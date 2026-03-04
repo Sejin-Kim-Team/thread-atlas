@@ -1,0 +1,22 @@
+{
+  "name": "@threadatlas/extension",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "watch": "node scripts/build.mjs --watch",
+    "test": "vitest run --config vitest.config.mts",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@threadatlas/shared": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/chrome": "^0.0.316",
+    "@types/node": "^22.13.14",
+    "esbuild": "^0.25.0",
+    "jsdom": "^26.0.0",
+    "typescript": "^5.8.2",
+    "vitest": "^3.0.8"
+  }
+}

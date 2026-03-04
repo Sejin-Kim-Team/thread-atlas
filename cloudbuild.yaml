@@ -1,0 +1,30 @@
+substitutions:
+  _SERVICE_NAME: threadatlas-api
+  _REGION: asia-northeast3
+  _IMAGE: asia-northeast3-docker.pkg.dev/$PROJECT_ID/threadatlas/threadatlas-api
+
+steps:
+  - name: gcr.io/cloud-builders/docker
+    args: ["build", "-t", "${_IMAGE}:$COMMIT_SHA", "-f", "apps/api/Dockerfile", "."]
+
+  - name: gcr.io/cloud-builders/docker
+    args: ["push", "${_IMAGE}:$COMMIT_SHA"]
+
+  - name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    entrypoint: gcloud
+    args:
+      - run
+      - deploy
+      - ${_SERVICE_NAME}
+      - --image
+      - ${_IMAGE}:$COMMIT_SHA
+      - --region
+      - ${_REGION}
+      - --platform
+      - managed
+      - --allow-unauthenticated
+      - --set-env-vars
+      - GEMINI_API_KEY=${_GEMINI_API_KEY},GOOGLE_CLOUD_PROJECT=$PROJECT_ID,FIRESTORE_DATABASE=(default),NODE_ENV=production
+
+images:
+  - ${_IMAGE}:$COMMIT_SHA
