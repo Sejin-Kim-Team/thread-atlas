@@ -43,6 +43,7 @@ describe("content-hn utils", () => {
     expect(parsed.comments).toHaveLength(2)
     expect(parsed.comments[0]?.id).toBe("c1")
     expect(parsed.comments[1]?.depth).toBe(1)
+    expect(parsed.comments[1]?.parentId).toBe("c1")
   })
 
   it("filters visible comments", () => {

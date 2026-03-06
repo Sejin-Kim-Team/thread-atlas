@@ -1,5 +1,14 @@
 import type { Comment, SelectedText, ThreadDoc, VisibleComment } from "@threadatlas/shared"
 
+export interface ParsedCommentRow {
+  id: string
+  author: string
+  text: string
+  depth: number
+  parentId: string | null
+  ageText: string | null
+}
+
 export function parseDepthFromRow(row: Element): number {
   const indentRaw = row.querySelector(".ind")?.getAttribute("indent")
   if (!indentRaw) {
@@ -10,23 +19,46 @@ export function parseDepthFromRow(row: Element): number {
   return Number.isFinite(parsed) ? parsed : 0
 }
 
-export function parseCommentsFromDocument(doc: Document): Comment[] {
-  const commentRows = doc.querySelectorAll("tr.athing.comtr")
-  const comments: Comment[] = []
+export function parseCommentRows(rows: Iterable<Element>): ParsedCommentRow[] {
+  const parsedRows: ParsedCommentRow[] = []
+  const stack: Array<{ id: string; depth: number }> = []
 
-  for (const row of commentRows) {
-    comments.push({
-      id: row.getAttribute("id") ?? "",
+  for (const row of rows) {
+    const id = row.getAttribute("id") ?? ""
+    const depth = parseDepthFromRow(row)
+
+    while (stack.length > 0 && (stack.at(-1)?.depth ?? 0) >= depth) {
+      stack.pop()
+    }
+
+    const parentId = stack.at(-1)?.id ?? null
+
+    parsedRows.push({
+      id,
       author: row.querySelector(".hnuser")?.textContent?.trim() ?? "",
       text: row.querySelector(".commtext")?.textContent?.trim() ?? "",
-      depth: parseDepthFromRow(row),
-      score: null,
-      parentId: null,
-      timestamp: Date.now()
+      depth,
+      parentId,
+      ageText: row.querySelector(".age")?.textContent?.trim() ?? null
     })
+
+    stack.push({ id, depth })
   }
 
-  return comments
+  return parsedRows
+}
+
+export function parseCommentsFromDocument(doc: Document): Comment[] {
+  const commentRows = doc.querySelectorAll("tr.athing.comtr")
+  return parseCommentRows(commentRows).map((row) => ({
+    id: row.id,
+    author: row.author,
+    text: row.text,
+    depth: row.depth,
+    score: null,
+    parentId: row.parentId,
+    timestamp: Date.now()
+  }))
 }
 
 export function parseThreadDocFromDocument(doc: Document, url: string): ThreadDoc {
