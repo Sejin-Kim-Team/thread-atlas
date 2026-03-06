@@ -74,6 +74,7 @@ export class SemanticPipeline {
       timestamp: new Date().toISOString(),
       regions,
       expandRegion: (regionId) => this.expandRegion(regionId, document),
+      getState: (regionId) => this.getState(regionId),
       decisions: this.logger.snapshot()
     })
   }
