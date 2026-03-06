@@ -4,6 +4,44 @@
   "private": true,
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./domain": {
+      "types": "./dist/domain.d.ts",
+      "default": "./dist/domain.js"
+    },
+    "./runtime": {
+      "types": "./dist/runtime.d.ts",
+      "default": "./dist/runtime.js"
+    },
+    "./browser-runtime": {
+      "types": "./dist/browser-runtime.d.ts",
+      "default": "./dist/browser-runtime.js"
+    },
+    "./projection-policy": {
+      "types": "./dist/projection-policy.d.ts",
+      "default": "./dist/projection-policy.js"
+    }
+  },
+  "typesVersions": {
+    "*": {
+      "domain": [
+        "dist/domain.d.ts"
+      ],
+      "runtime": [
+        "dist/runtime.d.ts"
+      ],
+      "browser-runtime": [
+        "dist/browser-runtime.d.ts"
+      ],
+      "projection-policy": [
+        "dist/projection-policy.d.ts"
+      ]
+    }
+  },
   "files": [
     "dist"
   ],
