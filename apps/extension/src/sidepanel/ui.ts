@@ -35,6 +35,25 @@ const CONTEXT_RELATIONS: ContextRelation[] = [
   "ancestor"
 ]
 
+export interface DisabledContextProfileReason {
+  profile: ContextTaskProfile
+  reason: string
+}
+
+export interface SemanticDebugInfo {
+  regionId: string
+  primitive: string
+  subtype: string
+  category: string
+  layoutRole: string
+  roleRank: string
+  suppression: string
+  normalizedKind: string
+  assembledItemCount: string
+  signals: string
+  note?: string
+}
+
 function setText(id: string, value: string): void {
   const element = document.getElementById(id)
   if (!element) {
@@ -200,7 +219,9 @@ function renderRawSnapshot(snapshot: SemanticSnapshot | null, rawVisible: boolea
 
 function renderSelectionDetail(
   enabled: boolean,
-  selectedTarget: SemanticSelectionTarget | null
+  selectedTarget: SemanticSelectionTarget | null,
+  snapshot: SemanticSnapshot | null,
+  resolutionNote?: string | null
 ): void {
   const status = document.getElementById("semantic-selection-status")
   const detail = document.getElementById("semantic-selection-detail")
@@ -237,7 +258,65 @@ function renderSelectionDetail(
   if (selectedTarget.scopeRootId) {
     detail.appendChild(createValue("Scope Root", selectedTarget.scopeRootId))
   }
+  if (selectedTarget.rootNodeId) {
+    detail.appendChild(createValue("Root Node", selectedTarget.rootNodeId))
+  }
+  if (snapshot?.meta.coverage) {
+    detail.appendChild(createValue("Coverage", snapshot.meta.coverage.kind))
+    detail.appendChild(createValue("Captured Nodes", String(snapshot.meta.coverage.capturedNodeCount)))
+    detail.appendChild(createValue("Omitted Nodes", String(snapshot.meta.coverage.omittedNodeCount)))
+    detail.appendChild(createValue("Omitted Roots", String(snapshot.meta.coverage.omittedRootCount)))
+  }
+  if (resolutionNote) {
+    detail.appendChild(createValue("Resolution", resolutionNote))
+  }
   detail.appendChild(createValue("Text", selectedTarget.text || "(empty)"))
+}
+
+function renderDebugDetail(debugStatus: string, debugInfo: SemanticDebugInfo | null): void {
+  const status = document.getElementById("semantic-debug-status")
+  const detail = document.getElementById("semantic-debug-detail")
+  if (!status || !detail) {
+    return
+  }
+
+  status.textContent = debugStatus
+  detail.innerHTML = ""
+
+  if (!debugInfo) {
+    detail.appendChild(createValue("State", debugStatus))
+    return
+  }
+
+  detail.appendChild(createValue("Region", debugInfo.regionId))
+  detail.appendChild(createValue("Primitive", debugInfo.primitive))
+  detail.appendChild(createValue("Subtype", debugInfo.subtype))
+  detail.appendChild(createValue("Category", debugInfo.category))
+  detail.appendChild(createValue("Layout Role", debugInfo.layoutRole))
+  detail.appendChild(createValue("Role Rank", debugInfo.roleRank))
+  detail.appendChild(createValue("Suppression", debugInfo.suppression))
+  detail.appendChild(createValue("Normalized", debugInfo.normalizedKind))
+  detail.appendChild(createValue("Assembled Items", debugInfo.assembledItemCount))
+  detail.appendChild(createValue("Signals", debugInfo.signals))
+  if (debugInfo.note) {
+    detail.appendChild(createValue("Note", debugInfo.note))
+  }
+}
+
+function renderContextRestrictions(restrictions: DisabledContextProfileReason[]): void {
+  const root = document.getElementById("semantic-context-restrictions")
+  if (!root) {
+    return
+  }
+
+  root.innerHTML = ""
+  if (restrictions.length === 0) {
+    return
+  }
+
+  for (const restriction of restrictions) {
+    root.appendChild(createValue(restriction.profile, restriction.reason))
+  }
 }
 
 export function updatePhaseIndicator(phase: Phase): void {
@@ -389,7 +468,10 @@ export function renderSemanticSnapshot(args: {
   contextPreview: string
   contextAvailable: boolean
   contextStatus: string
-  disabledContextProfiles?: ContextTaskProfile[]
+  contextRestrictions?: DisabledContextProfileReason[]
+  selectionResolutionNote?: string | null
+  debugStatus?: string
+  debugInfo?: SemanticDebugInfo | null
 }): void {
   const status = document.getElementById("semantic-snapshot-status")
   const selectionButton = document.getElementById("semantic-selection-button")
@@ -423,7 +505,8 @@ export function renderSemanticSnapshot(args: {
     selectionEnabled,
     selectedTarget,
     contextAvailable,
-    disabledContextProfiles = []
+    contextRestrictions = [],
+    selectionResolutionNote = null
   } = args
   if (snapshot) {
     status.textContent = error ? `Captured with warning: ${error}` : "Latest semantic snapshot"
@@ -439,11 +522,13 @@ export function renderSemanticSnapshot(args: {
   renderContextGroups(snapshot)
   renderHistory(history, selectedSnapshotId)
   renderRawSnapshot(snapshot, rawVisible)
-  renderSelectionDetail(selectionEnabled, selectedTarget)
+  renderSelectionDetail(selectionEnabled, selectedTarget, snapshot, selectionResolutionNote)
+  renderDebugDetail(args.debugStatus ?? "No region dump loaded.", args.debugInfo ?? null)
+  renderContextRestrictions(contextRestrictions)
 
   contextProfile.value = args.contextProfile
   for (const option of Array.from(contextProfile.options)) {
-    option.disabled = disabledContextProfiles.includes(option.value as ContextTaskProfile)
+    option.disabled = contextRestrictions.some((restriction) => restriction.profile === option.value)
   }
   contextStatus.textContent = args.contextStatus
   contextPreview.textContent = args.contextPreview

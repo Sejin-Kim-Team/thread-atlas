@@ -894,8 +894,12 @@ function semanticTextForElement(element: Element): string {
     .toLowerCase()
 }
 
+function combinedTextForElements(elements: Element[]): string {
+  return normalizeText(elements.map((element) => element.textContent ?? "").join(" ")).toLowerCase()
+}
+
 function hasCardLikeHint(element: Element): boolean {
-  return /\bcard\b|\bgrid\b|\bresult\b|\bgallery\b|\btiles?\b|\bfeed\b|\bitemlist\b|\bresults\b/.test(
+  return /\bcard\b|\bgrid\b|\bresult\b|\bgallery\b|\btiles?\b|\bfeed\b|\bitemlist\b|\bresults\b|\bmasonry\b|\bcatalog\b/.test(
     semanticTextForElement(element)
   )
 }
@@ -908,6 +912,144 @@ function isUtilityContainer(element: Element): boolean {
   return /\bnav\b|\bmenu\b|\bfooter\b|\bsidebar\b|\bbreadcrumb\b|\bpagination\b|\btoolbar\b|\butility\b|\bresource\b|\bsections\b|\brelated\b|\btoc\b/.test(
     semanticTextForElement(element)
   )
+}
+
+function hasCommentBody(element: Element): boolean {
+  return Boolean(element.querySelector(".commtext,.comment,[class*='comment' i],[data-comment-id]"))
+}
+
+function hasCommentMetadata(element: Element): boolean {
+  return Boolean(
+    element.querySelector(".hnuser,[rel='author'],[itemprop*='author' i],[class*='author' i],[class*='user' i]") ||
+      element.querySelector(".age,time,[datetime],[class*='time' i],[class*='date' i],[class*='age' i]")
+  )
+}
+
+function hasCollapsedThreadHint(text: string): boolean {
+  return /\[\s*\d+\s+more\s*\]|show more|more replies|collapsed/i.test(text)
+}
+
+function hasExplicitThreadHint(text: string): boolean {
+  return /\b(parent|root|next|prev)\b/i.test(text)
+}
+
+function looksLikeThreadItem(element: Element): boolean {
+  const text = normalizeText(element.textContent ?? "")
+  if (!text) {
+    return false
+  }
+
+  if (element.querySelector("textarea") && !hasCommentBody(element)) {
+    return false
+  }
+
+  return Boolean(
+    hasCommentBody(element) ||
+      hasCommentMetadata(element) ||
+      element.matches("[indent],[data-depth],[aria-level]") ||
+      element.querySelector("[indent],[data-depth],[aria-level]") ||
+      /\breply\b/i.test(text) ||
+      hasCollapsedThreadHint(text) ||
+      hasExplicitThreadHint(text)
+  )
+}
+
+function scoreThreadStructure(root: Element, items: Element[]): number {
+  const semanticText = `${semanticTextForElement(root)} ${items.map((item) => semanticTextForElement(item)).join(" ")}`
+  const flattenedText = combinedTextForElements([root, ...items])
+  let score = 0
+
+  if (items.some((item) => item.matches("[indent],[aria-level],[data-depth]") || item.querySelector("[indent],[aria-level],[data-depth]"))) {
+    score += 2
+  }
+  if (items.some(hasCommentBody)) {
+    score += 3
+  }
+  if (items.some(hasCommentMetadata)) {
+    score += 2
+  }
+  if (/\b(comment|comments|thread|discussion|commtext|hnuser)\b/.test(semanticText)) {
+    score += 2
+  }
+  if (/\breply\b/.test(flattenedText)) {
+    score += 1
+  }
+  if (hasCollapsedThreadHint(flattenedText)) {
+    score += 2
+  }
+  if (hasExplicitThreadHint(flattenedText)) {
+    score += 2
+  }
+  if (items.filter(looksLikeThreadItem).length >= Math.max(2, Math.floor(items.length / 2))) {
+    score += 1
+  }
+
+  return score
+}
+
+function looksLikeThreadStructure(root: Element, items: Element[]): boolean {
+  return scoreThreadStructure(root, items) >= 3
+}
+
+function looksLikeNavigationTree(root: Element, items: Element[]): boolean {
+  const semanticText = `${semanticTextForElement(root)} ${items.map((item) => semanticTextForElement(item)).join(" ")}`
+  const anchors = items.flatMap((item) => Array.from(item.querySelectorAll<HTMLAnchorElement>("a[href]")))
+  const fragmentLinkRatio =
+    anchors.length === 0
+      ? 0
+      : anchors.filter((link) => (link.getAttribute("href") ?? "").startsWith("#")).length / anchors.length
+  const mostlyLinkItems =
+    items.filter((item) => {
+      const links = countSelfAndDescendants(item, "a[href]")
+      const controls = countSelfAndDescendants(item, "button,input,select,textarea,[role='button'],[role='tab']")
+      const prose = countSelfAndDescendants(item, "p,blockquote,pre,code")
+      return links >= 1 && controls === 0 && prose === 0 && !looksLikeThreadItem(item)
+    }).length / Math.max(1, items.length)
+
+  return (
+    root.matches("nav,[role='navigation'],aside") ||
+    /\b(toc|table of contents|contents|sidebar|breadcrumb|menu|sections?|chapters?|outline)\b/.test(semanticText) ||
+    (mostlyLinkItems >= 0.8 && fragmentLinkRatio >= 0.6)
+  )
+}
+
+function filterNestedRepeatedItems(items: Element[]): Element[] {
+  const filtered = items.filter(looksLikeThreadItem)
+  return filtered.length >= 3 ? filtered : items
+}
+
+function normalizeRepeatedItems(
+  root: Element,
+  items: Element[],
+  subtype: "flat" | "nested" | "grid"
+): Element[] {
+  if (subtype !== "nested") {
+    return items
+  }
+
+  if (looksLikeNavigationTree(root, items)) {
+    return items
+  }
+
+  return filterNestedRepeatedItems(items)
+}
+
+function computeRepeatedConfidence(
+  root: Element,
+  items: Element[],
+  subtype: "flat" | "nested" | "grid",
+  approximate = false
+): number {
+  if (subtype === "nested") {
+    return Math.min(0.96, (approximate ? 0.84 : 0.88) + Math.min(scoreThreadStructure(root, items), 4) * 0.02)
+  }
+
+  if (subtype === "grid") {
+    return approximate ? 0.76 : 0.8
+  }
+
+  const allRows = items.every((item) => item.tagName.toLowerCase() === "tr")
+  return approximate ? 0.74 : allRows ? 0.84 : 0.78
 }
 
 function classifyRepeatedSubtype(root: Element, items: Element[]): "flat" | "nested" | "grid" {
@@ -984,6 +1126,14 @@ function looksLikeUtilityLinkCluster(root: Element, items: Element[], subtype: s
 }
 
 function isLowQualityRepeatedCandidate(root: Element, items: Element[], subtype: string): boolean {
+  if (subtype === "nested") {
+    if (looksLikeNavigationTree(root, items)) {
+      return true
+    }
+
+    return !looksLikeThreadStructure(root, items)
+  }
+
   const textLengths = items.map((item) => textForElement(item).length)
   const nonEmptyCount = textLengths.filter((length) => length > 0).length
   if (nonEmptyCount < 3) {
@@ -1000,10 +1150,6 @@ function isLowQualityRepeatedCandidate(root: Element, items: Element[], subtype:
 
   if (looksLikeAuthoredProseList(root, items, subtype)) {
     return true
-  }
-
-  if (subtype === "nested") {
-    return false
   }
 
   return insideAuthoredBlock && !hasStructure && averageLength < 60
@@ -1073,6 +1219,30 @@ function findTitleRowGroup(root: Element): Element[] {
   )
 
   return titleRows.length >= 3 ? titleRows : []
+}
+
+function looksLikeCardChild(element: Element): boolean {
+  const links = countSelfAndDescendants(element, "a[href]")
+  const headings = countSelfAndDescendants(element, "h1,h2,h3,h4,h5,h6,[role='heading'],strong")
+  const media = countSelfAndDescendants(element, "img,picture,video,svg")
+  const controls = countSelfAndDescendants(element, "button,[role='button']")
+  const textLength = textForElement(element).length
+
+  return links >= 1 && textLength >= 24 && (headings >= 1 || media >= 1 || controls >= 1)
+}
+
+function findLooseCardChildGroup(root: Element): Element[] {
+  if (!hasCardLikeHint(root)) {
+    return []
+  }
+
+  const children = Array.from(root.children)
+  if (children.length < 3 || children.length > 20) {
+    return []
+  }
+
+  const cards = children.filter((child) => looksLikeCardChild(child))
+  return cards.length >= 3 && cards.length / children.length >= 0.6 ? cards : []
 }
 
 function buildRepeatedFlatNode(
@@ -1235,13 +1405,17 @@ class RepeatedItemRecognizer implements GenericRecognizer {
   detectDetailed(document: Document): DetectedRegion[] {
     const listRegions = Array.from(document.querySelectorAll("ul,ol"))
       .filter((list) => list.querySelectorAll(":scope > li").length >= 3 || list.querySelectorAll("li").length >= 3)
-      .map((element) => ({
-        element,
-        itemElements: Array.from(element.querySelectorAll("li")),
-        subtype: element.querySelector("li ul, li ol") ? "nested" : "flat",
-        confidence: 0.88,
-        signals: ["list-structure"]
-      }))
+      .map((element) => {
+        const subtype = element.querySelector("li ul, li ol") ? "nested" : "flat"
+        const itemElements = normalizeRepeatedItems(element, Array.from(element.querySelectorAll("li")), subtype)
+        return {
+          element,
+          itemElements,
+          subtype,
+          confidence: computeRepeatedConfidence(element, itemElements, subtype),
+          signals: [subtype === "nested" ? "list-thread-structure" : "list-structure"]
+        }
+      })
       .filter((candidate) => !isLowQualityRepeatedCandidate(candidate.element, candidate.itemElements, candidate.subtype))
 
     const repeatedCandidates = detectRepeatedStructureCandidates(document)
@@ -1250,25 +1424,17 @@ class RepeatedItemRecognizer implements GenericRecognizer {
         return items.length >= 3
       })
       .map((candidate) => {
-        const items = candidate.itemElements ?? []
-        const subtype = classifyRepeatedSubtype(candidate.element, items)
-        const allRows = items.every((item) => item.tagName.toLowerCase() === "tr")
-        const confidence =
-          subtype === "nested"
-            ? 0.92
-            : subtype === "grid"
-              ? 0.8
-              : allRows
-                ? 0.84
-                : 0.78
+        const rawItems = candidate.itemElements ?? []
+        const subtype = classifyRepeatedSubtype(candidate.element, rawItems)
+        const itemElements = normalizeRepeatedItems(candidate.element, rawItems, subtype)
         return {
           element: candidate.element,
-          itemElements: items,
+          itemElements,
           subtype,
-          confidence,
+          confidence: computeRepeatedConfidence(candidate.element, itemElements, subtype),
           signals:
             subtype === "nested"
-              ? ["repeated-rows", "depth-variation"]
+              ? ["repeated-rows", "depth-variation", "thread-signals"]
               : subtype === "grid"
                 ? ["repeated-rows", "layout-regularity"]
                 : ["repeated-rows"]
@@ -1279,20 +1445,22 @@ class RepeatedItemRecognizer implements GenericRecognizer {
     const approximateCandidates = Array.from(document.querySelectorAll("tbody,table,section,div"))
       .map((element) => {
         const items = findApproximateRepeatedChildGroup(element)
-        const resolvedItems = items.length >= 3 ? items : findTitleRowGroup(element)
+        const resolvedItems =
+          items.length >= 3 ? items : findTitleRowGroup(element).length >= 3 ? findTitleRowGroup(element) : findLooseCardChildGroup(element)
         if (resolvedItems.length < 3) {
           return null
         }
 
         const subtype = classifyRepeatedSubtype(element, resolvedItems)
+        const itemElements = normalizeRepeatedItems(element, resolvedItems, subtype)
         return {
           element,
-          itemElements: resolvedItems,
+          itemElements,
           subtype,
-          confidence: subtype === "nested" ? 0.9 : subtype === "grid" ? 0.76 : 0.74,
+          confidence: computeRepeatedConfidence(element, itemElements, subtype, true),
           signals:
             subtype === "nested"
-              ? ["approximate-repetition", "depth-variation"]
+              ? ["approximate-repetition", "depth-variation", "thread-signals"]
               : subtype === "grid"
                 ? ["approximate-repetition", "layout-regularity"]
                 : ["approximate-repetition"]
@@ -1486,8 +1654,8 @@ function resolveControlLabel(control: HTMLElement, root: Element): string {
   return label
 }
 
-function resolveInteractiveSubtype(root: Element, controls: HTMLElement[]): string {
-  const semanticText = normalizeText(
+function buildInteractiveSemanticText(root: Element, controls: HTMLElement[]): string {
+  return normalizeText(
     [
       root.getAttribute("role"),
       root.getAttribute("aria-label"),
@@ -1500,43 +1668,129 @@ function resolveInteractiveSubtype(root: Element, controls: HTMLElement[]): stri
           control.getAttribute("placeholder"),
           control.getAttribute("name"),
           control.getAttribute("aria-label"),
+          control.getAttribute("title"),
           control.textContent
         ].join(" ")
       )
     ].join(" ")
   ).toLowerCase()
+}
+
+function isSortChoiceText(text: string): boolean {
+  return /\b(relevance|recent|latest|newest|oldest|top|best|popular|price|date|name|rating)\b/.test(text)
+}
+
+function resolveInteractiveRegionLabel(root: Element, subtype: string, controls: HTMLElement[]): string {
+  const semanticText = buildInteractiveSemanticText(root, controls)
+  const explicitLabel = normalizeText(
+    root.getAttribute("aria-label") ??
+      root.querySelector("legend,h1,h2,h3,h4,h5,h6,[role='heading']")?.textContent ??
+      ""
+  )
+  if (explicitLabel) {
+    return explicitLabel
+  }
+
+  if (subtype === "search") {
+    if (/\b(command palette|quick search|quick open|cmd\s*k|ctrl\s*k|⌘k)\b/.test(semanticText)) {
+      return "Command palette"
+    }
+    return "Search controls"
+  }
+
+  if (subtype === "filter") {
+    return controls.some((control) => {
+      const type = control.getAttribute("type")?.toLowerCase()
+      return type === "checkbox" || type === "radio"
+    })
+      ? "Filter panel"
+      : "Filter controls"
+  }
+
+  if (subtype === "sort") {
+    return root.matches("[role='tablist']") || controls.filter((control) => getInteractiveControlType(control) === "chip").length >= 2
+      ? "Sort tabs"
+      : "Sort controls"
+  }
+
+  return describeRegionLabel("interactive-block", subtype)
+}
+
+function resolveInteractiveSubtype(root: Element, controls: HTMLElement[]): string {
+  const semanticText = buildInteractiveSemanticText(root, controls)
 
   const checkboxRadioCount = controls.filter((control) => {
     const type = control.getAttribute("type")?.toLowerCase()
     return type === "checkbox" || type === "radio"
   }).length
   const selectCount = controls.filter((control) => control.tagName.toLowerCase() === "select").length
+  const chipCount = controls.filter((control) => getInteractiveControlType(control) === "chip").length
+  const textInputCount = controls.filter((control) => {
+    const controlType = getInteractiveControlType(control)
+    const inputType = control.getAttribute("type")?.toLowerCase() ?? ""
+    return controlType === "input" && inputType !== "hidden" && inputType !== "checkbox" && inputType !== "radio"
+  }).length
+  const searchInputCount = controls.filter((control) => {
+    const inputType = control.getAttribute("type")?.toLowerCase() ?? ""
+    const labelText = resolveControlLabel(control, root).toLowerCase()
+    return (
+      inputType === "search" ||
+      control.getAttribute("role") === "searchbox" ||
+      /\b(search|find|query)\b/.test(
+        `${labelText} ${(control.getAttribute("placeholder") ?? "").toLowerCase()} ${(control.getAttribute("name") ?? "").toLowerCase()}`
+      )
+    )
+  }).length
   const buttonCount = controls.filter((control) => {
     const tag = control.tagName.toLowerCase()
     return tag === "button" || control.getAttribute("role") === "button"
   }).length
+  const labelledChoices = controls.map((control) => resolveControlLabel(control, root).toLowerCase()).filter(Boolean)
+  const sortChoiceCount = labelledChoices.filter((label) => isSortChoiceText(label)).length
+  const hasCommandPaletteHint = /\b(command palette|quick search|quick open|cmd\s*k|ctrl\s*k|⌘k)\b/.test(semanticText)
+  const hasSearchCue = /\b(search|find|query)\b/.test(semanticText)
+  const hasSortCue = /\bsort|order|relevance|recent|latest|newest|oldest|top|best|popular\b/.test(semanticText)
+  const hasFilterCue = /\bfilter|facet|facets|category|tag|topic|status|price|date\b/.test(semanticText)
+  const hasSearchButtonCue = controls.some((control) => {
+    const label = resolveControlLabel(control, root).toLowerCase()
+    return getInteractiveControlType(control) !== "input" && /\b(search|find)\b/.test(label)
+  })
 
   if (
     root.matches("form[role='search'],[role='search']") ||
-    /\bsearch\b/.test(semanticText) ||
-    controls.some((control) => control.getAttribute("role") === "searchbox")
+    hasSearchCue ||
+    controls.some((control) => control.getAttribute("role") === "searchbox") ||
+    searchInputCount >= 1 ||
+    hasSearchButtonCue ||
+    (hasCommandPaletteHint && buttonCount >= 1)
   ) {
     return "search"
   }
 
-  if (/\bsort|order\b/.test(semanticText)) {
+  if (
+    hasSortCue ||
+    (root.matches("[role='tablist']") && sortChoiceCount >= 2) ||
+    sortChoiceCount >= Math.max(2, Math.floor(controls.length / 2))
+  ) {
     return "sort"
   }
 
   if (
-    /\bfilter|facet|category|tag|price|date\b/.test(semanticText) ||
+    hasFilterCue ||
     checkboxRadioCount >= 2 ||
-    (selectCount >= 1 && buttonCount >= 1)
+    (selectCount >= 1 && buttonCount >= 1 && !hasSortCue) ||
+    (chipCount >= 3 && !hasSortCue)
   ) {
     return "filter"
   }
 
-  if (root.matches("form,fieldset") || controls.filter((control) => getInteractiveControlType(control) === "input").length >= 2) {
+  if (
+    root.matches("form,fieldset") ||
+    textInputCount >= 2 ||
+    controls.some((control) => control.tagName.toLowerCase() === "textarea") ||
+    (textInputCount >= 1 && selectCount >= 1) ||
+    (textInputCount >= 1 && buttonCount >= 1 && controls.length >= 3)
+  ) {
     return "form"
   }
 
@@ -1664,7 +1918,7 @@ function buildInteractiveRegion(regionId: string, root: Element, subtype: string
 } {
   const controls = getInteractiveControls(root)
   const category = interactiveCategoryForSubtype(subtype)
-  const regionLabel = describeRegionLabel("interactive-block", subtype)
+  const regionLabel = resolveInteractiveRegionLabel(root, subtype, controls)
   const rootAction = rootActionForSubtype(subtype)
   const rootNodeId = `${regionId}-cluster`
   const nodes: InteractiveNode[] = [

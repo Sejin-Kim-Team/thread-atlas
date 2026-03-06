@@ -57,6 +57,7 @@ export type ServiceWorkerToContentMessage =
   | { type: "CAPTURE_SEMANTIC_SNAPSHOT"; payload: { source: CaptureSource } }
   | { type: "TOGGLE_SEMANTIC_SELECTION" }
   | { type: "GET_SEMANTIC_SELECTION_STATE" }
+  | { type: "GET_SEMANTIC_REGION_DUMP" }
   | { type: "CLEAR_SEMANTIC_SELECTION" }
 
 export type ServiceWorkerToSidePanelMessage =
@@ -93,6 +94,7 @@ export type SidePanelToServiceWorkerMessage =
   | { type: "GET_SEMANTIC_SNAPSHOT_HISTORY"; payload?: { tabId?: number } }
   | { type: "TOGGLE_SEMANTIC_SELECTION"; payload?: { tabId?: number } }
   | { type: "GET_SEMANTIC_SELECTION_STATE"; payload?: { tabId?: number } }
+  | { type: "GET_SEMANTIC_REGION_DUMP"; payload?: { tabId?: number } }
   | { type: "CLEAR_SEMANTIC_SELECTION"; payload?: { tabId?: number } }
   | {
       type: "SYNC_SEMANTIC_SELECTION_STATE"

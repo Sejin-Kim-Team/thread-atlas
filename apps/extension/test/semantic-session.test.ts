@@ -489,18 +489,22 @@ describe("SemanticCaptureSession", () => {
     expect(result.snapshot?.focus.region).toBe("interactive-block-1")
     expect(result.snapshot?.focus.node).toMatchObject({
       kind: "interactive",
-      controlType: "input",
+      controlType: "group",
+      label: "Docs search",
       action: "search",
-      valuePreview: "rate limiter"
+      metadata: expect.objectContaining({
+        controlCount: "2",
+        subtype: "search"
+      })
     })
     expect(result.snapshot?.context).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          relation: "parent",
-          node: expect.objectContaining({ id: "interactive-block-1-cluster" })
+          relation: "child",
+          node: expect.objectContaining({ controlType: "input", action: "search" })
         }),
         expect.objectContaining({
-          relation: "sibling",
+          relation: "child",
           node: expect.objectContaining({ controlType: "button" })
         })
       ])
@@ -714,7 +718,8 @@ describe("SemanticCaptureSession", () => {
     expect(explicitResult.snapshot?.focus.region).toBe("interactive-block-1")
     expect(explicitResult.snapshot?.focus.node).toMatchObject({
       kind: "interactive",
-      controlType: "input",
+      controlType: "group",
+      label: "Docs search",
       action: "search"
     })
 

@@ -159,9 +159,14 @@ export function elementToNodeTarget(element: Element | null): { regionId: string
 
   const nodeElement = element.closest("[data-semantic-node-id]") as HTMLElement | null
   if (nodeElement) {
+    const primitive = nodeElement.getAttribute("data-semantic-primitive")
+    const scopeRootId = nodeElement.getAttribute("data-semantic-scope-root-id")
     return {
       regionId: nodeElement.getAttribute("data-semantic-region") ?? "",
-      nodeId: nodeElement.getAttribute("data-semantic-node-id")
+      nodeId:
+        primitive === "interactive-block" && scopeRootId
+          ? scopeRootId
+          : nodeElement.getAttribute("data-semantic-node-id")
     }
   }
 
