@@ -36,6 +36,130 @@
         padding: 12px;
       }
 
+      .section-title {
+        margin: 0 0 8px;
+        font-size: 13px;
+        font-weight: 600;
+      }
+
+      .toolbar {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-bottom: 8px;
+      }
+
+      .button {
+        border: 1px solid #cbd5e1;
+        background: #f8fafc;
+        border-radius: 8px;
+        font-size: 12px;
+        padding: 6px 10px;
+        cursor: pointer;
+      }
+
+      .button:disabled {
+        cursor: default;
+        opacity: 0.6;
+      }
+
+      .snapshot-status {
+        margin-bottom: 8px;
+        color: #475569;
+        font-size: 12px;
+      }
+
+      .snapshot-json {
+        margin: 0;
+        padding: 10px;
+        border: 1px solid #e2e8f0;
+        border-radius: 8px;
+        background: #f8fafc;
+        font-size: 11px;
+        line-height: 1.45;
+        white-space: pre-wrap;
+        word-break: break-word;
+        max-height: 280px;
+        overflow: auto;
+      }
+
+      .snapshot-card {
+        border: 1px solid #e2e8f0;
+        border-radius: 10px;
+        background: #ffffff;
+        padding: 10px;
+      }
+
+      .snapshot-grid {
+        display: grid;
+        gap: 10px;
+      }
+
+      .snapshot-label {
+        margin: 0 0 4px;
+        color: #64748b;
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+      }
+
+      .snapshot-value {
+        margin: 0;
+        color: #0f172a;
+        font-size: 12px;
+        line-height: 1.5;
+      }
+
+      .snapshot-list {
+        display: grid;
+        gap: 8px;
+      }
+
+      .history-list {
+        display: grid;
+        gap: 6px;
+      }
+
+      .history-item {
+        width: 100%;
+        text-align: left;
+        border: 1px solid #cbd5e1;
+        background: #ffffff;
+        border-radius: 8px;
+        padding: 8px;
+        cursor: pointer;
+        font-size: 12px;
+      }
+
+      .history-item.active {
+        border-color: #2563eb;
+        background: #eff6ff;
+      }
+
+      .toolbar-select {
+        border: 1px solid #cbd5e1;
+        background: #ffffff;
+        border-radius: 8px;
+        font-size: 12px;
+        padding: 6px 10px;
+      }
+
+      .tab-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-bottom: 8px;
+      }
+
+      .tab-button.active {
+        border-color: #2563eb;
+        background: #eff6ff;
+      }
+
+      .hidden {
+        display: none;
+      }
+
       .toast {
         position: fixed;
         bottom: 8px;
@@ -75,6 +199,64 @@
     </header>
     <section class="section">
       <div id="present-root"></div>
+    </section>
+    <section class="section">
+      <h2 class="section-title">Semantic Snapshot</h2>
+      <div class="toolbar">
+        <button id="semantic-capture-button" class="button" type="button">Capture Snapshot</button>
+        <button id="semantic-copy-button" class="button" type="button">Copy JSON</button>
+        <button id="semantic-selection-button" class="button" type="button">Selection Off</button>
+        <button id="semantic-raw-toggle-button" class="button" type="button">Show Raw JSON</button>
+      </div>
+      <div id="semantic-snapshot-status" class="snapshot-status">No semantic snapshot captured yet.</div>
+      <div class="snapshot-grid">
+        <div class="snapshot-card">
+          <div class="snapshot-label">Page</div>
+          <div id="semantic-page-summary" class="snapshot-list"></div>
+        </div>
+        <div class="snapshot-card">
+          <div class="snapshot-label">Focus</div>
+          <div id="semantic-focus-detail" class="snapshot-list"></div>
+        </div>
+        <div class="snapshot-card">
+          <div class="snapshot-label">Context</div>
+          <div id="semantic-context-groups" class="snapshot-list"></div>
+        </div>
+        <div class="snapshot-card">
+          <div class="snapshot-label">History</div>
+          <div id="semantic-history-list" class="history-list"></div>
+        </div>
+      </div>
+      <pre id="semantic-snapshot-json" class="snapshot-json hidden"></pre>
+    </section>
+    <section class="section">
+      <h2 class="section-title">Semantic Selection</h2>
+      <div class="toolbar">
+        <button id="semantic-selection-clear-button" class="button" type="button">Clear Selection</button>
+      </div>
+      <div id="semantic-selection-status" class="snapshot-status">Selection mode is off.</div>
+      <div class="snapshot-card">
+        <div class="snapshot-label">Selected Node</div>
+        <div id="semantic-selection-detail" class="snapshot-list"></div>
+      </div>
+    </section>
+    <section class="section">
+      <h2 class="section-title">LLM Context</h2>
+      <div class="toolbar">
+        <select id="semantic-context-profile" class="toolbar-select">
+          <option value="branch-summary">branch-summary</option>
+          <option value="reply-assist">reply-assist</option>
+          <option value="claim-extraction">claim-extraction</option>
+        </select>
+        <button id="semantic-context-copy-button" class="button" type="button">Copy LLM Context</button>
+      </div>
+      <div class="tab-row">
+        <button id="semantic-context-pack-tab" class="button tab-button active" type="button">Context Pack</button>
+        <button id="semantic-context-compact-tab" class="button tab-button" type="button">Compact JSON</button>
+        <button id="semantic-context-linear-tab" class="button tab-button" type="button">Linear Text</button>
+      </div>
+      <div id="semantic-context-status" class="snapshot-status">No semantic snapshot selected.</div>
+      <pre id="semantic-context-preview" class="snapshot-json"></pre>
     </section>
     <section class="section">
       <div id="suggest-root" class="chips"></div>

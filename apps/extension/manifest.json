@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "ThreadAtlas",
   "version": "0.1.0",
-  "permissions": ["activeTab", "scripting", "sidePanel", "storage", "tabs"],
+  "permissions": ["activeTab", "clipboardWrite", "commands", "contextMenus", "scripting", "sidePanel", "storage", "tabs"],
   "host_permissions": ["*://news.ycombinator.com/*", "<all_urls>"],
   "background": {
     "service_worker": "service-worker.js"
@@ -11,6 +11,11 @@
     "default_path": "sidepanel.html"
   },
   "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content-semantic.js"],
+      "run_at": "document_idle"
+    },
     {
       "matches": ["*://news.ycombinator.com/*"],
       "js": ["content-hn.js"],
@@ -24,6 +29,23 @@
     }
   ],
   "action": {
-    "default_title": "ThreadAtlas"
+    "default_title": "ThreadAtlas",
+    "default_popup": "popup.html"
+  },
+  "commands": {
+    "capture-snapshot": {
+      "suggested_key": {
+        "default": "Alt+Shift+C",
+        "mac": "Alt+Shift+C"
+      },
+      "description": "Capture Semantic Snapshot"
+    },
+    "toggle-selection": {
+      "suggested_key": {
+        "default": "Alt+Shift+S",
+        "mac": "Alt+Shift+S"
+      },
+      "description": "Toggle Semantic Selection"
+    }
   }
 }

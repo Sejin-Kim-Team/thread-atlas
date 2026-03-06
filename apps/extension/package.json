@@ -9,7 +9,9 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@threadatlas/shared": "workspace:*"
+    "@mozilla/readability": "^0.6.0",
+    "@threadatlas/shared": "workspace:*",
+    "dom-to-semantic-markdown": "^1.5.0"
   },
   "devDependencies": {
     "@types/chrome": "^0.0.316",

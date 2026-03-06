@@ -42,12 +42,40 @@ Default base URL: `http://localhost:8080`
 ## Build extension
 
 ```bash
-pnpm --filter @threadatlas/extension build
+pnpm extension:build
 ```
 
 Load unpacked extension from:
 
 `apps/extension/dist`
+
+## Use in Chrome
+
+1. Build the extension:
+
+```bash
+pnpm extension:build
+```
+
+2. Open `chrome://extensions`
+3. Enable `Developer mode`
+4. Click `Load unpacked`
+5. Select [apps/extension/dist](/Users/eggp/dev/workspace/eggp/thread-atlas/apps/extension/dist)
+6. Open a Hacker News item page like `https://news.ycombinator.com/item?id=...`
+7. Click the ThreadAtlas toolbar button to open the sidepanel
+8. Use `Capture Snapshot`, the context menu item, or the shortcut `Alt+Shift+C`
+9. Toggle semantic selection with `Alt+Shift+S`
+
+## Runtime Notes
+
+- Semantic snapshot capture works without the local API server.
+- Voice-related flows still expect the API server:
+
+```bash
+pnpm api:dev
+```
+
+- Default API base URL is `http://localhost:8080`.
 
 ## API stub status
 

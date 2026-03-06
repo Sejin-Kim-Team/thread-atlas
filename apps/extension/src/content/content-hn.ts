@@ -2,11 +2,10 @@ import type {
   FocusedElement,
   PageStructure,
   Projection,
-  SensorData,
-  SidePanelToContentMessage,
   ThreadDoc,
   VisibleComment
 } from "@threadatlas/shared"
+import type { SensorData, SidePanelToContentMessage } from "@threadatlas/shared/runtime"
 import {
   parseThreadDocFromDocument,
   parseVisibleComments,

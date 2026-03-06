@@ -1,13 +1,26 @@
 import {
+  buildContextPack,
   DEFAULT_API_BASE_URL,
-  type AnyRuntimeMessage,
   type ConversationContext,
   type Intent,
   type Projection,
-  type SensorData,
+  type SemanticSnapshot,
   type ThreadSemantics,
   type TokenResponse
 } from "@threadatlas/shared"
+import {
+  renderCompactJson,
+  renderContextPack,
+  renderLinearText,
+  type ContextProjectionFormat,
+  type ContextTaskProfile
+} from "@threadatlas/shared/projection-policy"
+import type {
+  AnyRuntimeMessage,
+  SemanticSelectionTarget,
+  SensorData
+} from "@threadatlas/shared/runtime"
+import { isSemanticCaptureSupportedUrl } from "../common/semantic-url"
 import { assembleStateSnapshot } from "./state-assembler"
 import { callEvaluate } from "./sse-client"
 import { routeProjection } from "./projection-router"
@@ -15,7 +28,34 @@ import { ContentGraphManager } from "./content-graph"
 import { connectGeminiLive, type LiveSession } from "./gemini-live"
 import { initializeAudio } from "./audio"
 import { TokenManager } from "./token-manager"
-import { renderPresent, showNotify, showSuggestChips, updatePhaseIndicator, type Phase } from "./ui"
+import {
+  bindSemanticSnapshotActions,
+  renderPresent,
+  renderSemanticSnapshot,
+  selectSnapshotById,
+  setSemanticSnapshotBusy,
+  showNotify,
+  showSuggestChips,
+  updatePhaseIndicator,
+  type Phase
+} from "./ui"
+
+interface SemanticSnapshotState {
+  tabId: number | null
+  snapshot: SemanticSnapshot | null
+  error: string | null
+}
+
+interface SemanticSnapshotHistoryState {
+  tabId: number | null
+  snapshots: SemanticSnapshot[]
+}
+
+interface SemanticSelectionState {
+  tabId: number | null
+  enabled: boolean
+  selectedTarget: SemanticSelectionTarget | null
+}
 
 interface SidePanelState {
   phase: Phase
@@ -26,6 +66,14 @@ interface SidePanelState {
   conversationContext: ConversationContext | null
   cachedSemantics: ThreadSemantics | null
   currentAbortController: AbortController | null
+  latestSemanticSnapshot: SemanticSnapshotState | null
+  semanticSnapshotHistory: SemanticSnapshot[]
+  selectedSemanticSnapshotId: string | null
+  semanticRawVisible: boolean
+  selectionEnabled: boolean
+  selectedTarget: SemanticSelectionTarget | null
+  semanticContextProfile: ContextTaskProfile
+  semanticContextFormat: ContextProjectionFormat
 }
 
 const API_BASE_URL = window.localStorage.getItem("THREADATLAS_API_BASE_URL") ?? DEFAULT_API_BASE_URL
@@ -38,12 +86,24 @@ const state: SidePanelState = {
   activeTabId: null,
   conversationContext: null,
   cachedSemantics: null,
-  currentAbortController: null
+  currentAbortController: null,
+  latestSemanticSnapshot: null,
+  semanticSnapshotHistory: [],
+  selectedSemanticSnapshotId: null,
+  semanticRawVisible: false,
+  selectionEnabled: false,
+  selectedTarget: null,
+  semanticContextProfile: "branch-summary",
+  semanticContextFormat: "context-pack-json"
 }
 
 function setPhase(phase: Phase): void {
   state.phase = phase
   updatePhaseIndicator(phase)
+}
+
+function setPhaseForUrl(url: string): void {
+  setPhase(isSemanticCaptureSupportedUrl(url) ? "ready" : "dormant")
 }
 
 async function sendRuntimeMessage<TResponse>(message: AnyRuntimeMessage): Promise<TResponse> {
@@ -97,6 +157,277 @@ async function requestToken(): Promise<TokenResponse> {
     body: JSON.stringify({ userId: "user_sungwoo" })
   })
   return (await response.json()) as TokenResponse
+}
+
+function handleVoiceUnavailable(error: unknown): void {
+  const message = error instanceof Error ? error.message : "Voice features unavailable."
+  state.geminiLiveSession = null
+  showNotify(`${message} Semantic snapshots still work.`, "info")
+}
+
+function getSelectedSemanticSnapshot(): SemanticSnapshot | null {
+  return selectSnapshotById(
+    state.semanticSnapshotHistory,
+    state.selectedSemanticSnapshotId,
+    state.latestSemanticSnapshot?.snapshot ?? null
+  )
+}
+
+function getDisabledContextProfiles(snapshot: SemanticSnapshot | null): ContextTaskProfile[] {
+  if (!snapshot || "text" in snapshot.focus.node) {
+    return []
+  }
+
+  return ["reply-assist", "claim-extraction"]
+}
+
+function renderSemanticSnapshotState(errorOverride?: string | null): void {
+  const snapshot = getSelectedSemanticSnapshot()
+  let contextPreview = "No semantic snapshot selected."
+  let contextAvailable = false
+  let contextStatus = "No semantic snapshot selected."
+  const disabledContextProfiles = getDisabledContextProfiles(snapshot)
+  const interactiveRestricted =
+    snapshot !== null &&
+    disabledContextProfiles.includes(state.semanticContextProfile) &&
+    !("text" in snapshot.focus.node)
+
+  if (snapshot) {
+    const pack = buildContextPack(snapshot)
+    if (interactiveRestricted) {
+      contextStatus = "Interactive snapshots support branch-summary only."
+      contextPreview =
+        "Interactive semantic snapshots currently support only the branch-summary profile."
+    } else {
+      contextAvailable = true
+      contextStatus = `${state.semanticContextProfile} · ${state.semanticContextFormat}`
+      contextPreview =
+        state.semanticContextFormat === "context-pack-json"
+          ? renderContextPack(pack)
+          : state.semanticContextFormat === "compact-json"
+            ? renderCompactJson(pack, state.semanticContextProfile)
+            : renderLinearText(pack, state.semanticContextProfile)
+    }
+  }
+
+  renderSemanticSnapshot({
+    snapshot,
+    error: errorOverride ?? state.latestSemanticSnapshot?.error ?? null,
+    history: state.semanticSnapshotHistory,
+    selectedSnapshotId: state.selectedSemanticSnapshotId,
+    rawVisible: state.semanticRawVisible,
+    selectionEnabled: state.selectionEnabled,
+    selectedTarget: state.selectedTarget,
+    contextProfile: state.semanticContextProfile,
+    contextFormat: state.semanticContextFormat,
+    contextPreview,
+    contextAvailable,
+    contextStatus,
+    disabledContextProfiles
+  })
+}
+
+function updateSemanticSnapshot(payload: SemanticSnapshotState): void {
+  state.latestSemanticSnapshot = payload
+  if (payload.snapshot) {
+    state.selectedSemanticSnapshotId = payload.snapshot.meta.capturedAt
+  }
+  renderSemanticSnapshotState()
+}
+
+function updateSemanticSnapshotHistory(payload: SemanticSnapshotHistoryState): void {
+  state.semanticSnapshotHistory = payload.snapshots
+  if (!state.selectedSemanticSnapshotId && payload.snapshots[0]) {
+    state.selectedSemanticSnapshotId = payload.snapshots[0].meta.capturedAt
+  }
+  renderSemanticSnapshotState()
+}
+
+function updateSelectionState(payload: SemanticSelectionState): void {
+  state.selectionEnabled = payload.enabled
+  state.selectedTarget = payload.selectedTarget
+  renderSemanticSnapshotState()
+}
+
+async function hydrateSemanticSnapshot(tabId?: number): Promise<void> {
+  try {
+    const payload = await sendRuntimeMessage<SemanticSnapshotState>(
+      typeof tabId === "number"
+        ? {
+            type: "GET_LATEST_SEMANTIC_SNAPSHOT",
+            payload: { tabId }
+          }
+        : {
+            type: "GET_LATEST_SEMANTIC_SNAPSHOT"
+          }
+    )
+    updateSemanticSnapshot(payload)
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "failed to load semantic snapshot"
+    renderSemanticSnapshotState(message)
+  }
+}
+
+async function hydrateSemanticSnapshotHistory(tabId?: number): Promise<void> {
+  try {
+    const payload = await sendRuntimeMessage<SemanticSnapshotHistoryState>(
+      typeof tabId === "number"
+        ? {
+            type: "GET_SEMANTIC_SNAPSHOT_HISTORY",
+            payload: { tabId }
+          }
+        : {
+            type: "GET_SEMANTIC_SNAPSHOT_HISTORY"
+          }
+    )
+    updateSemanticSnapshotHistory(payload)
+  } catch {
+    updateSemanticSnapshotHistory({ tabId: tabId ?? null, snapshots: [] })
+  }
+}
+
+async function hydrateSelectionState(tabId?: number): Promise<void> {
+  try {
+    const payload = await sendRuntimeMessage<SemanticSelectionState>(
+      typeof tabId === "number"
+        ? {
+            type: "GET_SEMANTIC_SELECTION_STATE",
+            payload: { tabId }
+          }
+        : {
+            type: "GET_SEMANTIC_SELECTION_STATE"
+          }
+    )
+    updateSelectionState(payload)
+  } catch {
+    updateSelectionState({ tabId: tabId ?? null, enabled: false, selectedTarget: null })
+  }
+}
+
+async function requestSemanticSnapshot(options: {
+  suppressErrors?: boolean
+  source?: "command" | "context-menu" | "popup" | "sidepanel"
+} = {}): Promise<void> {
+  const { suppressErrors = false, source = "sidepanel" } = options
+  setSemanticSnapshotBusy(true)
+
+  try {
+    const payload = await sendRuntimeMessage<SemanticSnapshotState>(
+      typeof state.activeTabId === "number"
+        ? {
+            type: "REQUEST_SEMANTIC_SNAPSHOT",
+            payload: { tabId: state.activeTabId, source }
+          }
+        : {
+            type: "REQUEST_SEMANTIC_SNAPSHOT",
+            payload: { source }
+          }
+    )
+    updateSemanticSnapshot(payload)
+    if (payload.error && !suppressErrors) {
+      showNotify(payload.error, "error")
+    }
+    await hydrateSemanticSnapshotHistory(state.activeTabId ?? undefined)
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "failed to capture semantic snapshot"
+    renderSemanticSnapshotState(message)
+    if (!suppressErrors) {
+      showNotify(message, "error")
+    }
+  } finally {
+    setSemanticSnapshotBusy(false)
+  }
+}
+
+async function copySemanticSnapshot(): Promise<void> {
+  const snapshot = getSelectedSemanticSnapshot()
+  if (!snapshot) {
+    showNotify("No semantic snapshot to copy.", "error")
+    return
+  }
+
+  await navigator.clipboard.writeText(JSON.stringify(snapshot, null, 2))
+  showNotify("Semantic snapshot copied.", "success")
+}
+
+async function copySemanticContext(): Promise<void> {
+  const snapshot = getSelectedSemanticSnapshot()
+  if (!snapshot) {
+    showNotify("No semantic snapshot to derive LLM context from.", "error")
+    return
+  }
+
+  if (getDisabledContextProfiles(snapshot).includes(state.semanticContextProfile)) {
+    showNotify("Interactive snapshots currently support only branch-summary.", "info")
+    return
+  }
+
+  const pack = buildContextPack(snapshot)
+  const output =
+    state.semanticContextFormat === "context-pack-json"
+      ? renderContextPack(pack)
+      : state.semanticContextFormat === "compact-json"
+        ? renderCompactJson(pack, state.semanticContextProfile)
+        : renderLinearText(pack, state.semanticContextProfile)
+
+  await navigator.clipboard.writeText(output)
+  showNotify("LLM context copied.", "success")
+}
+
+async function toggleSemanticSelection(): Promise<void> {
+  const payload = await sendRuntimeMessage<SemanticSelectionState>(
+    typeof state.activeTabId === "number"
+      ? {
+          type: "TOGGLE_SEMANTIC_SELECTION",
+          payload: { tabId: state.activeTabId }
+        }
+      : {
+          type: "TOGGLE_SEMANTIC_SELECTION"
+        }
+  )
+  updateSelectionState(payload)
+  showNotify(payload.enabled ? "Selection mode enabled." : "Selection mode disabled.", "info")
+}
+
+async function clearSemanticSelection(): Promise<void> {
+  const payload = await sendRuntimeMessage<SemanticSelectionState>(
+    typeof state.activeTabId === "number"
+      ? {
+          type: "CLEAR_SEMANTIC_SELECTION",
+          payload: { tabId: state.activeTabId }
+        }
+      : {
+          type: "CLEAR_SEMANTIC_SELECTION"
+        }
+  )
+  updateSelectionState(payload)
+  showNotify("Semantic selection cleared.", "info")
+}
+
+function toggleSemanticRawView(): void {
+  state.semanticRawVisible = !state.semanticRawVisible
+  renderSemanticSnapshotState()
+}
+
+function selectSemanticSnapshot(snapshotId: string): void {
+  state.selectedSemanticSnapshotId = snapshotId
+  renderSemanticSnapshotState()
+}
+
+function selectSemanticContextProfile(profile: ContextTaskProfile): void {
+  const snapshot = getSelectedSemanticSnapshot()
+  if (getDisabledContextProfiles(snapshot).includes(profile)) {
+    showNotify("Interactive snapshots currently support only branch-summary.", "info")
+    return
+  }
+
+  state.semanticContextProfile = profile
+  renderSemanticSnapshotState()
+}
+
+function selectSemanticContextFormat(format: ContextProjectionFormat): void {
+  state.semanticContextFormat = format
+  renderSemanticSnapshotState()
 }
 
 function splitSuggestOptions(text: string): string[] {
@@ -162,6 +493,11 @@ async function captureViewportIfNeeded(intent: Intent): Promise<string | null> {
 }
 
 async function handleUserIntent(intent: Intent): Promise<void> {
+  if (!state.geminiLiveSession) {
+    showNotify("Voice mode is unavailable. Semantic snapshots still work.", "error")
+    return
+  }
+
   if (state.activeTabId === null) {
     showNotify("No active tab context.", "error")
     return
@@ -219,38 +555,31 @@ async function handleUserIntent(intent: Intent): Promise<void> {
   })
 }
 
-async function initialize(): Promise<void> {
-  setPhase("initializing")
-
-  await initializeAudio()
-
+async function initializeVoiceSession(): Promise<void> {
   const tokenManager = new TokenManager(
     requestToken,
     async (token) => {
       state.geminiLiveSession = await connectGeminiLive(token)
     },
     (error) => {
-      setPhase("error")
-      showNotify(error.message, "error")
+      handleVoiceUnavailable(error)
     }
   )
 
   const token = await tokenManager.initialize()
   state.geminiLiveSession = await connectGeminiLive(token)
   state.geminiLiveSession.onFunctionCall = handleUserIntent
+}
 
-  if (typeof chrome !== "undefined" && chrome.tabs?.query) {
-    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-      state.activeTabId = tabs[0]?.id ?? null
-    })
-  }
-
+function registerRuntimeListeners(): void {
   if (typeof chrome !== "undefined" && chrome.runtime?.onMessage) {
     chrome.runtime.onMessage.addListener((message: AnyRuntimeMessage) => {
       if (message.type === "ACTIVE_TAB_CHANGED") {
         state.activeTabId = message.payload.tabId
-        const isHnThread = /news\.ycombinator\.com\/item\?id=\d+/.test(message.payload.url)
-        setPhase(isHnThread ? "ready" : "dormant")
+        setPhaseForUrl(message.payload.url)
+        void hydrateSemanticSnapshot(message.payload.tabId)
+        void hydrateSemanticSnapshotHistory(message.payload.tabId)
+        void hydrateSelectionState(message.payload.tabId)
       }
 
       if (message.type === "ARTICLE_CONTENT") {
@@ -262,10 +591,81 @@ async function initialize(): Promise<void> {
           message.payload.extractedAt
         )
       }
+
+      if (message.type === "SEMANTIC_SNAPSHOT_READY") {
+        updateSemanticSnapshot(message.payload)
+        if (message.payload.error) {
+          showNotify(message.payload.error, "error")
+        }
+      }
+
+      if (message.type === "SEMANTIC_SNAPSHOT_HISTORY_UPDATED") {
+        updateSemanticSnapshotHistory(message.payload)
+      }
+
+      if (message.type === "SEMANTIC_SELECTION_STATE_CHANGED") {
+        updateSelectionState(message.payload)
+      }
     })
   }
+}
 
-  setPhase("ready")
+async function hydrateActiveTabState(): Promise<void> {
+  if (typeof chrome !== "undefined" && chrome.tabs?.query) {
+    await new Promise<void>((resolve) => {
+      chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+        state.activeTabId = tabs[0]?.id ?? null
+        setPhaseForUrl(tabs[0]?.url ?? "")
+        void hydrateSemanticSnapshot(state.activeTabId ?? undefined)
+        void hydrateSemanticSnapshotHistory(state.activeTabId ?? undefined)
+        void hydrateSelectionState(state.activeTabId ?? undefined)
+        resolve()
+      })
+    })
+  }
+}
+
+async function initialize(): Promise<void> {
+  setPhase("initializing")
+  bindSemanticSnapshotActions({
+    onCapture: () => {
+      void requestSemanticSnapshot()
+    },
+    onCopy: () => {
+      void copySemanticSnapshot()
+    },
+    onCopyContext: () => {
+      void copySemanticContext()
+    },
+    onToggleSelection: () => {
+      void toggleSemanticSelection()
+    },
+    onClearSelection: () => {
+      void clearSemanticSelection()
+    },
+    onToggleRaw: () => {
+      toggleSemanticRawView()
+    },
+    onSelectHistory: (snapshotId) => {
+      selectSemanticSnapshot(snapshotId)
+    },
+    onSelectContextProfile: (profile) => {
+      selectSemanticContextProfile(profile)
+    },
+    onSelectContextFormat: (format) => {
+      selectSemanticContextFormat(format)
+    }
+  })
+  renderSemanticSnapshotState()
+  registerRuntimeListeners()
+  await hydrateActiveTabState()
+  await initializeAudio()
+
+  try {
+    await initializeVoiceSession()
+  } catch (error) {
+    handleVoiceUnavailable(error)
+  }
 }
 
 void initialize().catch((error) => {

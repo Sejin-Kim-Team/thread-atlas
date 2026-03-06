@@ -1,12 +1,11 @@
 import {
-  buildStateSnapshot,
   hashUrl,
   type ConversationContext,
   type Intent,
-  type SensorData,
   type StateSnapshot,
   type ThreadSemantics
 } from "@threadatlas/shared"
+import { buildStateSnapshot, type SensorData } from "@threadatlas/shared/runtime"
 import { ContentGraphManager } from "./content-graph"
 
 export async function assembleStateSnapshot(args: {
