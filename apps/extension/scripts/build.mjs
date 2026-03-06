@@ -8,7 +8,9 @@ const watchMode = process.argv.includes("--watch")
 
 const entries = [
   { entryPoints: ["src/sidepanel/index.ts"], outfile: "dist/sidepanel.js" },
+  { entryPoints: ["src/popup/index.ts"], outfile: "dist/popup.js" },
   { entryPoints: ["src/background/service-worker.ts"], outfile: "dist/service-worker.js" },
+  { entryPoints: ["src/content/content-semantic.ts"], outfile: "dist/content-semantic.js" },
   { entryPoints: ["src/content/content-hn.ts"], outfile: "dist/content-hn.js" },
   { entryPoints: ["src/content/content-article.ts"], outfile: "dist/content-article.js" }
 ]
@@ -17,6 +19,7 @@ function copyStatic() {
   mkdirSync(distDir, { recursive: true })
   cpSync(join(root, "manifest.json"), join(root, "dist/manifest.json"))
   cpSync(join(root, "sidepanel.html"), join(root, "dist/sidepanel.html"))
+  cpSync(join(root, "popup.html"), join(root, "dist/popup.html"))
 
   const stylesSrc = join(root, "src/styles")
   const stylesDest = join(root, "dist/styles")

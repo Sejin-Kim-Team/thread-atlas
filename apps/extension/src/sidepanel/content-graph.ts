@@ -1,7 +1,15 @@
-import type { ArticleContext, ContentEdge, ContentNode, ContentNodeType, PageStructure, ThreadDoc, ThreadSemantics } from "@threadatlas/shared"
+import type {
+  ArticleContext,
+  ContentEdge,
+  GraphContentNode,
+  GraphContentNodeType,
+  PageStructure,
+  ThreadDoc,
+  ThreadSemantics
+} from "@threadatlas/shared"
 import { hashUrl } from "@threadatlas/shared"
 
-interface ThreadNode extends ContentNode {
+interface ThreadNode extends GraphContentNode {
   type: "thread"
   platform: "hn"
   threadDoc: ThreadDoc | null
@@ -10,7 +18,7 @@ interface ThreadNode extends ContentNode {
 }
 
 export class ContentGraphManager {
-  private nodes = new Map<string, ContentNode>()
+  private nodes = new Map<string, GraphContentNode>()
   private edges: ContentEdge[] = []
 
   addThread(threadDoc: ThreadDoc, articleUrl: string | null): string {
@@ -60,7 +68,7 @@ export class ContentGraphManager {
       id,
       url,
       title,
-      type: "article" as ContentNodeType,
+      type: "article" as GraphContentNodeType,
       snapshot: {
         text,
         structure,

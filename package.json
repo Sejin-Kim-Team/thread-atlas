@@ -7,7 +7,10 @@
     "build": "turbo run build",
     "test": "turbo run test",
     "typecheck": "turbo run typecheck",
-    "dev": "turbo run dev --parallel"
+    "dev": "turbo run dev --parallel",
+    "api:dev": "pnpm --filter @threadatlas/api dev",
+    "extension:build": "pnpm --filter @threadatlas/extension build",
+    "extension:watch": "pnpm --filter @threadatlas/extension watch"
   },
   "devDependencies": {
     "@types/node": "^22.13.14",

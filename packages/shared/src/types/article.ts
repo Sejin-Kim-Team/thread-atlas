@@ -26,7 +26,7 @@ export interface ArticleContext {
   readAt: number
 }
 
-export type ContentNodeType = "article" | "thread"
+export type GraphContentNodeType = "article" | "thread"
 
 export interface ContentSnapshot {
   text: string
@@ -34,15 +34,15 @@ export interface ContentSnapshot {
   extractedAt: number
 }
 
-export interface ContentNode {
+export interface GraphContentNode {
   id: string
   url: string
   title: string
-  type: ContentNodeType
+  type: GraphContentNodeType
   snapshot: ContentSnapshot | null
 }
 
-export interface ThreadNode extends ContentNode {
+export interface ThreadNode extends GraphContentNode {
   type: "thread"
   platform: "hn"
   threadDoc: ThreadDoc | null
@@ -57,6 +57,6 @@ export interface ContentEdge {
 }
 
 export interface ContentGraph {
-  nodes: Map<string, ContentNode>
+  nodes: Map<string, GraphContentNode>
   edges: ContentEdge[]
 }
