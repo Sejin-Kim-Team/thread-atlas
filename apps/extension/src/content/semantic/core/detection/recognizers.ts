@@ -859,6 +859,10 @@ function hasStructuredContent(element: Element): boolean {
   )
 }
 
+function countSelfAndDescendants(element: Element, selector: string): number {
+  return (element.matches(selector) ? 1 : 0) + element.querySelectorAll(selector).length
+}
+
 function isGridContainer(element: Element, items: Element[]): boolean {
   const semanticText = `${element.className} ${element.id} ${element.getAttribute("style") ?? ""}`.toLowerCase()
   if (/\bgrid\b|\bcard\b|\bresult\b|\bgallery\b|\btiles?\b/.test(semanticText)) {
@@ -878,6 +882,34 @@ function isGridContainer(element: Element, items: Element[]): boolean {
   return false
 }
 
+function semanticTextForElement(element: Element): string {
+  return [
+    element.tagName.toLowerCase(),
+    element.className,
+    element.id,
+    element.getAttribute("role") ?? "",
+    element.getAttribute("aria-label") ?? ""
+  ]
+    .join(" ")
+    .toLowerCase()
+}
+
+function hasCardLikeHint(element: Element): boolean {
+  return /\bcard\b|\bgrid\b|\bresult\b|\bgallery\b|\btiles?\b|\bfeed\b|\bitemlist\b|\bresults\b/.test(
+    semanticTextForElement(element)
+  )
+}
+
+function isUtilityContainer(element: Element): boolean {
+  if (element.closest("nav,footer,header,aside")) {
+    return true
+  }
+
+  return /\bnav\b|\bmenu\b|\bfooter\b|\bsidebar\b|\bbreadcrumb\b|\bpagination\b|\btoolbar\b|\butility\b|\bresource\b|\bsections\b|\brelated\b|\btoc\b/.test(
+    semanticTextForElement(element)
+  )
+}
+
 function classifyRepeatedSubtype(root: Element, items: Element[]): "flat" | "nested" | "grid" {
   const depths = items.map((item) => getElementDepth(item, root))
   const hasDepthVariation = new Set(depths).size > 1 || depths.some((depth) => depth > 0)
@@ -892,7 +924,66 @@ function classifyRepeatedSubtype(root: Element, items: Element[]): "flat" | "nes
   return "flat"
 }
 
-function isLowQualityRepeatedCandidate(root: Element, items: Element[]): boolean {
+function isSimpleTextItem(element: Element): boolean {
+  const links = countSelfAndDescendants(element, "a[href]")
+  const controls = countSelfAndDescendants(
+    element,
+    "button,input,select,textarea,[role='button'],[role='tab']"
+  )
+  const media = countSelfAndDescendants(element, "img,picture,video,svg")
+  const headings = countSelfAndDescendants(element, "h1,h2,h3,h4,h5,h6,[role='heading'],strong")
+  const prose = countSelfAndDescendants(element, "p,blockquote,pre,code")
+  const textLength = textForElement(element).length
+
+  return links <= 1 && controls === 0 && media === 0 && headings === 0 && prose === 0 && textLength < 140
+}
+
+function looksLikeAuthoredProseList(root: Element, items: Element[], subtype: string): boolean {
+  if (subtype !== "flat") {
+    return false
+  }
+
+  if (!root.matches("ul,ol")) {
+    return false
+  }
+
+  if (!root.closest("article,main,section") || root.closest("nav,aside,footer")) {
+    return false
+  }
+
+  if (hasCardLikeHint(root)) {
+    return false
+  }
+
+  if (!items.every((item) => item.tagName.toLowerCase() === "li")) {
+    return false
+  }
+
+  const averageLength =
+    items.reduce((sum, item) => sum + textForElement(item).length, 0) / Math.max(1, items.length)
+  const simpleItemCount = items.filter((item) => isSimpleTextItem(item)).length
+
+  return simpleItemCount / Math.max(1, items.length) >= 0.8 && averageLength < 120
+}
+
+function looksLikeUtilityLinkCluster(root: Element, items: Element[], subtype: string): boolean {
+  if (subtype === "nested" || !isUtilityContainer(root) || hasCardLikeHint(root)) {
+    return false
+  }
+
+  const averageLength =
+    items.reduce((sum, item) => sum + textForElement(item).length, 0) / Math.max(1, items.length)
+  const mostlyLinkItems = items.filter((item) => {
+    const links = countSelfAndDescendants(item, "a[href]")
+    const controls = countSelfAndDescendants(item, "button,input,select,textarea,[role='button'],[role='tab']")
+    const media = countSelfAndDescendants(item, "img,picture,video,svg")
+    return links >= 1 && controls === 0 && media === 0
+  }).length
+
+  return mostlyLinkItems / Math.max(1, items.length) >= 0.8 && averageLength < 100
+}
+
+function isLowQualityRepeatedCandidate(root: Element, items: Element[], subtype: string): boolean {
   const textLengths = items.map((item) => textForElement(item).length)
   const nonEmptyCount = textLengths.filter((length) => length > 0).length
   if (nonEmptyCount < 3) {
@@ -902,6 +993,18 @@ function isLowQualityRepeatedCandidate(root: Element, items: Element[]): boolean
   const averageLength = textLengths.reduce((sum, length) => sum + length, 0) / Math.max(1, textLengths.length)
   const insideAuthoredBlock = Boolean(root.closest("article,main,section"))
   const hasStructure = items.some((item) => hasStructuredContent(item) || hasInteractiveAffordance(item))
+
+  if (looksLikeUtilityLinkCluster(root, items, subtype)) {
+    return true
+  }
+
+  if (looksLikeAuthoredProseList(root, items, subtype)) {
+    return true
+  }
+
+  if (subtype === "nested") {
+    return false
+  }
 
   return insideAuthoredBlock && !hasStructure && averageLength < 60
 }
@@ -955,6 +1058,21 @@ function findApproximateRepeatedChildGroup(root: Element): Element[] {
   }
 
   return best.length >= 3 && best.length / children.length >= 0.5 ? best : []
+}
+
+function findTitleRowGroup(root: Element): Element[] {
+  const children = Array.from(root.children).filter((child) => child.tagName.toLowerCase() === "tr")
+  if (children.length < 3) {
+    return []
+  }
+
+  const titleRows = children.filter(
+    (child) =>
+      roleHintForElement(child) === "title" &&
+      Boolean(child.querySelector("a[href],h1,h2,h3,h4,h5,h6,[role='heading'],.titleline,strong"))
+  )
+
+  return titleRows.length >= 3 ? titleRows : []
 }
 
 function buildRepeatedFlatNode(
@@ -1124,6 +1242,7 @@ class RepeatedItemRecognizer implements GenericRecognizer {
         confidence: 0.88,
         signals: ["list-structure"]
       }))
+      .filter((candidate) => !isLowQualityRepeatedCandidate(candidate.element, candidate.itemElements, candidate.subtype))
 
     const repeatedCandidates = detectRepeatedStructureCandidates(document)
       .filter((candidate) => {
@@ -1155,19 +1274,20 @@ class RepeatedItemRecognizer implements GenericRecognizer {
                 : ["repeated-rows"]
         }
       })
-      .filter((candidate) => !isLowQualityRepeatedCandidate(candidate.element, candidate.itemElements))
+      .filter((candidate) => !isLowQualityRepeatedCandidate(candidate.element, candidate.itemElements, candidate.subtype))
 
     const approximateCandidates = Array.from(document.querySelectorAll("tbody,table,section,div"))
       .map((element) => {
         const items = findApproximateRepeatedChildGroup(element)
-        if (items.length < 3) {
+        const resolvedItems = items.length >= 3 ? items : findTitleRowGroup(element)
+        if (resolvedItems.length < 3) {
           return null
         }
 
-        const subtype = classifyRepeatedSubtype(element, items)
+        const subtype = classifyRepeatedSubtype(element, resolvedItems)
         return {
           element,
-          itemElements: items,
+          itemElements: resolvedItems,
           subtype,
           confidence: subtype === "nested" ? 0.9 : subtype === "grid" ? 0.76 : 0.74,
           signals:
@@ -1180,7 +1300,7 @@ class RepeatedItemRecognizer implements GenericRecognizer {
       })
       .filter((candidate): candidate is NonNullable<typeof candidate> => Boolean(candidate))
       .filter((candidate) => !repeatedCandidates.some((existing) => existing.element === candidate.element))
-      .filter((candidate) => !isLowQualityRepeatedCandidate(candidate.element, candidate.itemElements))
+      .filter((candidate) => !isLowQualityRepeatedCandidate(candidate.element, candidate.itemElements, candidate.subtype))
 
     return uniqueElements(
       [
