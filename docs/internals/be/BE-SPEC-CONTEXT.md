@@ -5,9 +5,9 @@
 Version: 0.1
 Status: Draft
 Companion:
-- [BE-PRD.md](/Users/spark/workspace/thread-atlas/docs/internals/BE-PRD.md)
-- [BE-SPEC.md](/Users/spark/workspace/thread-atlas/docs/internals/BE-SPEC.md)
-- [FE-SPEC.md](/Users/spark/workspace/thread-atlas/docs/internals/FE-SPEC.md)
+- [BE-PRD.md](./BE-PRD.md)
+- [BE-SPEC.md](./BE-SPEC.md)
+- [FE-SPEC.md](../FE-SPEC.md)
 
 ---
 

@@ -7,6 +7,9 @@ Owner: Backend Team
 Target: Gemini Live Agent Challenge
 Status: Draft
 
+> Note: 이 문서는 해커톤 이후까지 포함한 업그레이드 타깃 PRD에 가깝다.
+> 2026-03-16 제출 기준의 축소 범위는 [BE-PRD-HACKATHON.md](./BE-PRD-HACKATHON.md)를 우선 기준으로 삼는다.
+
 ---
 
 ## 1. Problem
@@ -236,6 +239,12 @@ retrieval, relation, memory의 canonical reasoning 단위.
 - same page branch jump
 - cross page open
 - sidepanel evidence preview
+
+규칙:
+
+- backend는 `NavigationTarget`과 open hint를 제안할 수 있다
+- 실제 navigation 실행 방식은 client가 결정한다
+- 즉 backend는 힌트를 주고, FE가 실제 UX 맥락에 맞게 same-tab / new-tab / sidepanel preview를 선택한다
 
 ### 6.5 Projection
 
@@ -475,7 +484,8 @@ backend의 canonical 평가 경로는 WebSocket session이다.
 v0.1에서 HTTP는 최소한 다음만 남길 수 있다.
 
 - `/api/token`
-- `/api/analyze` 또는 후속 ingest endpoint
+- `/api/analyze`
+- `/api/ingest/memory`
 - `/api/health`
 
 ### 11.3 Session Event Model
@@ -560,11 +570,12 @@ v0.1에서 지원할 retrieval mode:
 - semantic text retrieval
 - relation-aware retrieval
 - memory similarity retrieval
+- selected-scenario visual / hybrid retrieval
 
 확장 가능 mode:
 
-- visual retrieval
-- hybrid retrieval
+- broader visual retrieval
+- broader hybrid retrieval
 
 ### 12.4 Retrieval Planner Policy
 
@@ -626,6 +637,18 @@ backend는 retrieval된 semantic unit과 현재 focus 사이의 관계를 분석
 단계를 가진다.
 
 accepted 되기 전까지는 보수적으로 사용한다.
+
+v0.1 정책:
+
+- 시스템은 사용자 확인 없이도 `memory-link`를 `accepted`로 올릴 수 있다
+- 단, 자동 채택은 높은 유사도, 명확한 provenance, 허용된 memory unit kind, 현재 탭과의 정합성을 만족할 때만 허용한다
+- 중간 수준 유사도는 `recall` 또는 `comparison` intent에서만 조건부 채택한다
+- 낮은 유사도는 `candidate` 유지 또는 `rejected` 처리한다
+
+채택된 `memory-link`의 의미:
+
+- 현재 사실을 대체하는 단정 근거가 아니라
+- 현재 맥락과 연결 가능한 **검증된 유사 기억**이다
 
 ### 13.3 Relation Analysis Strategy
 
@@ -729,13 +752,27 @@ WS event 관점에서는 다음처럼 분해된다.
 
 세션을 넘어 저장되는 semantic memory.
 
-저장 단위 예시:
+v0.1의 canonical long-term memory unit은 `summary-bearing semantic unit`이다.
+
+허용되는 concrete kind:
 
 - branch summary
 - section summary
 - claim/evidence summary
-- article section summary
+
+설명:
+
+- `branch summary`는 discussion page의 기본 장기 기억 단위다
+- `section summary`는 article/docs/authored page의 기본 장기 기억 단위다
+- `claim/evidence summary`는 cross-page recall과 relation analysis를 위한 공통 장기 기억 단위다
+
+v0.1 기본 제외:
+
 - control cluster summary
+
+이유:
+
+- interactive control cluster는 변동성과 privacy risk가 높아 v0.1 장기 기억 기본 단위로는 쓰지 않는다
 
 ### 16.3 Write Policy
 
@@ -805,7 +842,11 @@ v0.1 MVP에서 제외할 것:
 ### 18.1 MVP Boundary Notes
 
 - v0.1의 canonical flow는 text-first semantic navigation이다
-- visual / hybrid retrieval은 architecture-compatible하게만 설계하고, 실제 지원은 제한적 시나리오에 한정한다
+- visual / hybrid retrieval은 제한적 1급 입력으로 허용하되, 현재 또는 과거에 이미 본 자료를 바탕으로 한 selected scenario에만 한정한다
+- Live API와 이미지 이해 기능은 사용할 수 있지만, 결과는 구조화된 summary-bearing semantic unit으로 변환된 뒤에만 retrieval/evidence 체계에 편입한다
+- raw visual-only 결과를 곧바로 최종 사실로 단정하지 않는다
+- v0.1에서 우선 허용하는 visual 대상은 `chart`, `diagram`, `visible UI screenshot / visual region`이다
+- v0.1에서 지원하는 대표 시나리오는 "지금/방금 본 내용 중 설명용 차트나 이미지가 있었는가", "이전에 본 자료 중 이 주장과 연결되는 시각 자료가 있었는가" 같은 recall/comparison 흐름이다
 - session scope는 single-sidepanel 기준으로 정의한다
 
 ---
@@ -838,9 +879,7 @@ backend는 어떤 탭/기억/semantic unit을 근거로 답했는지 추적할 �
 
 ## 20. Open Questions
 
-1. long-term memory의 canonical 저장 단위를 무엇으로 고정할 것인가
-2. memory-link accepted 기준을 어떤 threshold와 policy로 둘 것인가
-3. visual / hybrid retrieval을 v0.1 이후 어떤 시점에 일반화할 것인가
+없음
 
 ---
 

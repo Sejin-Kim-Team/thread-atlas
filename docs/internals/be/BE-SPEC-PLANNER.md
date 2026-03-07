@@ -5,9 +5,9 @@
 Version: 0.1
 Status: Draft
 Companion:
-- [BE-PRD.md](/Users/spark/workspace/thread-atlas/docs/internals/BE-PRD.md)
-- [BE-SPEC.md](/Users/spark/workspace/thread-atlas/docs/internals/BE-SPEC.md)
-- [BE-SPEC-CONTEXT.md](/Users/spark/workspace/thread-atlas/docs/internals/BE-SPEC-CONTEXT.md)
+- [BE-PRD.md](./BE-PRD.md)
+- [BE-SPEC.md](./BE-SPEC.md)
+- [BE-SPEC-CONTEXT.md](./BE-SPEC-CONTEXT.md)
 
 ---
 
@@ -190,13 +190,46 @@ relation candidate는 다음 신호를 조합해 생성한다.
 기본 정책:
 - memory hit는 기본적으로 `candidate`
 - candidate는 바로 answer evidence가 아니다
-- 고신뢰 또는 사용자 확인이 있을 때만 `accepted`로 승격한다
+- 시스템은 사용자 확인 없이도 `accepted`로 승격할 수 있다
+
+### 6.2.1 Acceptance Levels
+
+v0.1은 3단계 채택 정책을 사용한다.
+
+- `high`
+  - 자동 `accepted`
+- `medium`
+  - 기본은 `candidate`
+  - 현재 intent가 `recall-request` 또는 `comparison-request`면 조건부 `accepted`
+- `low`
+  - `candidate` 유지 또는 `rejected`
+
+판정 신호:
+
+- semantic similarity
+- provenance 선명도
+- memory record kind 안정성
+- 현재 primary tab과의 정합성
+
+자동 채택 조건:
+
+- similarity가 충분히 높음
+- provenance가 명확함
+- record kind가 `branch-summary`, `section-summary`, `claim-evidence-summary` 중 하나
+- 현재 맥락과 정면 충돌하지 않음
+
+사용 규칙:
+
+- `candidate`는 `suggest` / `clarify` 용도로만 사용
+- `accepted`는 비교, 회상, 유사 사례 제시에 사용 가능
+- `accepted`라도 현재 사실을 덮어쓰는 단정 근거로 사용하지 않는다
 
 ### 6.3 Evidence Strength Policy
 
 - strong `cross-tab` relation + fresh snapshot -> direct evidence 가능
 - weak `memory-link` -> suggest 또는 clarify 우선
 - ambiguous relation -> clarify 우선
+- accepted `memory-link` -> 검증된 유사 기억으로서 보조 근거 사용 가능
 
 ---
 
@@ -288,12 +321,42 @@ projection은 reasoning의 부산물이어야 한다.
 - branch summary
 - section summary
 - claim/evidence summary
-- article section summary
-- control cluster summary
 
 역할:
 - recall
 - cross-session similarity retrieval
+
+v0.1 canonical long-term memory unit:
+
+- `branch-summary`
+- `section-summary`
+- `claim-evidence-summary`
+
+v0.1 기본 제외:
+
+- `control-cluster-summary`
+
+설명:
+- discussion은 `branch-summary`를 기본 단위로 사용
+- authored/docs는 `section-summary`를 기본 단위로 사용
+- cross-page recall과 relation matching은 `claim-evidence-summary`를 우선 활용
+
+### 9.2.1 Visual-Derived Memory Support
+
+v0.1은 현재 또는 과거에 이미 본 시각 자료에 대해 제한적 visual-derived memory를 허용한다.
+
+허용 대상:
+
+- chart
+- diagram
+- visible UI screenshot / visual region
+
+규칙:
+
+- visual result는 raw image evidence로 직접 저장하지 않는다
+- Live API 또는 이미지 이해 결과는 summary-bearing semantic unit으로 변환한 뒤에만 memory/retrieval 체계에 넣는다
+- 현재 또는 과거에 이미 본 자료만 retrieval 대상이 된다
+- 새 외부 자료를 찾는 웹 탐색은 v0.1 비범위다
 
 ### 9.3 Long-term Memory Write Policy
 
@@ -330,6 +393,26 @@ projection은 reasoning의 부산물이어야 한다.
 - cross-tab retrieval 비활성화가 기본값
 - memory recall 비활성화가 기본값
 - control explanation 중심으로 제한
+
+### 10.4 Visual / Hybrid Retrieval Boundary
+
+v0.1 canonical rule:
+
+- text-based semantic unit이 기본 retrieval target이다
+- visual / hybrid retrieval은 selected scenario support만 허용한다
+
+selected scenario:
+
+- chart의 핵심 추세 설명
+- diagram의 주요 구성요소와 관계 설명
+- visible UI structure 설명
+- 현재 또는 과거에 이미 본 시각 자료 회상
+
+사용 규칙:
+
+- visual-only 결과를 직접 final evidence로 채택하지 않는다
+- text summary 또는 structured semantic summary로 변환 후 사용한다
+- answer 생성 시에는 "현재/이전에 본 자료 기준"이라는 provenance를 유지한다
 
 ---
 

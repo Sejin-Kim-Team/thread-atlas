@@ -4,10 +4,20 @@
 
 Version: 0.1
 Status: Draft
+
+> Note: 이 문서는 해커톤 이후 업그레이드 타깃까지 포함한 full spec overview에 가깝다.
+> 2026-03-16 제출 기준의 구현 우선순위는 [BE-SPEC-HACKATHON.md](./BE-SPEC-HACKATHON.md)를 먼저 따른다.
+
 Companion:
-- [BE-PRD.md](/Users/spark/workspace/thread-atlas/docs/internals/BE-PRD.md)
-- [BE-SPEC-CONTEXT.md](/Users/spark/workspace/thread-atlas/docs/internals/BE-SPEC-CONTEXT.md)
-- [BE-SPEC-PLANNER.md](/Users/spark/workspace/thread-atlas/docs/internals/BE-SPEC-PLANNER.md)
+- [BE-SPEC-HACKATHON.md](./BE-SPEC-HACKATHON.md)
+- [BE-SPEC-UPGRADE.md](./BE-SPEC-UPGRADE.md)
+- [BE-PRD.md](./BE-PRD.md)
+- [BE-SPEC-CONTEXT.md](./BE-SPEC-CONTEXT.md)
+- [BE-SPEC-PLANNER.md](./BE-SPEC-PLANNER.md)
+- [BE-SPEC-PROTOCOL.md](./BE-SPEC-PROTOCOL.md)
+- [BE-SPEC-MEMORY.md](./BE-SPEC-MEMORY.md)
+- [BE-SPEC-INGEST.md](./BE-SPEC-INGEST.md)
+- [BE-SPEC-INFRA.md](./BE-SPEC-INFRA.md)
 
 ---
 
@@ -131,7 +141,8 @@ backend의 canonical evaluation path는 `WebSocket session`이다.
 v0.1에서 HTTP는 다음 범위로 제한한다.
 
 - `/api/token`
-- `/api/analyze` 또는 ingest 계열 endpoint
+- `/api/analyze`
+- `/api/ingest/memory`
 - `/api/health`
 
 ### 5.3 Client -> Server Events
@@ -166,6 +177,7 @@ server는 최소한 다음 이벤트를 전송해야 한다.
 - `snapshot.push`는 항상 특정 `tabId`에 귀속된다
 - `turn.done`은 사용된 provenance와 referenced tabs를 명시해야 한다
 - `interrupt`는 현재 active turn을 중단 가능한 상태로 전이시켜야 한다
+- navigation/projection 관련 실제 UX 실행은 client가 결정하고, backend는 target과 hint를 제안한다
 
 ---
 
@@ -286,14 +298,28 @@ v0.1의 canonical flow는 `text-first semantic navigation`이다.
 
 세부 명세는 다음 문서에서 정의한다.
 
-- [BE-SPEC-CONTEXT.md](/Users/spark/workspace/thread-atlas/docs/internals/BE-SPEC-CONTEXT.md)
+- [BE-SPEC-CONTEXT.md](./BE-SPEC-CONTEXT.md)
   - snapshot/context ingestion
   - normalized context model
   - relation edge model
   - builder/normalizer function signatures
-- [BE-SPEC-PLANNER.md](/Users/spark/workspace/thread-atlas/docs/internals/BE-SPEC-PLANNER.md)
+- [BE-SPEC-PLANNER.md](./BE-SPEC-PLANNER.md)
   - intent router
   - retrieval planner
   - relation analysis
   - memory/evidence promotion
   - response/projection planning
+- [BE-SPEC-PROTOCOL.md](./BE-SPEC-PROTOCOL.md)
+  - WebSocket event contract
+  - session lifecycle
+  - event payload schemas
+  - delivery / ack / error rules
+- [BE-SPEC-MEMORY.md](./BE-SPEC-MEMORY.md)
+  - long-term memory record schema
+  - visual-derived summary schema
+  - memory write / read policy
+  - memory helper function signatures
+- [BE-SPEC-INGEST.md](./BE-SPEC-INGEST.md)
+  - `/api/analyze` 역할과 schema
+  - `/api/ingest/memory` 역할과 schema
+  - analyze/ingest lifecycle
