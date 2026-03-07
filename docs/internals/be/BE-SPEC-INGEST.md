@@ -28,6 +28,21 @@ v0.1에서 고정하는 HTTP endpoint:
 - `/api/ingest/memory`
   - 승인된 memory record를 영속화한다
 
+### 1.1 `feature/be-rag-persistence` 브랜치 범위 고정
+
+이번 브랜치에서 HTTP companion endpoint 기준으로 실제 구현하는 범위:
+
+- `/api/analyze` 호출 결과의 `analysis_runs` 최소 DB 기록
+- `/api/ingest/memory`의 실제 DB write (`memory_records`, `memory_record_embeddings`)
+- owner isolation 기반 read/write 규칙 강제
+
+이번 브랜치 비범위:
+
+- analyze real LLM generation 품질 완성
+- WS turn runtime 연동
+- enrich sub-loop 연동
+- recall-card projection 연동
+
 ---
 
 ## 2. Endpoint Roles
@@ -163,6 +178,9 @@ export type AnalyzeResponse =
 - backend는 내부적으로 `validateSemanticSnapshot -> buildCanonicalContextPack -> normalizeContextPack` 순서를 사용해야 한다
 - `mode=visual-summary`라도 raw visual-only 결과만 반환하지 않는다
 - summary candidate는 허용된 canonical memory kind만 반환한다
+- 이번 브랜치에서 `/api/analyze`는 `analysis_runs`에 최소 감사 로그를 남겨야 한다
+  - 필수 컬럼: `id`, `owner_user_id`, `tab_id`, `mode`, `snapshot_page_id`, `snapshot_url`, `normalized_mode`
+  - `summary_candidates`, `visual_summaries`는 빈 배열 저장을 허용한다
 
 ---
 
@@ -228,6 +246,24 @@ write 허용 규칙:
 - `ownerUserId`가 존재하고 현재 principal과 일치해야 한다
 - provenance가 완전해야 한다
 - visual-only 결과는 저장할 수 없다
+
+## 4.4 Persistence Rules (구현 강제)
+
+- `/api/ingest/memory`는 record 단위 트랜잭션을 사용한다
+- 트랜잭션 순서:
+  1. `memory_records` insert
+  2. canonical `retrieval_text` 생성
+  3. embedding 생성
+  4. `memory_record_embeddings` insert
+- embedding 생성 또는 embedding insert가 실패하면 해당 record write를 rollback하고 `rejected`에 포함한다
+- 한 record 실패가 전체 batch 실패를 강제하지는 않는다
+
+## 4.5 Owner Isolation Rules (구현 강제)
+
+- principal은 bearer token -> `auth_sessions` -> `users.id` 체인으로 해석한다
+- 요청 body의 `ownerUserId`를 신뢰하지 않는다. principal과 불일치하면 reject한다
+- persistence read/query 계층은 owner 조건 없는 조회 API를 제공하지 않는다
+- owner 조건 없는 SQL 실행은 금지한다
 
 ---
 
@@ -341,3 +377,15 @@ export function ingestMemoryRecords(
 - `apps/api/src/routes/ingest-memory.ts`
 - `apps/api/src/session/analyze/analyze-snapshot.ts`
 - `apps/api/src/session/memory/ingest-records.ts`
+
+---
+
+## 10. `feature/be-rag-persistence` 완료 조건
+
+다음을 모두 만족하면 이번 브랜치 관점에서 ingest/analyze persistence는 완료다.
+
+- `/api/analyze` 호출이 `analysis_runs`에 owner-scoped row를 기록한다.
+- `/api/ingest/memory`가 `memory_records`와 `memory_record_embeddings`를 실제로 기록한다.
+- owner mismatch record는 저장되지 않고 `rejected`로 반환된다.
+- owner 조건 없는 read/write 경로가 존재하지 않는다.
+- WS turn runtime, enrich, recall-card 연결은 미구현이어도 완료 판정을 유지한다.

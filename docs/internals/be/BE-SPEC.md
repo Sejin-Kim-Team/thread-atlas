@@ -7,6 +7,8 @@ Status: Draft
 
 > Note: 이 문서는 해커톤 이후 업그레이드 타깃까지 포함한 full spec overview에 가깝다.
 > 2026-03-16 제출 기준의 구현 우선순위는 [BE-SPEC-HACKATHON.md](./BE-SPEC-HACKATHON.md)를 먼저 따른다.
+> `feature/be-rag-persistence` 브랜치 구현 범위는 [BE-SPEC-RAG-HACKATHON.md](./BE-SPEC-RAG-HACKATHON.md)의 브랜치 범위/완료 조건을 우선 적용한다.
+> 해커톤 RAG embedding canonical path는 `Vertex AI(gemini-embedding-001, output_dimensionality=768)`이며, pseudo embedding 대체는 허용하지 않는다.
 
 Companion:
 - [BE-SPEC-HACKATHON.md](./BE-SPEC-HACKATHON.md)

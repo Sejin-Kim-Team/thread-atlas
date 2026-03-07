@@ -177,6 +177,20 @@ v0.1 운영 원칙:
 - Embeddings:
   - memory record embedding 생성
 
+구현 원칙:
+
+- 로컬 개발과 GCP 배포가 같은 코드 경로를 타도록 `Vertex AI adapter`를 둔다
+- 로컬 개발에서는 `Application Default Credentials (ADC)`를 사용한다
+- GCP 배포에서는 `Cloud Run` 서비스 계정으로 인증한다
+- API key 전용 분기 구현보다 `project + location + ADC/service account` 경로를 canonical로 둔다
+- embedding 연동 필수 env는 `GOOGLE_CLOUD_PROJECT`, `GOOGLE_CLOUD_LOCATION`으로 고정한다
+
+해커톤 canonical embedding 설정:
+
+- model: `gemini-embedding-001`
+- output dimensionality: `768`
+- provider failure 시 pseudo/placeholder vector 대체는 허용하지 않는다
+
 ### 5.4 Secret Manager
 
 역할:

@@ -1,5 +1,5 @@
 import request from "supertest"
-import { describe, expect, it } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { createServer } from "../../src/server"
 import { requireEnv } from "../helpers/env"
 import { buildIngestMemoryRequest, buildStorableMemoryRecord } from "./helpers/payloads"
@@ -7,6 +7,27 @@ import { buildIngestMemoryRequest, buildStorableMemoryRecord } from "./helpers/p
 const BOOTSTRAP_KEY = requireEnv("AUTH_BOOTSTRAP_KEY")
 const UUID_V4_REGEX =
   /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+
+vi.mock("../../src/rag/vertex-embedding-adapter", () => {
+  const dims = 768
+  const model = "gemini-embedding-001"
+  return {
+    CANONICAL_VERTEX_EMBEDDING_MODEL: model,
+    CANONICAL_VERTEX_EMBEDDING_DIMS: dims,
+    isEmbeddingProviderError: (error: unknown) =>
+      Boolean(
+        error &&
+          typeof error === "object" &&
+          "code" in error &&
+          (error as { code?: string }).code?.startsWith("EMBEDDING_PROVIDER_")
+      ),
+    embedTextWithVertex: vi.fn(async () => ({
+      embeddingModel: model,
+      embeddingDims: dims,
+      embedding: Array.from({ length: dims }, () => 0.02)
+    }))
+  }
+})
 
 async function issueToken(
   app: ReturnType<typeof createServer>,
@@ -29,6 +50,15 @@ async function issueToken(
 }
 
 describe("POST /api/ingest/memory (hackathon contract)", () => {
+  beforeEach(() => {
+    vi.stubEnv("GOOGLE_CLOUD_PROJECT", "thread-atlas")
+    vi.stubEnv("GOOGLE_CLOUD_LOCATION", "us-central1")
+  })
+
+  afterEach(() => {
+    vi.unstubAllEnvs()
+  })
+
   it("accepts storable memory records when ownerUserId matches local users.id", async () => {
     const app = createServer()
     const issued = await issueToken(app, "google-sub-ingest-alpha")

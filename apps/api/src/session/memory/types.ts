@@ -8,6 +8,8 @@ export interface MemoryRecord {
   ownerUserId?: string
   kind?: string
   summary?: string
+  keywords?: string[]
+  entities?: string[]
   provenance?: {
     sourceUrl?: string
     pageKind?: "article" | "thread" | "post" | "generic"
@@ -15,11 +17,30 @@ export interface MemoryRecord {
     extractorId?: string
     skeletonVersion?: number
   }
+  source?: {
+    pageId?: string
+    unitId?: string
+    rootNodeIds?: string[]
+  }
+  navigation?: {
+    canonicalUrl?: string
+    pageTitle?: string
+    pageAnchor?: string
+    nodeAnchor?: Record<string, unknown>
+    openMode?: "same-tab" | "new-tab" | "sidepanel-preview"
+  }
+  evidence?: {
+    textSpans?: string[]
+    referencedNodeIds?: string[]
+    [key: string]: unknown
+  }
   visual?: {
     kind: "chart-summary" | "diagram-summary" | "ui-visual-summary"
     summaryText: string
     extractedLabels: string[]
   }
+  kindPayload?: Record<string, unknown>
+  createdAt?: string
 }
 
 export interface IngestMemoryRequestBody {
@@ -40,4 +61,3 @@ export interface IngestMemoryResponseBody {
     reason: RejectReason
   }>
 }
-

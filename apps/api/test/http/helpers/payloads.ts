@@ -54,7 +54,7 @@ export function buildAnalyzeRequest(mode: "seed" | "memory-candidate" | "visual-
 
 export function buildStorableMemoryRecord(ownerUserId = "user_sungwoo") {
   return {
-    id: "mem-branch-101",
+    id: randomUUID(),
     ownerUserId,
     kind: "branch-summary",
     summary:
@@ -99,3 +99,4 @@ export function buildIngestMemoryRequest(ownerUserId = "user_sungwoo") {
     records: [buildStorableMemoryRecord(ownerUserId)]
   }
 }
+import { randomUUID } from "node:crypto"

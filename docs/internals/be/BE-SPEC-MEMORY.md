@@ -27,6 +27,20 @@ Companion:
 - memory read/write 기준
 - memory helper function signatures
 
+### 1.1 `feature/be-rag-persistence` 구현 범위 고정
+
+이번 브랜치에서 고정하는 memory 구현 범위:
+
+- `MemoryRecord`의 DB write/read 규칙
+- owner isolation 규칙
+- retrieval service 초안(DB query 레이어)
+
+이번 브랜치 비범위:
+
+- `recall-card`를 turn runtime/projection에 붙이는 작업
+- WebSocket event 발행 및 turn state 전이
+- enrich sub-loop와의 연결
+
 ---
 
 ## 2. Canonical Memory Model
@@ -126,6 +140,14 @@ ownership 규칙:
 - memory record는 항상 단일 `ownerUserId`에 귀속된다
 - recall lookup은 현재 authenticated principal의 record 범위 안에서만 수행한다
 - 다른 principal의 record를 cross-user recall 대상으로 사용하지 않는다
+
+구현 강제 규칙:
+
+- write API는 `ownerUserId` 누락 record를 거부한다
+- write API는 `ownerUserId !== principalUserId` record를 거부한다
+- retrieval API는 `ownerUserId`를 필수 파라미터로 받는다
+- retrieval SQL은 항상 `where owner_user_id = $ownerUserId`를 포함한다
+- owner 조건 없는 조회 helper를 제공하지 않는다
 
 ---
 
@@ -334,6 +356,9 @@ export interface VisualDerivedSummary {
 
 ## 8. Read / Recall Policy
 
+현재 브랜치에서는 이 장의 내용 중 `DB retrieval`까지만 구현한다.
+recall 결과를 projection/turn runtime에 노출하는 단계는 다음 브랜치 범위다.
+
 ## 8.1 Retrieval Targets
 
 Long-term RAG는 다음을 기준으로 검색한다.
@@ -413,6 +438,29 @@ export function buildVisualDerivedSummary(
 export function isMemoryRecordStorable(
   record: MemoryRecord
 ): boolean
+
+export interface RetrieveMemoryCandidatesInput {
+  ownerUserId: string
+  queryText: string
+  limit?: number
+  pageKind?: "article" | "thread" | "post" | "generic"
+  sourceDomain?: string
+}
+
+export interface RetrieveMemoryCandidate {
+  recordId: string
+  ownerUserId: string
+  kind: MemoryRecordKind
+  summary: string
+  canonicalUrl: string
+  pageTitle?: string
+  nodeAnchor?: MemoryRecord["navigation"]["nodeAnchor"]
+  similarityScore: number
+}
+
+export function retrieveMemoryCandidates(
+  input: RetrieveMemoryCandidatesInput
+): Promise<RetrieveMemoryCandidate[]>
 ```
 
 규칙:
@@ -420,6 +468,7 @@ export function isMemoryRecordStorable(
 - `buildMemoryRecord`는 허용되지 않은 kind면 `null`
 - visual summary는 optional이며, visual-only로는 record를 만들지 않는다
 - helper는 pure function 원칙을 따른다
+- retrieval helper는 owner 없는 호출을 허용하지 않는다
 
 ---
 

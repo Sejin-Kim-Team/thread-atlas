@@ -64,6 +64,45 @@ ThreadAtlas 해커톤 RAG의 canonical 저장 단위는 `summary-bearing semanti
 - cross-tab session graph 기반 retrieval은 제외
 - raw snapshot / raw screenshot은 장기 저장하지 않음
 
+### 3.1 `feature/be-rag-persistence` 브랜치 구현 고정 범위
+
+이번 브랜치에서 실제 구현으로 고정하는 최소 범위:
+
+- `memory_records` 테이블 + required index
+- `memory_record_embeddings` 테이블 + vector index
+- `analysis_runs` 테이블 + required index
+- `/api/ingest/memory`의 실제 DB write
+- owner-scoped retrieval service 초안
+
+이번 브랜치의 retrieval service는 `turn runtime 연결`이 아니라 `DB read 바닥`까지만 포함한다.
+
+### 3.2 `feature/be-rag-persistence` 브랜치 비범위
+
+이번 브랜치에서 구현하지 않는 항목:
+
+- `recall-card`를 turn runtime/projection에 연결하는 작업
+- real WebSocket transport 처리
+- enrich sub-loop (`context.enrich.request/result`) 처리
+- analyze의 real LLM generation 품질 완성
+
+### 3.3 Embedding Provider Rule
+
+해커톤 RAG의 canonical embedding provider는 `Vertex AI`다.
+
+고정 규칙:
+
+- canonical model: `gemini-embedding-001`
+- canonical output dimensionality: `768`
+- vector retrieval은 실제 provider가 만든 embedding을 사용해야 한다
+- required env: `GOOGLE_CLOUD_PROJECT`, `GOOGLE_CLOUD_LOCATION`
+- auth path: 로컬 `ADC`, 배포 `Cloud Run service account` 공통 adapter
+
+금지 규칙:
+
+- deterministic hash 기반 pseudo embedding을 최종 구현으로 사용하지 않는다
+- 테스트 통과만을 위한 상수/난수 vector를 사용하지 않는다
+- provider 오류 시 placeholder embedding으로 대체하지 않는다
+
 ---
 
 ## 4. Canonical Tables
@@ -180,6 +219,7 @@ create table if not exists memory_record_embeddings (
 - record당 embedding은 정확히 1개
 - 해커톤 canonical dimension은 `768`
 - 다른 차원을 쓰려면 migration이 필요
+- `embedding_model`에는 실제 호출한 Vertex model identifier를 기록한다
 
 ### 4.3 `analysis_runs`
 
@@ -276,6 +316,7 @@ create index if not exists idx_memory_record_embeddings_vector
 - `analysis_runs`에는 기록 가능
 - `memory_records`에는 직접 쓰지 않음
 - 실제 장기 저장은 `/api/ingest/memory`만 담당
+- 이번 브랜치에서 `/api/analyze`는 `analysis_runs` 최소 기록(호출자, mode, snapshot 식별자, 후보 json)만 보장하면 된다
 
 ### 6.2 Ingest Write Rule
 
@@ -286,6 +327,8 @@ create index if not exists idx_memory_record_embeddings_vector
 - 비어 있지 않은 `summary`
 - complete provenance
 - visual-only record 아님
+- `record.id`가 UUID 형식
+- `source`가 허용 enum (`analyze` | `turn-completion` | `batch-repair`) 중 하나
 
 추가 규칙:
 
@@ -321,16 +364,24 @@ ingest 시 embedding도 같이 생성한다.
 
 실패 규칙:
 
-- embedding 생성 실패 시 record write 전체를 실패로 돌릴지,
-- embedding 없는 record를 허용할지는 구현 정책으로 볼 수 있다
+- embedding 생성 실패 시 해당 record는 `reject`한다
+- embedding 없는 record는 저장하지 않는다
+- placeholder embedding으로 대체하지 않는다
 
-해커톤 canonical 권장은:
+구현 규칙:
 
-- **embedding 생성 실패 시 해당 record는 reject**
+- record 단위 트랜잭션으로 처리한다
+- `memory_records` insert 후 embedding 실패 시 해당 record insert를 rollback한다
 
-이유:
+### 6.4 Owner Isolation Hard Rule
 
-- RAG가 in-scope이므로 recall 가능한 record만 저장하는 편이 더 단순하다
+write/read 공통 강제 규칙:
+
+- principal은 항상 `auth_sessions -> users.id`로 해석한다
+- write 시 `record.ownerUserId !== principal`이면 해당 record는 reject한다
+- read(retrieval) 시 `where owner_user_id = :principal` 필터는 선택이 아니라 필수다
+- 서비스 레이어는 `ownerUserId` 없는 retrieval 호출을 허용하지 않는다
+- cross-user fallback query를 금지한다
 
 ---
 
@@ -375,6 +426,12 @@ recall query text는 아래를 합쳐 만든다.
 - `top_k = 8`
 - 최종 recall-card 노출 수 = 최대 2
 
+추가 규칙:
+
+- `queryText`는 실제 embedding 생성과 rerank 둘 다에 사용해야 한다
+- `pageKind`, `sourceDomain`은 metadata filter 또는 rerank 입력으로 사용해야 한다
+- vector similarity는 실제 provider embedding을 전제로 한다
+
 ### 7.5 Recall Output Rule
 
 recall hit는 current-page answer를 대체하지 않는다.
@@ -384,6 +441,40 @@ recall hit는 current-page answer를 대체하지 않는다.
 - primary answer는 항상 current-page 기반
 - recall은 `recall-card`로만 노출
 - `navigation` 메타를 그대로 FE에 전달
+
+### 7.6 Retrieval Service Draft Contract (이번 브랜치)
+
+이번 브랜치에서 구현할 retrieval은 아래 함수 계약까지를 완료 기준으로 둔다.
+
+```ts
+export interface RetrieveMemoryInput {
+  ownerUserId: string
+  queryText: string
+  limit?: number
+  pageKind?: "article" | "thread" | "post" | "generic"
+  sourceDomain?: string
+}
+
+export interface RetrievedMemoryCandidate {
+  recordId: string
+  ownerUserId: string
+  summary: string
+  kind: "branch-summary" | "section-summary" | "claim-evidence-summary"
+  canonicalUrl: string
+  pageTitle?: string
+  nodeAnchor?: Record<string, unknown>
+  similarityScore: number
+}
+
+export function retrieveMemoryCandidates(
+  input: RetrieveMemoryInput
+): Promise<RetrievedMemoryCandidate[]>
+```
+
+범위 제한:
+
+- 이 함수는 DB query + lightweight filter/rerank만 담당한다
+- `projection` 생성, `turn.done` 연결, WS event 발행은 이번 브랜치 범위가 아니다
 
 ---
 
@@ -433,8 +524,9 @@ recall hit는 current-page answer를 대체하지 않는다.
 
 - `memory_records`
 - `memory_record_embeddings`
-- owner-scoped vector recall
+- owner-scoped vector retrieval service 초안
 - `analysis_runs` 최소 기록
+- `/api/ingest/memory` 실제 DB write
 
 지금 필수가 아닌 것:
 
@@ -443,10 +535,24 @@ recall hit는 current-page answer를 대체하지 않는다.
 - cross-user retrieval
 - chunk-level storage
 - raw visual artifact storage
+- recall-card runtime 연결
+- WS transport 연계
+- enrich sub-loop
+- analyze real LLM generation
 
 ---
 
-## 10. Implementation Notes
+## 10. `feature/be-rag-persistence` 완료 조건
+
+다음 문장을 모두 만족하면 이번 브랜치의 RAG persistence 작업은 완료로 본다.
+
+- `memory_records`, `memory_record_embeddings`, `analysis_runs`가 migration으로 생성되고 인덱스까지 적용된다.
+- `/api/ingest/memory`가 storable 검증 + owner 검증 + embedding 생성 + 트랜잭션 write를 실제로 수행한다.
+- retrieval service가 owner-scoped top-k 조회를 실제 SQL로 수행하고 결과를 반환한다.
+- 어떤 read/write 경로에서도 cross-user 데이터 접근이 발생하지 않는다.
+- recall-card/WS/enrich/analyze-LLM은 구현되지 않아도 완료 판정을 유지한다.
+
+## 11. Implementation Notes
 
 해커톤 구현 우선순위는 다음이다.
 
@@ -454,8 +560,8 @@ recall hit는 current-page answer를 대체하지 않는다.
 2. `memory_record_embeddings` table
 3. `/api/ingest/memory` 실제 DB write
 4. embedding 생성 adapter
-5. current-page answer 이후 recall query
-6. `recall-card` projection 연결
+5. retrieval service 초안 (owner-scoped query)
+6. integration branch에서 recall-card/turn runtime 연결
 
 즉, WS transport보다 먼저 이 스키마를 닫는 이유는
 recall과 ingest의 실제 동작 기준이 이 테이블 정의에 달려 있기 때문이다.

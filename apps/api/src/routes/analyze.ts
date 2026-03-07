@@ -1,5 +1,6 @@
 import { Router, type RequestHandler } from "express"
 import { resolvePrincipalFromAuthorizationHeader } from "../auth/principal"
+import { insertAnalysisRun } from "../rag/analysis-runs-repository"
 import { buildCanonicalContextPack } from "../session/context-pack/build"
 import { normalizeForAnalyze } from "../session/context-pack/normalize"
 import type {
@@ -17,10 +18,6 @@ function normalizeMode(mode: AnalyzeRequestBody["mode"]): AnalyzeMode {
     return mode
   }
   return "seed"
-}
-
-function createAnalysisId(): string {
-  return `analysis_${Date.now().toString(36)}`
 }
 
 function isValidTabId(tabId: unknown): tabId is number {
@@ -62,9 +59,21 @@ const handleAnalyze: RequestHandler = async (req, res) => {
     const snapshot = body.snapshot as SemanticSnapshot
     const canonicalPack = buildCanonicalContextPack(snapshot)
     const normalized = normalizeForAnalyze(snapshot, canonicalPack, mode)
+    // analyze 결과는 해커톤 규약에 따라 analysis_runs에 최소 감사 로그를 남긴다.
+    const analysisRun = await insertAnalysisRun({
+      ownerUserId: principal.userId,
+      tabId: body.tabId,
+      mode,
+      snapshotPageId: snapshot.page.id,
+      snapshotUrl: snapshot.page.url,
+      normalizedMode: normalized.normalizedMode,
+      summaryCandidates: normalized.summaryCandidates,
+      visualSummaries: normalized.visualSummaries
+    })
+
     const base = {
       mode,
-      analysisId: createAnalysisId(),
+      analysisId: analysisRun.id,
       normalizedMode: normalized.normalizedMode
     }
 
