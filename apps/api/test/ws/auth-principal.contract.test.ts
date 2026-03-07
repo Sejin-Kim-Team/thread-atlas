@@ -14,7 +14,7 @@ const UUID_V4_REGEX =
   /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 
 async function issueTransitionToken(
-  client: request.SuperTest<request.Test>,
+  client: request.Agent,
   bootstrapSubject: string
 ): Promise<{ token: string; userId: string }> {
   const response = await client

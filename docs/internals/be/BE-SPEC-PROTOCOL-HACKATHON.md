@@ -33,6 +33,7 @@ Companion:
 - active turn 1개만 허용
 - enrich는 current primary tab / current turn 안에서만 허용
 - recall은 output metadata 수준으로만 노출
+- `/api/evaluate` legacy compatibility route는 FE migration 완료 전까지 별도로 유지
 
 해커톤에서 비적용:
 
@@ -40,6 +41,12 @@ Companion:
 - shared working set 외부 노출
 - multi-tab state patch
 - memory patch streaming
+
+호환성 규칙:
+
+- canonical transport는 WebSocket session이다.
+- 단, 기존 extension 호환을 위해 `/api/evaluate`는 별도 legacy compatibility route로 유지한다.
+- `/api/evaluate`는 본 문서의 protocol subset 확장 경로가 아니다.
 
 ---
 
@@ -103,7 +110,8 @@ export interface WsEnvelope<TType extends string, TPayload> {
 - canonical identity chain은 `dev-bootstrap subject 또는 google identity -> /api/token -> opaque app session token -> auth_sessions 조회 -> local users.id principal`이다
 - 해커톤 구현의 canonical user identity는 token claim이 아니라 local `users.id` principal이다
 - 같은 principal만 자신의 long-term memory record를 조회하고 저장할 수 있다
-- `/api/token` 응답은 `token`, `expiresAt`, `user`를 반환한다
+- `/api/token` 응답은 `token`, `expiresAt(epoch seconds number)`, `user`를 반환한다
+- FE legacy 호출 호환을 위해 해커톤 기간에는 `{ userId }` 입력을 임시 허용한다
 - HTTP/WS principal 해석은 `Authorization: Bearer <opaque-app-token>`를 `auth_sessions.session_token_hash`로 조회하는 방식으로 동작해야 한다
 - token 검증 실패, revoked/expired session, 또는 principal 불일치 시 WS 연결과 HTTP companion 요청은 `UNAUTHORIZED`로 거부한다
 

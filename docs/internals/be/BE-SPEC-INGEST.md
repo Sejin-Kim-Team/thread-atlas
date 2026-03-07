@@ -34,9 +34,9 @@ v0.1에서 고정하는 HTTP endpoint:
 
 공통 인증 모델:
 
-- canonical identity chain은 `extension-provided stable user id -> /api/token -> token claim.userId`다
-- `/api/analyze`, `/api/ingest/memory`는 검증된 bearer token의 `claim.userId`를 principal로 사용한다
-- token 검증 실패 또는 `claim.userId` 누락 시 `401 UNAUTHORIZED`로 거부한다
+- canonical identity chain은 `dev-bootstrap subject 또는 google identity -> /api/token -> opaque app session token -> auth_sessions 조회 -> local users.id principal`이다
+- `/api/analyze`, `/api/ingest/memory`는 검증된 bearer token을 `auth_sessions.session_token_hash`로 조회해 principal을 해석한다
+- token 검증 실패, revoked/expired session, 또는 principal 해석 실패 시 `401 UNAUTHORIZED`로 거부한다
 
 ## 2.1 `/api/analyze`
 
@@ -101,7 +101,7 @@ export interface AnalyzeRequest {
 - `providedPack`은 optional hint다
 - canonical truth는 항상 `snapshot`
 - `mode`가 없으면 기본값은 `seed`
-- 요청 principal은 bearer token의 `claim.userId`로 고정한다
+- 요청 principal은 bearer token을 `auth_sessions`로 조회해 해석한 local `users.id`로 고정한다
 
 ## 3.2 Response
 
@@ -188,7 +188,7 @@ export interface IngestMemoryRequest {
 - candidate 상태 relation이나 raw snapshot-derived payload는 허용하지 않는다
 - empty `records`는 허용 가능하나 no-op 처리한다
 - 각 record의 `ownerUserId`는 현재 authenticated principal과 일치해야 한다
-- 현재 authenticated principal은 검증된 bearer token의 `claim.userId`다
+- 현재 authenticated principal은 검증된 bearer token을 `auth_sessions`에서 조회해 해석한 local `users.id`다
 
 ## 4.2 Response
 

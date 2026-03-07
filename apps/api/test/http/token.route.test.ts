@@ -24,7 +24,8 @@ describe("POST /api/token", () => {
 
     expect(response.status).toBe(200)
     expect(typeof response.body.token).toBe("string")
-    expect(typeof response.body.expiresAt).toBe("string")
+    expect(typeof response.body.expiresAt).toBe("number")
+    expect(response.body.expiresAt).toBeGreaterThan(Math.floor(Date.now() / 1000))
     expect(typeof response.body.user?.id).toBe("string")
     expect(response.body.user.id).toMatch(UUID_V4_REGEX)
     expect(response.body.userId).toBeUndefined()
@@ -106,7 +107,8 @@ describe("POST /api/token", () => {
     expect(second.body.user.id).toMatch(UUID_V4_REGEX)
     expect(first.body.user.id).toBe(second.body.user.id)
     expect(first.body.token).not.toBe(second.body.token)
-    expect(first.body.expiresAt).not.toBe(second.body.expiresAt)
+    expect(typeof first.body.expiresAt).toBe("number")
+    expect(typeof second.body.expiresAt).toBe("number")
     expect(first.body.userId).toBeUndefined()
     expect(second.body.userId).toBeUndefined()
   })
@@ -125,5 +127,18 @@ describe("POST /api/token", () => {
     expect(response.body).toMatchObject({
       code: "INVALID_EVENT"
     })
+  })
+
+  it("accepts legacy compatibility payload with userId only", async () => {
+    const app = createServer()
+    const response = await request(app).post("/api/token").send({
+      userId: "user_sungwoo"
+    })
+
+    expect(response.status).toBe(200)
+    expect(typeof response.body.token).toBe("string")
+    expect(typeof response.body.expiresAt).toBe("number")
+    expect(typeof response.body.user?.id).toBe("string")
+    expect(response.body.user.id).toMatch(UUID_V4_REGEX)
   })
 })

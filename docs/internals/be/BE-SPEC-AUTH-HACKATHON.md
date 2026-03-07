@@ -209,7 +209,7 @@ export interface GoogleAuthExchangeRequest {
 ```ts
 export interface GoogleAuthExchangeResponse {
   token: string
-  expiresAt: string
+  expiresAt: number
   user: {
     id: string
     displayName?: string
@@ -228,6 +228,16 @@ export interface GoogleAuthExchangeResponse {
 
 해커톤 구현에서는 Google 검증 연결 전 단계로 `dev-bootstrap` grant를 허용한다.
 
+요청 호환 규칙:
+
+- 신규 입력:
+  - `grantType: "dev-bootstrap"`
+  - `bootstrapSubject: string`
+- legacy compatibility 입력:
+  - `{ userId: string }`
+- 해커톤 기간에는 위 2가지 입력을 모두 허용한다.
+- FE migration 완료 후 legacy compatibility 입력은 제거 대상으로 본다.
+
 요구사항:
 
 - `DATABASE_URL` 환경변수는 필수다. (auth session store가 PostgreSQL 기반)
@@ -236,6 +246,11 @@ export interface GoogleAuthExchangeResponse {
 - fallback key 또는 hardcoded dev key는 허용하지 않는다.
 - bootstrap key mismatch는 `403 FORBIDDEN`를 반환한다.
 - `google-id-token` grant는 verifier 연동 전까지 `501 NOT_IMPLEMENTED`를 반환한다.
+
+응답 규칙:
+
+- `/api/token`의 `expiresAt`는 epoch seconds(number)로 반환한다.
+- 문자열 timestamp 형식은 허용하지 않는다.
 
 ---
 

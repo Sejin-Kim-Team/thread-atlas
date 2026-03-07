@@ -87,7 +87,7 @@ create extension if not exists vector;
 
 create table if not exists memory_records (
   id uuid primary key,
-  owner_user_id text not null,
+  owner_user_id uuid not null references users(id) on delete cascade,
   kind text not null check (kind in (
     'branch-summary',
     'section-summary',
@@ -166,7 +166,7 @@ create table if not exists memory_records (
 ```sql
 create table if not exists memory_record_embeddings (
   record_id uuid primary key references memory_records(id) on delete cascade,
-  owner_user_id text not null,
+  owner_user_id uuid not null references users(id) on delete cascade,
   embedding_model text not null,
   embedding_dims integer not null default 768 check (embedding_dims = 768),
   embedding vector(768) not null,
@@ -191,7 +191,7 @@ create table if not exists memory_record_embeddings (
 ```sql
 create table if not exists analysis_runs (
   id uuid primary key,
-  owner_user_id text not null,
+  owner_user_id uuid not null references users(id) on delete cascade,
   tab_id integer not null,
   mode text not null check (mode in (
     'seed',
@@ -217,6 +217,17 @@ create table if not exists analysis_runs (
 - `analysis_runs`는 canonical truth가 아니다
 - debug / replay / candidate provenance 용도다
 - memory recall은 `analysis_runs`가 아니라 `memory_records`에서 수행한다
+
+### 4.4 Legacy Owner ID Migration Rule
+
+`002_memory_owner_fk.sql` 적용 시 `owner_user_id`에 legacy non-UUID 값이 남아있으면 다음을 강제한다.
+
+- `owner_user_id::uuid` 변환 실패를 조용히 무시하지 않는다.
+- 변환 불가능한 row는 명시적으로 처리한다.
+  - 정책 A: 해당 row 삭제 후 변환
+  - 정책 B: 별도 quarantine 테이블로 이동 후 변환
+- 변환 결과에 대한 집계(대상/성공/실패)를 로그 또는 migration 결과로 남긴다.
+- 위 정리 없이 FK 추가를 진행하지 않는다.
 
 ---
 

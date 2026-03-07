@@ -45,7 +45,7 @@ export interface IssueAuthSessionInput {
 
 export interface IssueAuthSessionResult {
   token: string
-  expiresAt: string
+  expiresAt: number
   sessionId: string
 }
 
@@ -101,7 +101,8 @@ export async function issueAuthSession(
 
   return {
     token,
-    expiresAt: expiresAt.toISOString(),
+    // shared 계약과 extension 스케줄링 호환을 위해 epoch seconds로 반환한다.
+    expiresAt: Math.floor(expiresAt.getTime() / 1000),
     sessionId
   }
 }

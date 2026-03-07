@@ -43,12 +43,19 @@ Companion:
 - current-page scoped enrich request 지원
 - selected-scenario visual explanation 지원
 - 제한적 long-term memory recall
+- `/api/evaluate` legacy compatibility route 유지 (FE migration 완료 전까지)
 
 제외:
 
 - cross-tab retrieval orchestration
 - multi-tab workspace state
 - complex memory-link acceptance flow
+
+주의:
+
+- canonical path는 WebSocket session이다.
+- 다만 FE migration이 완료되기 전까지 `/api/evaluate`는 legacy compatibility route로 유지한다.
+- `/api/evaluate`는 신규 기능 추가 대상이 아니라, 기존 extension 호출 호환 목적의 유지 경로다.
 
 해커톤 구현 중 코드 구조와 주석 작성은
 [BE-SPEC-IMPLEMENTATION-RULES.md](./BE-SPEC-IMPLEMENTATION-RULES.md)를 필수 계약으로 따른다.
@@ -127,7 +134,8 @@ Companion:
 - 해커톤 canonical identity chain은 `dev-bootstrap subject 또는 google identity -> /api/token -> opaque app session token -> auth_sessions 조회 -> local users.id principal`이다
 - 해커톤 구현의 canonical user identity는 token claim이 아니라 local `users.id` principal이다
 - long-term memory record는 모두 해당 principal에 귀속된다
-- `/api/token` 응답은 최소 `token`, `expiresAt`, `user.id`를 반환한다
+- `/api/token` 응답은 최소 `token`, `expiresAt(epoch seconds number)`, `user.id`를 반환한다
+- FE legacy 호출 호환을 위해 해커톤 기간에는 `{ userId }` 입력을 임시 허용한다
 - HTTP/WS principal 해석은 `Authorization: Bearer <opaque-app-token>`를 `auth_sessions.session_token_hash`로 조회하는 방식으로 동작해야 한다
 - token 검증 실패, revoked/expired session, 또는 session owner principal 불일치 시 `401 UNAUTHORIZED`를 반환한다
 

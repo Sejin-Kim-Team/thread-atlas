@@ -33,13 +33,15 @@ describe("POST /api/ingest/memory (hackathon contract)", () => {
     const app = createServer()
     const issued = await issueToken(app, "google-sub-ingest-alpha")
     const payload = buildIngestMemoryRequest(issued.userId)
+    const firstRecord = payload.records[0]
     const response = await request(app)
       .post("/api/ingest/memory")
       .set("Authorization", `Bearer ${issued.token}`)
       .send(payload)
 
     expect(response.status).toBe(200)
-    expect(response.body.acceptedIds).toContain(payload.records[0].id)
+    expect(firstRecord).toBeDefined()
+    expect(response.body.acceptedIds).toContain(firstRecord!.id)
     expect(Array.isArray(response.body.rejected)).toBe(true)
   })
 

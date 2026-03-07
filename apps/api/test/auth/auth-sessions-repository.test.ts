@@ -20,7 +20,7 @@ describe("auth sessions repository contract (red)", () => {
 
     expect(issued).toMatchObject({
       token: expect.any(String),
-      expiresAt: expect.any(String),
+      expiresAt: expect.any(Number),
       sessionId: expect.stringMatching(
         /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
       )
