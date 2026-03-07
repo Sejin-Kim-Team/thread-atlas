@@ -10,6 +10,7 @@ Status: Draft
 > `feature/be-rag-persistence` 브랜치 구현 범위는 [BE-SPEC-RAG-HACKATHON.md](./BE-SPEC-RAG-HACKATHON.md)의 브랜치 범위/완료 조건을 우선 적용한다.
 > `feature/be-recall-runtime` 브랜치에서는 recall-card projection runtime 연결 규칙을 우선 적용하며, FE 렌더링 합의는 비범위다.
 > 해커톤 RAG embedding canonical path는 `Vertex AI(gemini-embedding-001, output_dimensionality=768)`이며, pseudo embedding 대체는 허용하지 않는다.
+> 해커톤 current-page answer canonical path는 `@google/genai` + Vertex `models.generateContent`이며, stub/placeholder answer 대체는 허용하지 않는다.
 
 Companion:
 - [BE-SPEC-HACKATHON.md](./BE-SPEC-HACKATHON.md)
@@ -238,6 +239,17 @@ primary tab, referenced tabs, shared working set, long-term memory에서 semanti
 
 answer, suggest, clarify와 focus, navigate, present, notify 조합을 결정한다.
 
+### 6.8 Current-Page Answer Generation
+
+current-page answer generation canonical 규칙:
+
+- SDK: `@google/genai`
+- API: `models.generateContent`
+- Vertex 초기화: `GOOGLE_CLOUD_PROJECT` + `GOOGLE_CLOUD_LOCATION`
+- grounding input 최소 구성: `snapshot focus text + user intent text`
+- config 누락 시: 명시적 오류(`MODEL_CONFIG_MISSING`) 또는 conservative fallback
+- 금지: stub/placeholder answer output
+
 ---
 
 ## 7. Module Responsibilities
@@ -274,6 +286,7 @@ answer, suggest, clarify와 focus, navigate, present, notify 조합을 결정한
 
 - supports / contradicts / elaborates / references / similar 판별
 - LLM reasoner 호출
+- current-page answer generation은 `@google/genai` `models.generateContent` 경로를 사용
 
 ### 7.7 Response / Projection Planner
 
@@ -294,6 +307,7 @@ v0.1의 canonical flow는 `text-first semantic navigation`이다.
 - 최소 long-term memory retrieval
 - relation analysis
 - answer / suggest / clarify + navigation planning
+- current-page answer의 Google GenAI SDK canonical 호출 경로
 
 제외:
 - 완전한 visual retrieval pipeline

@@ -79,6 +79,19 @@ function unauthorized(message: string): RuntimeResult {
   }
 }
 
+function modelConfigMissing(message: string): RuntimeResult {
+  return {
+    status: 400,
+    body: {
+      type: "error",
+      payload: {
+        code: "MODEL_CONFIG_MISSING",
+        message
+      }
+    }
+  }
+}
+
 function validateEnvelope(input: unknown): RuntimeEnvelope | null {
   if (!isObject(input)) {
     return null
@@ -218,6 +231,17 @@ function resolveFocusText(snapshot: SnapshotLike): string {
 function buildRecallQueryText(intentText: string, snapshot: SnapshotLike, answerText: string): string {
   // recall 질의는 intent + focus text + answer 요약을 합쳐 현재 맥락을 최대한 보존한다.
   return [intentText, resolveFocusText(snapshot), answerText].filter(Boolean).join(" ")
+}
+
+function buildGenerationPrompt(intentText: string, snapshot: SnapshotLike): string {
+  const focusText = resolveFocusText(snapshot)
+  // 현재 페이지 근거를 유지하기 위해 intent와 focus 텍스트를 함께 프롬프트에 포함한다.
+  return [
+    "You are a current-page semantic assistant.",
+    `User intent: ${intentText}`,
+    `Focus text: ${focusText}`,
+    "Return a concise answer grounded in the current page context."
+  ].join("\n")
 }
 
 function selectRecallCandidate(
@@ -437,7 +461,22 @@ export class RuntimeManager {
 
     const turnId = this.newTurnId()
     session.activeTurnId = turnId
-    const answerText = "current-page answer placeholder"
+    if (!process.env.GOOGLE_CLOUD_PROJECT || !process.env.GOOGLE_CLOUD_LOCATION) {
+      return modelConfigMissing("GOOGLE_CLOUD_PROJECT and GOOGLE_CLOUD_LOCATION are required")
+    }
+    const geminiModule = await import("../../services/gemini")
+    let answerText: string
+    try {
+      const geminiClient = geminiModule.createGeminiClient()
+      answerText = await geminiClient.generateText(buildGenerationPrompt(parsed.text, latest))
+    } catch (error) {
+      if (geminiModule.isModelConfigError(error)) {
+        const message =
+          error instanceof Error ? error.message : "model configuration is missing"
+        return modelConfigMissing(message)
+      }
+      return invalidEvent("generation failed")
+    }
 
     const events: Array<Record<string, unknown>> = [
       {

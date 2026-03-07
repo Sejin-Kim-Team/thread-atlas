@@ -1,5 +1,5 @@
 import request from "supertest"
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import { createServer } from "../../src/server"
 import {
   assertOrderedEventTypes,
@@ -11,6 +11,14 @@ import {
   createValidSnapshot,
   postWsEventWithAuth
 } from "./helpers/ws-contract"
+
+vi.mock("../../src/services/gemini", () => ({
+  createGeminiClient: () => ({
+    // generation 품질 검증은 별도 테스트에서 다루고, 본 흐름 테스트는 이벤트 계약만 고정한다.
+    generateText: vi.fn(async () => "GENAI_FLOW_TEST_ANSWER")
+  }),
+  isModelConfigError: () => false
+}))
 
 const app = createServer()
 

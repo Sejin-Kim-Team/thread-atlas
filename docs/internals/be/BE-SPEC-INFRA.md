@@ -186,6 +186,16 @@ v0.1 운영 원칙:
 - 제출 기준으로는 Gemini 모델 연동 계층을 `Google GenAI SDK` 또는 `ADK` 기반으로 정렬한다
 - embedding 연동 필수 env는 `GOOGLE_CLOUD_PROJECT`, `GOOGLE_CLOUD_LOCATION`으로 고정한다
 
+해커톤 current-page answer generation canonical 규칙:
+
+- 런타임 SDK는 `@google/genai`를 사용한다
+- 모델 호출은 `models.generateContent`로 고정한다
+- Vertex 초기화는 `project + location` 기반으로만 수행한다
+- current-page grounding input은 최소 `snapshot focus text + intent text`를 포함해야 한다
+- `GOOGLE_CLOUD_PROJECT` 또는 `GOOGLE_CLOUD_LOCATION` 누락 시 명시적 오류(`MODEL_CONFIG_MISSING`)를 반환한다
+- optional conservative fallback 모드가 아니면 모델 비정상 상태에서 답변 생성을 시도하지 않는다
+- placeholder/stub answer output은 금지한다
+
 해커톤 canonical embedding 설정:
 
 - model: `gemini-embedding-001`
@@ -298,6 +308,7 @@ v0.1 배포 원칙:
 - backend runtime은 Cloud Run 하나를 중심으로 시작한다
 - DB는 Cloud SQL 단일 primary로 시작한다
 - 모델 호출은 Vertex AI에 위임한다
+- current-page answer path는 `@google/genai` + `models.generateContent`를 사용한다
 - secret은 Secret Manager에서 주입한다
 
 즉, 초기 배포는 다음처럼 이해하면 된다.

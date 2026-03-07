@@ -33,7 +33,7 @@ Companion:
 추가 제출 조건:
 
 - Gemini 계열 모델 연동은 최종적으로 `Google GenAI SDK` 또는 `ADK`를 사용해야 한다.
-- 현재 브랜치 작업은 recall runtime 연결을 우선 진행하되, SDK 전환은 제출 전 필수 후속 범위로 관리한다.
+- current-page answer generation canonical path는 `@google/genai` 기반 `models.generateContent`로 고정한다.
 
 ---
 
@@ -48,6 +48,7 @@ Companion:
 - current-page scoped enrich request 지원
 - selected-scenario visual explanation 지원
 - 제한적 long-term memory recall
+- `@google/genai` + Vertex 기반 current-page answer generation
 - `/api/evaluate` legacy compatibility route 유지 (FE migration 완료 전까지)
 
 제외:
@@ -65,20 +66,19 @@ Companion:
 해커톤 구현 중 코드 구조와 주석 작성은
 [BE-SPEC-IMPLEMENTATION-RULES.md](./BE-SPEC-IMPLEMENTATION-RULES.md)를 필수 계약으로 따른다.
 
-### 2.1 현재 구현 브랜치(`feature/be-rag-persistence`) 범위 고정
+### 2.1 현재 구현 브랜치(`feature/be-recall-runtime`) 범위 고정
 
 본 문서의 해커톤 전체 목표와 별개로, 현재 구현 브랜치의 고정 범위는 아래로 제한한다.
 
-- `memory_records`, `memory_record_embeddings`, `analysis_runs` 스키마 및 인덱스
-- `/api/ingest/memory` 실제 DB write
-- owner-scoped retrieval service 초안
+- `recall-card` runtime/projection 연결 규칙
+- owner-scoped memory retrieval + recall runtime bridge
+- current-page answer generation SDK/Vertex canonical 계약 정렬
 
 현재 브랜치 비범위:
 
-- `recall-card`의 turn runtime/projection 연결
-- real WebSocket transport
-- enrich sub-loop
-- analyze real LLM generation
+- enrich sub-loop 완성
+- multi-tab retrieval orchestration
+- full production prompt tuning
 
 따라서 4장 이후의 WS/event/turn 내용은 `해커톤 최종 목표 계약`이며, 본 브랜치의 완료 판정 기준은 [BE-SPEC-RAG-HACKATHON.md](./BE-SPEC-RAG-HACKATHON.md)의 브랜치 완료 조건을 따른다.
 
@@ -101,6 +101,37 @@ ingest/retrieval 공통 규칙:
 
 - ingest는 실제 provider embedding을 저장해야 한다
 - retrieval은 실제 provider query embedding을 사용해야 한다
+
+### 2.3 Current-Page Answer Generation Canonical Path
+
+해커톤 current-page answer generation path는 아래로 고정한다.
+
+- SDK: `@google/genai`
+- 호출 API: `models.generateContent`
+- 실행 백엔드: `Vertex AI`
+- 필수 env: `GOOGLE_CLOUD_PROJECT`, `GOOGLE_CLOUD_LOCATION`
+
+초기화 규칙:
+
+- Vertex 초기화는 `project + location` 기반으로만 수행한다
+- 로컬은 ADC, 배포는 Cloud Run service account를 사용한다
+
+grounding input 최소 규칙:
+
+- `SemanticSnapshot`의 `focus text`
+- 현재 turn의 `user intent text`
+- optional: current-page retrieval evidence summary
+
+오류/폴백 규칙:
+
+- `GOOGLE_CLOUD_PROJECT` 또는 `GOOGLE_CLOUD_LOCATION` 누락 시 `MODEL_CONFIG_MISSING` 오류를 명시적으로 반환해야 한다
+- optional fallback 모드에서는 `clarify` 또는 근거 제한 `answer`를 반환할 수 있다
+- fallback 응답은 retrieval evidence에만 기반해야 하며, 모델 생성 문장처럼 가장하면 안 된다
+
+금지 규칙:
+
+- placeholder/stub answer text를 사용자 응답으로 반환하지 않는다
+- 모델 호출 실패 시 fabricated answer를 반환하지 않는다
 
 ---
 
@@ -248,7 +279,7 @@ session.open
 -> current-page retrieval
 -> initial reasoning
 -> optional enrich request / result
--> final reasoning
+-> current-page answer generation (`@google/genai` `models.generateContent`)
 -> optional recall metadata attach
 -> turn.done
 ```
@@ -355,6 +386,8 @@ export type HackathonProjectionBody =
 - `recall-card`는 current-page answer 이후에만 붙을 수 있는 제한적 과거 회상 카드 전달용이다
 - `status-note`는 FE가 보조 상태/메시지를 렌더링할 수 있게 하는 최소 payload다
 - 해커톤 current-page 구현에서는 이 union 외 body type을 사용하지 않는다
+- `answer.text`는 `models.generateContent` 결과 또는 conservative fallback 규칙 결과여야 한다
+- placeholder/stub 문자열은 유효한 `answer.text`로 간주하지 않는다
 
 ### 6.6 Turn State Machine
 
@@ -499,7 +532,7 @@ memory는 해커톤에서 보조 기능이지만, 데모 가능한 범위로 포
 - `enriched-context-merger`
   - enrich result 병합
 - `reasoner`
-  - explanation / summary / visual interpretation
+  - `@google/genai` `models.generateContent` 기반 explanation / summary / visual interpretation
 - `memory-recall`
   - optional past similar case 조회
 - `response-planner`

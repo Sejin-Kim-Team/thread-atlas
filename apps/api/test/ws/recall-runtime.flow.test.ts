@@ -17,6 +17,14 @@ vi.mock("../../src/rag/retrieval-service", () => ({
   retrieveMemoryCandidates: retrieveMemoryCandidatesMock
 }))
 
+vi.mock("../../src/services/gemini", () => ({
+  createGeminiClient: () => ({
+    // recall-runtime 테스트는 answer/recall 순서와 카드 조건이 목적이라 generation 호출은 고정 응답으로 격리한다.
+    generateText: vi.fn(async () => "GENAI_RECALL_TEST_ANSWER")
+  }),
+  isModelConfigError: () => false
+}))
+
 const app = createServer()
 let requestSeq = 0
 let sharedToken = ""
