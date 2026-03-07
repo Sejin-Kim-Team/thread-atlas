@@ -96,7 +96,9 @@ export async function retrieveMemoryCandidates(
   const vectorHits = await searchByVector({
     ownerUserId,
     queryEmbedding: queryEmbeddingResult.embedding,
-    topK: vectorTopK
+    topK: vectorTopK,
+    pageKind: pageKind ?? undefined,
+    sourceDomain: sourceDomain ?? undefined
   })
   if (vectorHits.length === 0) {
     return []

@@ -1,8 +1,6 @@
 import type { PoolClient } from "pg"
 import { getPool } from "../../db/pool"
-import {
-  buildEmbeddingHash,
-} from "../../rag/embedding"
+import { buildEmbeddingHash } from "../../rag/embedding"
 import { upsertMemoryRecordEmbedding } from "../../rag/memory-record-embeddings-repository"
 import {
   insertMemoryRecord,
@@ -10,8 +8,7 @@ import {
   type MemoryRecordKind as RagMemoryRecordKind
 } from "../../rag/memory-records-repository"
 import {
-  embedTextWithVertex,
-  isEmbeddingProviderError
+  embedTextWithVertex
 } from "../../rag/vertex-embedding-adapter"
 import type {
   IngestMemoryRequestBody,
@@ -267,10 +264,7 @@ export async function ingestMemoryRecords(
         source: body.source
       })
       acceptedIds.push(record.id)
-    } catch (error) {
-      if (isEmbeddingProviderError(error)) {
-        throw error
-      }
+    } catch {
       // embedding 실패 등 저장 실패는 해당 레코드만 reject한다.
       rejected.push({
         id: record.id || "unknown",

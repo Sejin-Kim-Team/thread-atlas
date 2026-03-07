@@ -27,7 +27,7 @@ vi.mock("../../src/rag/vertex-embedding-adapter", () => ({
 type MemoryKind = "branch-summary" | "section-summary" | "claim-evidence-summary"
 
 function buildEmbeddingVector(dimensions = 768, value = 0.01): number[] {
-  return Array.from({ length: dimensions }, () => value)
+  return Array.from({ length: dimensions }, (_, index) => (index === 0 ? value : 0.01))
 }
 
 function toVectorLiteral(values: number[]): string {
@@ -51,6 +51,8 @@ async function insertMemoryRecordFixture(input: {
   kind: MemoryKind
   summary: string
   createdAt: string
+  pageKind?: "article" | "thread" | "post" | "generic"
+  sourceDomain?: string
 }): Promise<void> {
   await ensureUserRow(input.ownerUserId)
   await queryDb(
@@ -74,8 +76,8 @@ async function insertMemoryRecordFixture(input: {
       input.summary,
       input.summary,
       "https://news.ycombinator.com/item?id=43199999",
-      "news.ycombinator.com",
-      "thread",
+      input.sourceDomain ?? "news.ycombinator.com",
+      input.pageKind ?? "thread",
       "2026-03-05T09:10:00.000Z",
       "generic+hacker-news-enhancer",
       8,
@@ -267,6 +269,55 @@ describe("retrieval service contract (red)", () => {
     })
     expect(embedTextWithVertexMock).toHaveBeenCalledWith("ownerC branch", "RETRIEVAL_QUERY")
     expect(result.length).toBeLessThanOrEqual(8)
+  })
+
+  it("does not lose filtered matches to unfiltered vector top-k truncation", async () => {
+    const retrieval = await loadRetrievalServiceModule()
+    const ownerId = randomUUID()
+    const matchingRecord = randomUUID()
+
+    for (let index = 0; index < 16; index += 1) {
+      const distractorId = randomUUID()
+      await insertMemoryRecordFixture({
+        id: distractorId,
+        ownerUserId: ownerId,
+        kind: "branch-summary",
+        summary: `filtered distractor ${index}`,
+        createdAt: `2026-03-${String(index + 1).padStart(2, "0")}T00:00:00.000Z`,
+        pageKind: "article"
+      })
+      await insertEmbeddingFixture({
+        recordId: distractorId,
+        ownerUserId: ownerId,
+        value: 0.24
+      })
+    }
+
+    await insertMemoryRecordFixture({
+      id: matchingRecord,
+      ownerUserId: ownerId,
+      kind: "branch-summary",
+      summary: "thread only matching candidate",
+      createdAt: "2026-03-20T00:00:00.000Z",
+      pageKind: "thread",
+      sourceDomain: "news.ycombinator.com"
+    })
+    await insertEmbeddingFixture({
+      recordId: matchingRecord,
+      ownerUserId: ownerId,
+      value: 0.2
+    })
+
+    const result = await retrieval.retrieveMemoryCandidates({
+      ownerUserId: ownerId,
+      queryText: "12345678901234567890",
+      limit: 1,
+      pageKind: "thread",
+      sourceDomain: "news.ycombinator.com"
+    })
+
+    expect(result).toHaveLength(1)
+    expect(result[0]?.recordId).toBe(matchingRecord)
   })
 
   it("requires provider config because query embedding must come from Vertex", async () => {

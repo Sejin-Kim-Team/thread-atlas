@@ -3,9 +3,12 @@ import request from "supertest"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { createServer } from "../../src/server"
 import { queryDb } from "../../src/db/pool"
+import { embedTextWithVertex } from "../../src/rag/vertex-embedding-adapter"
 import { requireEnv } from "../helpers/env"
 
 const BOOTSTRAP_KEY = requireEnv("AUTH_BOOTSTRAP_KEY")
+
+const embedTextWithVertexMock = vi.hoisted(() => vi.fn())
 
 vi.mock("../../src/rag/vertex-embedding-adapter", () => {
   const dims = 768
@@ -21,18 +24,7 @@ vi.mock("../../src/rag/vertex-embedding-adapter", () => {
           "code" in error &&
           (error as { code?: string }).code?.startsWith("EMBEDDING_PROVIDER_")
       ),
-    embedTextWithVertex: vi.fn(async () => {
-      if (!process.env.GOOGLE_CLOUD_PROJECT || !process.env.GOOGLE_CLOUD_LOCATION) {
-        const error = new Error("GOOGLE_CLOUD_PROJECT and GOOGLE_CLOUD_LOCATION are required")
-        ;(error as Error & { code: string }).code = "EMBEDDING_PROVIDER_CONFIG_MISSING"
-        throw error
-      }
-      return {
-        embeddingModel: model,
-        embeddingDims: dims,
-        embedding: Array.from({ length: dims }, () => 0.01)
-      }
-    })
+    embedTextWithVertex: embedTextWithVertexMock
   }
 })
 
@@ -104,10 +96,28 @@ describe("POST /api/ingest/memory (persistence red)", () => {
   beforeEach(() => {
     vi.stubEnv("GOOGLE_CLOUD_PROJECT", "thread-atlas")
     vi.stubEnv("GOOGLE_CLOUD_LOCATION", "us-central1")
+    vi.mocked(embedTextWithVertex).mockImplementation(async (text: string) => {
+      if (!process.env.GOOGLE_CLOUD_PROJECT || !process.env.GOOGLE_CLOUD_LOCATION) {
+        const error = new Error("GOOGLE_CLOUD_PROJECT and GOOGLE_CLOUD_LOCATION are required")
+        ;(error as Error & { code: string }).code = "EMBEDDING_PROVIDER_CONFIG_MISSING"
+        throw error
+      }
+      if (text.includes("force-provider-failure")) {
+        const error = new Error("provider request failed")
+        ;(error as Error & { code: string }).code = "EMBEDDING_PROVIDER_REQUEST_FAILED"
+        throw error
+      }
+      return {
+        embeddingModel: "gemini-embedding-001",
+        embeddingDims: 768,
+        embedding: Array.from({ length: 768 }, () => 0.01)
+      }
+    })
   })
 
   afterEach(() => {
     vi.unstubAllEnvs()
+    vi.mocked(embedTextWithVertex).mockReset()
   })
 
   it("writes accepted record to DB memory tables", async () => {
@@ -239,7 +249,7 @@ describe("POST /api/ingest/memory (persistence red)", () => {
     )
   })
 
-  it("returns explicit provider config error when GOOGLE_CLOUD_PROJECT/LOCATION is missing", async () => {
+  it("rejects provider config failure per record instead of failing the full batch", async () => {
     const app = createServer()
     const issued = await issueToken(app, "google-sub-ingest-persistence-epsilon")
     const record = buildStorableRecord(issued.userId)
@@ -254,10 +264,14 @@ describe("POST /api/ingest/memory (persistence red)", () => {
         records: [record]
       })
 
-    expect(response.status).toBe(500)
-    expect(response.body).toMatchObject({
-      code: "EMBEDDING_PROVIDER_CONFIG_MISSING"
-    })
+    expect(response.status).toBe(200)
+    expect(response.body.acceptedIds).toEqual([])
+    expect(response.body.rejected).toContainEqual(
+      expect.objectContaining({
+        id: record.id,
+        reason: "not-storable"
+      })
+    )
   })
 
   it("does not leave partial memory_records row when provider config is missing", async () => {
@@ -280,5 +294,39 @@ describe("POST /api/ingest/memory (persistence red)", () => {
     }>("select id from memory_records where id = $1", [record.id])
 
     expect(writtenRecord.rowCount).toBe(0)
+  })
+
+  it("keeps earlier accepted ids when a later record hits embedding provider failure", async () => {
+    const app = createServer()
+    const issued = await issueToken(app, "google-sub-ingest-persistence-theta")
+    const acceptedRecord = buildStorableRecord(issued.userId)
+    const failedRecord = buildStorableRecord(issued.userId)
+    failedRecord.summary = "force-provider-failure"
+
+    const response = await request(app)
+      .post("/api/ingest/memory")
+      .set("Authorization", `Bearer ${issued.token}`)
+      .send({
+        source: "analyze",
+        records: [acceptedRecord, failedRecord]
+      })
+
+    expect(response.status).toBe(200)
+    expect(response.body.acceptedIds).toEqual([acceptedRecord.id])
+    expect(response.body.rejected).toContainEqual(
+      expect.objectContaining({
+        id: failedRecord.id,
+        reason: "not-storable"
+      })
+    )
+
+    const acceptedRow = await queryDb<{ id: string }>("select id from memory_records where id = $1", [
+      acceptedRecord.id
+    ])
+    const failedRow = await queryDb<{ id: string }>("select id from memory_records where id = $1", [
+      failedRecord.id
+    ])
+    expect(acceptedRow.rowCount).toBe(1)
+    expect(failedRow.rowCount).toBe(0)
   })
 })
