@@ -6,7 +6,10 @@ Version: 0.1-hackathon
 Status: Draft
 Companion:
 - [BE-PRD-HACKATHON.md](./BE-PRD-HACKATHON.md)
+- [BE-SPEC-AUTH-HACKATHON.md](./BE-SPEC-AUTH-HACKATHON.md)
+- [BE-SPEC-IMPLEMENTATION-RULES.md](./BE-SPEC-IMPLEMENTATION-RULES.md)
 - [BE-SPEC-INFRA.md](./BE-SPEC-INFRA.md)
+- [BE-SPEC-RAG-HACKATHON.md](./BE-SPEC-RAG-HACKATHON.md)
 - [BE-SPEC-PROTOCOL-HACKATHON.md](./BE-SPEC-PROTOCOL-HACKATHON.md)
 - [BE-SPEC-UPGRADE.md](./BE-SPEC-UPGRADE.md)
 
@@ -25,6 +28,7 @@ Companion:
 - on-demand enrich request policy
 - visual explanation 범위
 - 제한적 과거 회상 범위
+- 해커톤 RAG 저장/검색 최소 스키마
 
 ---
 
@@ -45,6 +49,9 @@ Companion:
 - cross-tab retrieval orchestration
 - multi-tab workspace state
 - complex memory-link acceptance flow
+
+해커톤 구현 중 코드 구조와 주석 작성은
+[BE-SPEC-IMPLEMENTATION-RULES.md](./BE-SPEC-IMPLEMENTATION-RULES.md)를 필수 계약으로 따른다.
 
 ---
 
@@ -117,12 +124,12 @@ Companion:
 
 - session ownership과 memory ownership의 기준은 session cache가 아니라 authenticated user principal이다
 - WebSocket session과 HTTP companion endpoint는 동일한 auth principal을 사용해야 한다
-- canonical identity chain은 `extension-provided stable user id -> /api/token -> token claim.userId`다
-- 해커톤 구현의 canonical user identity는 검증된 token claim의 `userId`다
+- 해커톤 canonical identity chain은 `dev-bootstrap subject 또는 google identity -> /api/token -> opaque app session token -> auth_sessions 조회 -> local users.id principal`이다
+- 해커톤 구현의 canonical user identity는 token claim이 아니라 local `users.id` principal이다
 - long-term memory record는 모두 해당 principal에 귀속된다
-- `/api/token` 응답은 `token`, `expiresAt`만 반환한다
-- 검증된 token claim에는 반드시 `userId: string`이 포함되어야 한다
-- token 검증 실패, `userId` 누락, 또는 session owner principal 불일치 시 `401 UNAUTHORIZED`를 반환한다
+- `/api/token` 응답은 최소 `token`, `expiresAt`, `user.id`를 반환한다
+- HTTP/WS principal 해석은 `Authorization: Bearer <opaque-app-token>`를 `auth_sessions.session_token_hash`로 조회하는 방식으로 동작해야 한다
+- token 검증 실패, revoked/expired session, 또는 session owner principal 불일치 시 `401 UNAUTHORIZED`를 반환한다
 
 ---
 

@@ -12,10 +12,13 @@ Companion:
 - [BE-SPEC-HACKATHON.md](./BE-SPEC-HACKATHON.md)
 - [BE-SPEC-UPGRADE.md](./BE-SPEC-UPGRADE.md)
 - [BE-PRD.md](./BE-PRD.md)
+- [BE-SPEC-IMPLEMENTATION-RULES.md](./BE-SPEC-IMPLEMENTATION-RULES.md)
 - [BE-SPEC-CONTEXT.md](./BE-SPEC-CONTEXT.md)
 - [BE-SPEC-PLANNER.md](./BE-SPEC-PLANNER.md)
 - [BE-SPEC-PROTOCOL.md](./BE-SPEC-PROTOCOL.md)
 - [BE-SPEC-MEMORY.md](./BE-SPEC-MEMORY.md)
+- [BE-SPEC-AUTH-HACKATHON.md](./BE-SPEC-AUTH-HACKATHON.md)
+- [BE-SPEC-RAG-HACKATHON.md](./BE-SPEC-RAG-HACKATHON.md)
 - [BE-SPEC-INGEST.md](./BE-SPEC-INGEST.md)
 - [BE-SPEC-INFRA.md](./BE-SPEC-INFRA.md)
 
@@ -34,6 +37,9 @@ Companion:
 - retrieval은 `Session RAG + Long-term RAG` 2계층으로 동작
 
 세부 컨텍스트 모델과 planner 규칙은 companion spec으로 분리한다.
+
+구현 경계 규칙(SQL 배치, Express 레이어 경계, 한글 주석 원칙)은
+[BE-SPEC-IMPLEMENTATION-RULES.md](./BE-SPEC-IMPLEMENTATION-RULES.md)를 반드시 따른다.
 
 ---
 

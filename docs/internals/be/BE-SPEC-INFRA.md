@@ -9,6 +9,7 @@ Companion:
 - [BE-SPEC.md](./BE-SPEC.md)
 - [BE-SPEC-PROTOCOL.md](./BE-SPEC-PROTOCOL.md)
 - [BE-SPEC-MEMORY.md](./BE-SPEC-MEMORY.md)
+- [BE-SPEC-RAG-HACKATHON.md](./BE-SPEC-RAG-HACKATHON.md)
 
 ---
 
@@ -133,6 +134,13 @@ v0.1 운영 원칙:
 - memory model이 단순 chunk store가 아니라 구조화된 record store이기 때문
 - metadata filter와 vector similarity를 함께 다뤄야 하기 때문
 - `branch-summary`, `section-summary`, `claim-evidence-summary`를 일관되게 저장할 수 있기 때문
+- 해커톤 recall이 `recall-card`와 browse metadata를 반환해야 하므로 ownership/provenance/navigation을 함께 보관해야 하기 때문
+
+해커톤 canonical 입장:
+
+- `Cloud SQL for PostgreSQL`은 RAG persistence를 위해 필수다
+- `pgvector`는 해커톤 RAG를 실제 semantic recall로 동작시키기 위한 필수 확장이다
+- canonical 테이블과 retrieval 규칙은 [BE-SPEC-RAG-HACKATHON.md](./BE-SPEC-RAG-HACKATHON.md)를 따른다
 
 권장 저장 대상:
 
@@ -309,4 +317,3 @@ Cloud Run
 - Cloud SQL vector work: https://cloud.google.com/sql/docs/postgres/work-with-vectors
 - Cloud Run secrets: https://docs.cloud.google.com/run/docs/configuring/services/secrets
 - Cloud Run Error Reporting: https://docs.cloud.google.com/run/docs/error-reporting
-

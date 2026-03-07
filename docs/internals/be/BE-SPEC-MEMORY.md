@@ -9,12 +9,15 @@ Companion:
 - [BE-SPEC.md](./BE-SPEC.md)
 - [BE-SPEC-CONTEXT.md](./BE-SPEC-CONTEXT.md)
 - [BE-SPEC-PLANNER.md](./BE-SPEC-PLANNER.md)
+- [BE-SPEC-RAG-HACKATHON.md](./BE-SPEC-RAG-HACKATHON.md)
 
 ---
 
 ## 1. Purpose
 
 본 문서는 ThreadAtlas backend의 long-term memory schema를 정의한다.
+
+관계형 저장 스키마와 embedding/retrieval 규칙의 canonical 정의는 [BE-SPEC-RAG-HACKATHON.md](./BE-SPEC-RAG-HACKATHON.md)를 따른다.
 
 고정 범위:
 
