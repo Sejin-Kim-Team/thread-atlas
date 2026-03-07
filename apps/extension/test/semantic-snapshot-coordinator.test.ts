@@ -2,6 +2,7 @@ import type { SemanticSnapshot } from "@threadatlas/shared"
 import type { ServiceWorkerToContentMessage } from "@threadatlas/shared/runtime"
 import { describe, expect, it, vi } from "vitest"
 import { createSemanticSnapshotCoordinator } from "../src/background/semantic-snapshot"
+import type { RegionDump } from "../src/content/semantic/core/observability"
 
 const snapshot: SemanticSnapshot = {
   page: {
@@ -25,6 +26,46 @@ const snapshot: SemanticSnapshot = {
     capturedAt: new Date().toISOString(),
     skeletonVersion: 1,
     extractorId: "hackernews"
+  }
+}
+
+const regionDump: RegionDump = {
+  url: "https://news.ycombinator.com/item?id=1",
+  timestamp: "2026-03-06T00:00:00.000Z",
+  regions: [
+    {
+      id: "comment-tree",
+      primitive: "repeated-item",
+      subtype: "nested",
+      category: "discussion.thread",
+      layoutRole: "main-content",
+      dominanceScore: 1,
+      roleRank: "primary",
+      suppressed: false,
+      autoSuppressed: false,
+      explicitSelectionAllowed: true,
+      confidence: 0.92,
+      signals: ["depth-variation", "repeated-rows"],
+      nodeCount: 4,
+      textLength: 80,
+      assembledItemCount: 0,
+      normalizedKind: "thread",
+      boundingRect: {
+        top: 0,
+        left: 0,
+        right: 100,
+        bottom: 100,
+        width: 100,
+        height: 100,
+        x: 0,
+        y: 0
+      }
+    }
+  ],
+  decisions: {
+    overlapResolutions: [],
+    assemblyMerges: [],
+    suppressions: []
   }
 }
 
@@ -141,5 +182,41 @@ describe("semantic snapshot coordinator", () => {
     expect(toggled.selectedTarget).toBeNull()
     expect(read.enabled).toBe(true)
     expect(read.selectedTarget).toBeNull()
+  })
+
+  it("loads the current region dump for supported tabs", async () => {
+    const sendToContentScript = vi.fn(async (_tabId: number, message: ServiceWorkerToContentMessage) => {
+      if (message.type === "GET_SEMANTIC_REGION_DUMP") {
+        return { dump: regionDump }
+      }
+
+      return { enabled: false, selectedTarget: null }
+    })
+
+    const coordinator = createSemanticSnapshotCoordinator({
+      async getActiveTab() {
+        return {
+          id: 13,
+          url: "https://news.ycombinator.com/item?id=13"
+        }
+      },
+      async getTab(tabId) {
+        return {
+          id: tabId,
+          url: "https://news.ycombinator.com/item?id=13"
+        }
+      },
+      sendToContentScript,
+      openSidePanel: vi.fn(async () => {}),
+      notifyRuntime: vi.fn()
+    })
+
+    const payload = await coordinator.getRegionDump()
+
+    expect(sendToContentScript).toHaveBeenCalledWith(13, {
+      type: "GET_SEMANTIC_REGION_DUMP"
+    })
+    expect(payload.dump).toEqual(regionDump)
+    expect(payload.error).toBeNull()
   })
 })

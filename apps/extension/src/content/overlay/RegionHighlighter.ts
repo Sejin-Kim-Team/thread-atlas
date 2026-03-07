@@ -128,6 +128,9 @@ function resolveHighlightTarget(document: Document, leaf: Element | null): Highl
     return null
   }
 
+  const primitive =
+    (currentElement.getAttribute("data-semantic-primitive") as SemanticSelectionTarget["primitive"] | null) ??
+    "authored-block"
   const scopeRootId = currentElement.getAttribute("data-semantic-scope-root-id")
   const parentElement =
     scopeRootId && scopeRootId !== nodeId
@@ -135,9 +138,17 @@ function resolveHighlightTarget(document: Document, leaf: Element | null): Highl
           `[data-semantic-region="${regionId}"][data-semantic-node-id="${scopeRootId}"]`
         ) as HTMLElement | null)
       : null
+  const selectionElement =
+    primitive === "interactive-block" && parentElement
+      ? parentElement
+      : currentElement
+  const selectionNodeId =
+    primitive === "interactive-block" && scopeRootId
+      ? scopeRootId
+      : nodeId
   const displayLabel =
-    currentElement.getAttribute("data-semantic-display-label") ??
-    currentElement.getAttribute("data-semantic-category") ??
+    selectionElement.getAttribute("data-semantic-display-label") ??
+    selectionElement.getAttribute("data-semantic-category") ??
     "Semantic item"
 
   return {
@@ -148,25 +159,23 @@ function resolveHighlightTarget(document: Document, leaf: Element | null): Highl
     autoSuppressed: currentElement.getAttribute("data-semantic-auto-suppressed") === "true",
     selectionTarget: {
       regionId,
-      primitive:
-        (currentElement.getAttribute("data-semantic-primitive") as SemanticSelectionTarget["primitive"] | null) ??
-        "authored-block",
+      primitive,
       category:
-        (currentElement.getAttribute("data-semantic-category") as SemanticSelectionTarget["category"] | null) ??
+        (selectionElement.getAttribute("data-semantic-category") as SemanticSelectionTarget["category"] | null) ??
         "content.article",
       nodeKind:
-        (currentElement.getAttribute("data-semantic-node-kind") as SemanticSelectionTarget["nodeKind"] | null) ??
+        (selectionElement.getAttribute("data-semantic-node-kind") as SemanticSelectionTarget["nodeKind"] | null) ??
         "content",
-      nodeId,
+      nodeId: selectionNodeId,
       rootNodeId: scopeRootId,
       scopeRootId,
       label: displayLabel,
       displayLabel,
       text: summarizeText(
-        currentElement.getAttribute("data-semantic-text-preview") ?? currentElement.textContent ?? ""
+        selectionElement.getAttribute("data-semantic-text-preview") ?? selectionElement.textContent ?? ""
       ),
-      ...(currentElement.getAttribute("data-semantic-subtype")
-        ? { subtype: currentElement.getAttribute("data-semantic-subtype")! }
+      ...(selectionElement.getAttribute("data-semantic-subtype")
+        ? { subtype: selectionElement.getAttribute("data-semantic-subtype")! }
         : {})
     }
   }

@@ -20,6 +20,7 @@ import type {
   SemanticSelectionTarget,
   SensorData
 } from "@threadatlas/shared/runtime"
+import type { RegionDump } from "../content/semantic/core/observability"
 import { isSemanticCaptureSupportedUrl } from "../common/semantic-url"
 import { assembleStateSnapshot } from "./state-assembler"
 import { callEvaluate } from "./sse-client"
@@ -37,6 +38,8 @@ import {
   showNotify,
   showSuggestChips,
   updatePhaseIndicator,
+  type DisabledContextProfileReason,
+  type SemanticDebugInfo,
   type Phase
 } from "./ui"
 
@@ -57,6 +60,12 @@ interface SemanticSelectionState {
   selectedTarget: SemanticSelectionTarget | null
 }
 
+interface SemanticRegionDumpState {
+  tabId: number | null
+  dump: RegionDump | null
+  error: string | null
+}
+
 interface SidePanelState {
   phase: Phase
   geminiLiveSession: LiveSession | null
@@ -67,6 +76,7 @@ interface SidePanelState {
   cachedSemantics: ThreadSemantics | null
   currentAbortController: AbortController | null
   latestSemanticSnapshot: SemanticSnapshotState | null
+  latestRegionDump: SemanticRegionDumpState | null
   semanticSnapshotHistory: SemanticSnapshot[]
   selectedSemanticSnapshotId: string | null
   semanticRawVisible: boolean
@@ -88,6 +98,7 @@ const state: SidePanelState = {
   cachedSemantics: null,
   currentAbortController: null,
   latestSemanticSnapshot: null,
+  latestRegionDump: null,
   semanticSnapshotHistory: [],
   selectedSemanticSnapshotId: null,
   semanticRawVisible: false,
@@ -96,6 +107,9 @@ const state: SidePanelState = {
   semanticContextProfile: "branch-summary",
   semanticContextFormat: "context-pack-json"
 }
+
+type RegionDumpEntry = RegionDump["regions"][number]
+const INTERACTIVE_CONTEXT_RESTRICTION = "Interactive semantic snapshots currently support only the branch-summary profile."
 
 function setPhase(phase: Phase): void {
   state.phase = phase
@@ -173,12 +187,131 @@ function getSelectedSemanticSnapshot(): SemanticSnapshot | null {
   )
 }
 
-function getDisabledContextProfiles(snapshot: SemanticSnapshot | null): ContextTaskProfile[] {
+function getDisabledContextRestrictions(snapshot: SemanticSnapshot | null): DisabledContextProfileReason[] {
   if (!snapshot || "text" in snapshot.focus.node) {
     return []
   }
 
-  return ["reply-assist", "claim-extraction"]
+  return [
+    {
+      profile: "reply-assist",
+      reason: INTERACTIVE_CONTEXT_RESTRICTION
+    },
+    {
+      profile: "claim-extraction",
+      reason: INTERACTIVE_CONTEXT_RESTRICTION
+    }
+  ]
+}
+
+function findRegionDumpEntry(dump: RegionDump | null, regionId: string | null | undefined): RegionDumpEntry | null {
+  if (!dump || !regionId) {
+    return null
+  }
+
+  return dump.regions.find((region) => region.id === regionId) ?? null
+}
+
+function isProfileRestricted(
+  restrictions: DisabledContextProfileReason[],
+  profile: ContextTaskProfile
+): boolean {
+  return restrictions.some((restriction) => restriction.profile === profile)
+}
+
+function getRestrictionReason(
+  restrictions: DisabledContextProfileReason[],
+  profile: ContextTaskProfile
+): string | null {
+  return restrictions.find((restriction) => restriction.profile === profile)?.reason ?? null
+}
+
+function describeSuppression(region: RegionDumpEntry): string {
+  if (!region.autoSuppressed) {
+    return "active"
+  }
+
+  return region.explicitSelectionAllowed ? "suppressed (explicit selection allowed)" : "suppressed"
+}
+
+function buildSelectionResolutionNote(
+  snapshot: SemanticSnapshot | null,
+  selectedTarget: SemanticSelectionTarget | null,
+  dumpState: SemanticRegionDumpState | null
+): string | null {
+  if (!snapshot || !selectedTarget || !dumpState?.dump) {
+    return null
+  }
+
+  const selectedRegion = findRegionDumpEntry(dumpState.dump, selectedTarget.regionId)
+  if (selectedTarget.regionId !== snapshot.focus.region) {
+    if (selectedRegion?.autoSuppressed) {
+      return `Selected region ${selectedTarget.regionId} is suppressed, so focus fell back to ${snapshot.focus.region}.`
+    }
+
+    return `Selected region ${selectedTarget.regionId} is no longer focusable, so focus resolved to ${snapshot.focus.region}.`
+  }
+
+  if (selectedRegion?.autoSuppressed) {
+    return "Explicit selection kept a suppressed region because direct selection is allowed."
+  }
+
+  return null
+}
+
+function buildDebugState(
+  snapshot: SemanticSnapshot | null,
+  selectedTarget: SemanticSelectionTarget | null,
+  dumpState: SemanticRegionDumpState | null
+): { status: string; info: SemanticDebugInfo | null } {
+  if (!snapshot) {
+    return {
+      status: dumpState?.error ?? "No semantic snapshot selected.",
+      info: null
+    }
+  }
+
+  if (!dumpState?.dump) {
+    return {
+      status: dumpState?.error ?? "No region dump loaded.",
+      info: null
+    }
+  }
+
+  const focusRegion = findRegionDumpEntry(dumpState.dump, snapshot.focus.region)
+  if (!focusRegion) {
+    return {
+      status: "Focused region is not present in the current tab dump.",
+      info: null
+    }
+  }
+
+  const notes: string[] = []
+  if (snapshot.page.url !== dumpState.dump.url) {
+    notes.push("Selected snapshot URL does not match the current tab dump.")
+  }
+
+  const selectionNote = buildSelectionResolutionNote(snapshot, selectedTarget, dumpState)
+  if (selectionNote) {
+    notes.push(selectionNote)
+  }
+
+  return {
+    status: `Current region dump · ${dumpState.dump.url}`,
+    info: {
+      regionId: focusRegion.id,
+      primitive: focusRegion.primitive,
+      subtype: focusRegion.subtype ?? "(none)",
+      category: focusRegion.category,
+      layoutRole: focusRegion.layoutRole,
+      roleRank: focusRegion.roleRank,
+      suppression: describeSuppression(focusRegion),
+      normalizedKind: focusRegion.normalizedKind ?? "(none)",
+      assembledItemCount: String(focusRegion.assembledItemCount),
+      signals: focusRegion.signals.join(", ") || "(none)",
+      ...(notes.length > 0 ? { note: notes.join(" ") } : {})
+    }
+  }
 }
 
 function renderSemanticSnapshotState(errorOverride?: string | null): void {
@@ -186,18 +319,19 @@ function renderSemanticSnapshotState(errorOverride?: string | null): void {
   let contextPreview = "No semantic snapshot selected."
   let contextAvailable = false
   let contextStatus = "No semantic snapshot selected."
-  const disabledContextProfiles = getDisabledContextProfiles(snapshot)
+  const contextRestrictions = getDisabledContextRestrictions(snapshot)
   const interactiveRestricted =
     snapshot !== null &&
-    disabledContextProfiles.includes(state.semanticContextProfile) &&
+    isProfileRestricted(contextRestrictions, state.semanticContextProfile) &&
     !("text" in snapshot.focus.node)
+  const selectionResolutionNote = buildSelectionResolutionNote(snapshot, state.selectedTarget, state.latestRegionDump)
+  const debugState = buildDebugState(snapshot, state.selectedTarget, state.latestRegionDump)
 
   if (snapshot) {
     const pack = buildContextPack(snapshot)
     if (interactiveRestricted) {
       contextStatus = "Interactive snapshots support branch-summary only."
-      contextPreview =
-        "Interactive semantic snapshots currently support only the branch-summary profile."
+      contextPreview = getRestrictionReason(contextRestrictions, state.semanticContextProfile) ?? INTERACTIVE_CONTEXT_RESTRICTION
     } else {
       contextAvailable = true
       contextStatus = `${state.semanticContextProfile} · ${state.semanticContextFormat}`
@@ -223,7 +357,10 @@ function renderSemanticSnapshotState(errorOverride?: string | null): void {
     contextPreview,
     contextAvailable,
     contextStatus,
-    disabledContextProfiles
+    contextRestrictions,
+    selectionResolutionNote,
+    debugStatus: debugState.status,
+    debugInfo: debugState.info
   })
 }
 
@@ -232,6 +369,11 @@ function updateSemanticSnapshot(payload: SemanticSnapshotState): void {
   if (payload.snapshot) {
     state.selectedSemanticSnapshotId = payload.snapshot.meta.capturedAt
   }
+  renderSemanticSnapshotState()
+}
+
+function updateSemanticRegionDump(payload: SemanticRegionDumpState): void {
+  state.latestRegionDump = payload
   renderSemanticSnapshotState()
 }
 
@@ -304,6 +446,25 @@ async function hydrateSelectionState(tabId?: number): Promise<void> {
   }
 }
 
+async function hydrateSemanticRegionDump(tabId?: number): Promise<void> {
+  try {
+    const payload = await sendRuntimeMessage<SemanticRegionDumpState>(
+      typeof tabId === "number"
+        ? {
+            type: "GET_SEMANTIC_REGION_DUMP",
+            payload: { tabId }
+          }
+        : {
+            type: "GET_SEMANTIC_REGION_DUMP"
+          }
+    )
+    updateSemanticRegionDump(payload)
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "failed to load semantic region dump"
+    updateSemanticRegionDump({ tabId: tabId ?? null, dump: null, error: message })
+  }
+}
+
 async function requestSemanticSnapshot(options: {
   suppressErrors?: boolean
   source?: "command" | "context-menu" | "popup" | "sidepanel"
@@ -328,6 +489,7 @@ async function requestSemanticSnapshot(options: {
       showNotify(payload.error, "error")
     }
     await hydrateSemanticSnapshotHistory(state.activeTabId ?? undefined)
+    await hydrateSemanticRegionDump(state.activeTabId ?? undefined)
   } catch (error) {
     const message = error instanceof Error ? error.message : "failed to capture semantic snapshot"
     renderSemanticSnapshotState(message)
@@ -357,8 +519,9 @@ async function copySemanticContext(): Promise<void> {
     return
   }
 
-  if (getDisabledContextProfiles(snapshot).includes(state.semanticContextProfile)) {
-    showNotify("Interactive snapshots currently support only branch-summary.", "info")
+  const restrictions = getDisabledContextRestrictions(snapshot)
+  if (isProfileRestricted(restrictions, state.semanticContextProfile)) {
+    showNotify(getRestrictionReason(restrictions, state.semanticContextProfile) ?? INTERACTIVE_CONTEXT_RESTRICTION, "info")
     return
   }
 
@@ -412,12 +575,14 @@ function toggleSemanticRawView(): void {
 function selectSemanticSnapshot(snapshotId: string): void {
   state.selectedSemanticSnapshotId = snapshotId
   renderSemanticSnapshotState()
+  void hydrateSemanticRegionDump(state.activeTabId ?? undefined)
 }
 
 function selectSemanticContextProfile(profile: ContextTaskProfile): void {
   const snapshot = getSelectedSemanticSnapshot()
-  if (getDisabledContextProfiles(snapshot).includes(profile)) {
-    showNotify("Interactive snapshots currently support only branch-summary.", "info")
+  const restrictions = getDisabledContextRestrictions(snapshot)
+  if (isProfileRestricted(restrictions, profile)) {
+    showNotify(getRestrictionReason(restrictions, profile) ?? INTERACTIVE_CONTEXT_RESTRICTION, "info")
     return
   }
 
@@ -580,6 +745,7 @@ function registerRuntimeListeners(): void {
         void hydrateSemanticSnapshot(message.payload.tabId)
         void hydrateSemanticSnapshotHistory(message.payload.tabId)
         void hydrateSelectionState(message.payload.tabId)
+        void hydrateSemanticRegionDump(message.payload.tabId)
       }
 
       if (message.type === "ARTICLE_CONTENT") {
@@ -594,6 +760,7 @@ function registerRuntimeListeners(): void {
 
       if (message.type === "SEMANTIC_SNAPSHOT_READY") {
         updateSemanticSnapshot(message.payload)
+        void hydrateSemanticRegionDump(message.payload.tabId ?? undefined)
         if (message.payload.error) {
           showNotify(message.payload.error, "error")
         }
@@ -601,10 +768,12 @@ function registerRuntimeListeners(): void {
 
       if (message.type === "SEMANTIC_SNAPSHOT_HISTORY_UPDATED") {
         updateSemanticSnapshotHistory(message.payload)
+        void hydrateSemanticRegionDump(message.payload.tabId ?? undefined)
       }
 
       if (message.type === "SEMANTIC_SELECTION_STATE_CHANGED") {
         updateSelectionState(message.payload)
+        void hydrateSemanticRegionDump(message.payload.tabId ?? undefined)
       }
     })
   }
@@ -619,6 +788,7 @@ async function hydrateActiveTabState(): Promise<void> {
         void hydrateSemanticSnapshot(state.activeTabId ?? undefined)
         void hydrateSemanticSnapshotHistory(state.activeTabId ?? undefined)
         void hydrateSelectionState(state.activeTabId ?? undefined)
+        void hydrateSemanticRegionDump(state.activeTabId ?? undefined)
         resolve()
       })
     })

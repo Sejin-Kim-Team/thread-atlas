@@ -8,6 +8,11 @@ import { BrowserCapture } from "./capture/BrowserCapture"
 import { RegionHighlighter } from "./overlay/RegionHighlighter"
 import { SnapshotIndicator } from "./overlay/SnapshotIndicator"
 import { SemanticCaptureSession } from "./semantic/session"
+import type { RegionDump } from "./semantic/core/observability"
+
+interface SemanticRegionDumpResponse {
+  dump: RegionDump | null
+}
 
 declare global {
   interface Window {
@@ -69,7 +74,9 @@ function initializeSemanticCapture(): void {
     (
       message: ServiceWorkerToContentMessage,
       _sender,
-      sendResponse: (response: SemanticSnapshotCaptureResponse | SemanticSelectionStateResponse) => void
+      sendResponse: (
+        response: SemanticSnapshotCaptureResponse | SemanticSelectionStateResponse | SemanticRegionDumpResponse
+      ) => void
     ) => {
       if (message.type === "CAPTURE_SEMANTIC_SNAPSHOT") {
         void triggerManager.captureSnapshot(message.payload.source).then(sendResponse)
@@ -83,6 +90,13 @@ function initializeSemanticCapture(): void {
 
       if (message.type === "GET_SEMANTIC_SELECTION_STATE") {
         sendResponse(triggerManager.getSelectionState())
+        return true
+      }
+
+      if (message.type === "GET_SEMANTIC_REGION_DUMP") {
+        sendResponse({
+          dump: session.dumpObservability()
+        })
         return true
       }
 

@@ -157,6 +157,24 @@ function parseMetadata(elements: Element[]): AssembledItem["metadata"] | undefin
   return Object.keys(metadata).length > 0 ? metadata : undefined
 }
 
+function isSpacerRow(element: Element): boolean {
+  const text = normalizeText(element.textContent ?? "")
+  return text.length === 0 || /\bspacer\b/.test(`${element.className} ${element.id}`.toLowerCase())
+}
+
+function isMetadataCompanionRow(element: Element): boolean {
+  const text = normalizeText(element.textContent ?? "")
+  if (!text) {
+    return false
+  }
+
+  return Boolean(
+    element.querySelector(".subtext,.score,.age,time,[class*='subtext'],[class*='meta'],[class*='age']") ||
+      element.querySelector("a[href*='item?id=']") ||
+      /\bpoints?\b|\bcomments?\b|\bago\b|\bby\b/.test(text.toLowerCase())
+  )
+}
+
 function createBlueprints(
   item: AssembledItem,
   category: DetectedRegion["category"],
@@ -198,10 +216,21 @@ function assembleFlatOrGridItems(region: DetectedRegion): AssembledItem[] {
 
     if (isTableRows) {
       let current = element.nextElementSibling
-      while (current && !itemSet.has(current) && companions.length < 2) {
-        companions.push(current)
-        current = current.nextElementSibling
+      while (current && !itemSet.has(current)) {
+        if (isSpacerRow(current)) {
+          current = current.nextElementSibling
+          continue
+        }
+
+        if (isMetadataCompanionRow(current) && companions.length === 0) {
+          companions.push(current)
+          current = current.nextElementSibling
+          continue
+        }
+
+        break
       }
+
     }
 
     const primaryElement = findTitleElement(element)

@@ -209,6 +209,17 @@ chrome.runtime.onMessage.addListener((msg: SidePanelToServiceWorkerMessage, send
       return true
     }
 
+    case "GET_SEMANTIC_REGION_DUMP": {
+      void semanticSnapshotCoordinator
+        .getRegionDump(resolveSemanticTabId(msg.payload?.tabId, sender))
+        .then((payload) => sendResponse(payload))
+        .catch((error: unknown) => {
+          const message = error instanceof Error ? error.message : "semantic region dump lookup failed"
+          sendResponse({ tabId: null, dump: null, error: message })
+        })
+      return true
+    }
+
     case "CLEAR_SEMANTIC_SELECTION": {
       void semanticSnapshotCoordinator
         .clearSelection(resolveSemanticTabId(msg.payload?.tabId, sender))

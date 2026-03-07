@@ -41,7 +41,14 @@ const snapshot: SemanticSnapshot = {
   meta: {
     capturedAt: "2026-03-06T00:00:00.000Z",
     skeletonVersion: 1,
-    extractorId: "hackernews"
+    extractorId: "hackernews",
+    coverage: {
+      kind: "focus-branch",
+      rootNodeId: "comment-c1",
+      capturedNodeCount: 3,
+      omittedNodeCount: 1,
+      omittedRootCount: 0
+    }
   }
 }
 
@@ -67,9 +74,12 @@ describe("sidepanel semantic snapshot ui", () => {
       <div id="semantic-focus-detail"></div>
       <div id="semantic-context-groups"></div>
       <div id="semantic-history-list"></div>
+      <div id="semantic-debug-status"></div>
+      <div id="semantic-debug-detail"></div>
       <div id="semantic-selection-status"></div>
       <div id="semantic-selection-detail"></div>
       <div id="semantic-context-status"></div>
+      <div id="semantic-context-restrictions"></div>
       <pre id="semantic-context-preview"></pre>
       <pre id="semantic-snapshot-json" class="hidden"></pre>
     `
@@ -135,7 +145,22 @@ describe("sidepanel semantic snapshot ui", () => {
       contextFormat: "compact-json",
       contextPreview: "{\n  \"scope\": \"focus-branch\"\n}",
       contextAvailable: true,
-      contextStatus: "reply-assist · compact-json"
+      contextStatus: "reply-assist · compact-json",
+      selectionResolutionNote: "Explicit selection kept a suppressed region because direct selection is allowed.",
+      debugStatus: "Current region dump · https://news.ycombinator.com/item?id=1",
+      debugInfo: {
+        regionId: "comment-tree",
+        primitive: "repeated-item",
+        subtype: "nested",
+        category: "discussion.thread",
+        layoutRole: "main-content",
+        roleRank: "primary",
+        suppression: "active",
+        normalizedKind: "thread",
+        assembledItemCount: "0",
+        signals: "depth-variation, repeated-rows",
+        note: "Selected snapshot URL does not match the current tab dump."
+      }
     })
 
     document
@@ -158,9 +183,13 @@ describe("sidepanel semantic snapshot ui", () => {
     expect(document.getElementById("semantic-context-groups")?.textContent).toContain("container")
     expect(document.getElementById("semantic-selection-button")?.textContent).toContain("On")
     expect(document.getElementById("semantic-selection-detail")?.textContent).toContain("Comment by alice")
+    expect(document.getElementById("semantic-selection-detail")?.textContent).toContain("focus-branch")
+    expect(document.getElementById("semantic-selection-detail")?.textContent).toContain("3")
     expect(document.getElementById("semantic-snapshot-json")?.textContent).toContain("\"comment-c1\"")
     expect(document.getElementById("semantic-context-status")?.textContent).toContain("reply-assist")
     expect(document.getElementById("semantic-context-preview")?.textContent).toContain("\"scope\"")
+    expect(document.getElementById("semantic-debug-detail")?.textContent).toContain("discussion.thread")
+    expect(document.getElementById("semantic-debug-detail")?.textContent).toContain("depth-variation")
   })
 
   it("updates busy and empty states", () => {
@@ -179,13 +208,15 @@ describe("sidepanel semantic snapshot ui", () => {
       contextFormat: "context-pack-json",
       contextPreview: "No semantic snapshot selected.",
       contextAvailable: false,
-      contextStatus: "No semantic snapshot selected."
+      contextStatus: "No semantic snapshot selected.",
+      debugStatus: "No region dump loaded."
     })
 
     expect(document.getElementById("semantic-snapshot-status")?.textContent).toContain("unavailable")
     expect(document.getElementById("semantic-history-list")?.textContent).toContain("No snapshots")
     expect(document.getElementById("semantic-snapshot-json")?.textContent).toBe("")
     expect((document.getElementById("semantic-context-copy-button") as HTMLButtonElement).disabled).toBe(true)
+    expect(document.getElementById("semantic-debug-detail")?.textContent).toContain("No region dump loaded")
   })
 
   it("disables unsupported llm context profiles for interactive snapshots", () => {
@@ -227,7 +258,17 @@ describe("sidepanel semantic snapshot ui", () => {
       contextPreview: "Interactive semantic snapshots currently support only the branch-summary profile.",
       contextAvailable: false,
       contextStatus: "Interactive snapshots support branch-summary only.",
-      disabledContextProfiles: ["reply-assist", "claim-extraction"]
+      contextRestrictions: [
+        {
+          profile: "reply-assist",
+          reason: "Interactive semantic snapshots currently support only the branch-summary profile."
+        },
+        {
+          profile: "claim-extraction",
+          reason: "Interactive semantic snapshots currently support only the branch-summary profile."
+        }
+      ],
+      debugStatus: "Current region dump · https://example.com/search"
     })
 
     const profile = document.getElementById("semantic-context-profile") as HTMLSelectElement
@@ -235,5 +276,7 @@ describe("sidepanel semantic snapshot ui", () => {
     expect(profile.options[1]?.disabled).toBe(true)
     expect(profile.options[2]?.disabled).toBe(true)
     expect((document.getElementById("semantic-context-copy-button") as HTMLButtonElement).disabled).toBe(true)
+    expect(document.getElementById("semantic-context-restrictions")?.textContent).toContain("reply-assist")
+    expect(document.getElementById("semantic-context-restrictions")?.textContent).toContain("branch-summary")
   })
 })
