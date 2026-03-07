@@ -9,6 +9,10 @@ function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null
 }
 
+function hasNonBlankString(value: unknown): value is string {
+  return typeof value === "string" && value.trim().length > 0
+}
+
 export function validateSemanticSnapshot(snapshot: unknown): SnapshotValidationResult {
   if (!isObject(snapshot)) {
     return { ok: false, errors: ["snapshot must be an object"] }
@@ -19,6 +23,10 @@ export function validateSemanticSnapshot(snapshot: unknown): SnapshotValidationR
 
   if (!casted.page || !isObject(casted.page) || typeof casted.page.id !== "string") {
     errors.push("page is required")
+  }
+
+  if (!casted.page || !isObject(casted.page) || !hasNonBlankString(casted.page.url)) {
+    errors.push("page.url is required")
   }
 
   if (!casted.focus || !isObject(casted.focus) || typeof casted.focus.nodeId !== "string") {

@@ -8,7 +8,8 @@ import {
   type MemoryRecordKind as RagMemoryRecordKind
 } from "../../rag/memory-records-repository"
 import {
-  embedTextWithVertex
+  embedTextWithVertex,
+  isEmbeddingProviderError
 } from "../../rag/vertex-embedding-adapter"
 import type {
   IngestMemoryRequestBody,
@@ -264,8 +265,12 @@ export async function ingestMemoryRecords(
         source: body.source
       })
       acceptedIds.push(record.id)
-    } catch {
-      // embedding 실패 등 저장 실패는 해당 레코드만 reject한다.
+    } catch (error) {
+      if (!isEmbeddingProviderError(error)) {
+        throw error
+      }
+
+      // provider 오류는 해당 레코드만 reject하고 다음 배치를 계속 처리한다.
       rejected.push({
         id: record.id || "unknown",
         reason: "not-storable"
