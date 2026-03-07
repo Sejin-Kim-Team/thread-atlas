@@ -37,5 +37,12 @@ describe("rag schema migration contract (red)", () => {
     expect(sql).toMatch(/memory_record_embeddings[\s\S]*owner_user_id uuid not null references users\(id\)/i)
     expect(sql).toMatch(/analysis_runs[\s\S]*owner_user_id uuid not null references users\(id\)/i)
   })
-})
 
+  it("keeps embedding rows tied to canonical memory records", () => {
+    const sql = readSqlFile("003_rag_core.sql")
+
+    expect(sql).toMatch(/record_id text primary key references memory_records\(id\) on delete cascade/i)
+    expect(sql).toMatch(/delete from memory_record_embeddings[\s\S]*where not exists/i)
+    expect(sql).toMatch(/foreign key \(record_id\) references memory_records\(id\) on delete cascade/i)
+  })
+})

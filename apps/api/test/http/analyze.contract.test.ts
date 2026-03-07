@@ -91,6 +91,42 @@ describe("POST /api/analyze (hackathon contract)", () => {
     })
   })
 
+  it("returns INVALID_SNAPSHOT when snapshot.page.url is blank", async () => {
+    const app = createServer()
+    const issued = await issueAuthHeader(app)
+    const payload = buildAnalyzeRequest("seed")
+    payload.snapshot.page.url = "   "
+
+    const response = await request(app)
+      .post("/api/analyze")
+      .set("Authorization", issued.authorization)
+      .send(payload)
+
+    expect(response.status).toBeGreaterThanOrEqual(400)
+    expect(response.status).toBeLessThan(500)
+    expect(response.body).toMatchObject({
+      code: "INVALID_SNAPSHOT"
+    })
+  })
+
+  it("returns INVALID_SNAPSHOT when snapshot.page.id is blank", async () => {
+    const app = createServer()
+    const issued = await issueAuthHeader(app)
+    const payload = buildAnalyzeRequest("seed")
+    payload.snapshot.page.id = " "
+
+    const response = await request(app)
+      .post("/api/analyze")
+      .set("Authorization", issued.authorization)
+      .send(payload)
+
+    expect(response.status).toBeGreaterThanOrEqual(400)
+    expect(response.status).toBeLessThan(500)
+    expect(response.body).toMatchObject({
+      code: "INVALID_SNAPSHOT"
+    })
+  })
+
   it("returns INVALID_EVENT when tabId is missing", async () => {
     const app = createServer()
     const issued = await issueAuthHeader(app)

@@ -10,6 +10,8 @@ export interface SearchByVectorInput {
   ownerUserId: string
   queryEmbedding: number[]
   topK?: number
+  pageKind?: "article" | "thread" | "post" | "generic"
+  sourceDomain?: string
 }
 
 export interface VectorSearchRow {
@@ -52,10 +54,14 @@ export async function searchByVector(input: SearchByVectorInput): Promise<Vector
   const ownerUserId = assertOwnerUserId(input.ownerUserId)
   assertEmbeddingDimensions(input.queryEmbedding)
   const topK = normalizeLimit(input.topK, DEFAULT_TOP_K)
+  const pageKind = normalizeText(input.pageKind) as "article" | "thread" | "post" | "generic" | null
+  const sourceDomain = normalizeText(input.sourceDomain)
 
   const result = await getPool().query<VectorSearchDbRow>(SEARCH_BY_VECTOR_SQL, [
     ownerUserId,
     toVectorLiteral(input.queryEmbedding),
+    pageKind,
+    sourceDomain ?? null,
     topK
   ])
 

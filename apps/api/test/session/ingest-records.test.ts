@@ -1,0 +1,133 @@
+import { beforeEach, describe, expect, it, vi } from "vitest"
+
+const mocks = vi.hoisted(() => ({
+  connect: vi.fn(),
+  clientQuery: vi.fn(),
+  release: vi.fn(),
+  insertMemoryRecord: vi.fn(),
+  upsertMemoryRecordEmbedding: vi.fn(),
+  embedTextWithVertex: vi.fn()
+}))
+
+vi.mock("../../src/db/pool", () => ({
+  getPool: () => ({
+    connect: mocks.connect
+  })
+}))
+
+vi.mock("../../src/rag/memory-records-repository", () => ({
+  insertMemoryRecord: mocks.insertMemoryRecord
+}))
+
+vi.mock("../../src/rag/memory-record-embeddings-repository", () => ({
+  upsertMemoryRecordEmbedding: mocks.upsertMemoryRecordEmbedding
+}))
+
+vi.mock("../../src/rag/vertex-embedding-adapter", () => ({
+  embedTextWithVertex: mocks.embedTextWithVertex,
+  isEmbeddingProviderError: (error: unknown) =>
+    Boolean(
+      error &&
+        typeof error === "object" &&
+        "code" in error &&
+        (error as { code?: string }).code?.startsWith("EMBEDDING_PROVIDER_")
+    )
+}))
+
+function buildRecord(ownerUserId: string, id = "mem-record-1") {
+  return {
+    id,
+    ownerUserId,
+    kind: "branch-summary",
+    summary: "branch summary",
+    keywords: ["websocket"],
+    entities: ["WebSocket"],
+    provenance: {
+      sourceUrl: "https://news.ycombinator.com/item?id=43199999",
+      pageKind: "thread" as const,
+      snapshotCapturedAt: "2026-03-05T09:10:00.000Z",
+      extractorId: "generic+hacker-news-enhancer",
+      skeletonVersion: 8
+    },
+    source: {
+      pageId: "hn-43199999",
+      rootNodeIds: ["comment-43199977"],
+      unitId: "branch-43199977"
+    },
+    navigation: {
+      canonicalUrl: "https://news.ycombinator.com/item?id=43199999",
+      openMode: "new-tab" as const
+    },
+    evidence: {
+      textSpans: ["branch summary"],
+      referencedNodeIds: ["comment-43199977"]
+    }
+  }
+}
+
+describe("ingestMemoryRecords", () => {
+  beforeEach(() => {
+    vi.resetModules()
+    mocks.connect.mockReset()
+    mocks.clientQuery.mockReset()
+    mocks.release.mockReset()
+    mocks.insertMemoryRecord.mockReset()
+    mocks.upsertMemoryRecordEmbedding.mockReset()
+    mocks.embedTextWithVertex.mockReset()
+
+    mocks.connect.mockResolvedValue({
+      query: mocks.clientQuery,
+      release: mocks.release
+    })
+    mocks.clientQuery.mockResolvedValue({
+      rowCount: 0,
+      rows: []
+    })
+    mocks.insertMemoryRecord.mockResolvedValue({
+      id: "mem-record-1"
+    })
+    mocks.upsertMemoryRecordEmbedding.mockResolvedValue(undefined)
+    mocks.embedTextWithVertex.mockResolvedValue({
+      embeddingModel: "gemini-embedding-001",
+      embeddingDims: 768,
+      embedding: Array.from({ length: 768 }, () => 0.01)
+    })
+  })
+
+  it("downgrades embedding provider failures to per-record rejection", async () => {
+    const error = new Error("provider request failed")
+    ;(error as Error & { code: string }).code = "EMBEDDING_PROVIDER_REQUEST_FAILED"
+    mocks.embedTextWithVertex.mockRejectedValueOnce(error)
+
+    const { ingestMemoryRecords } = await import("../../src/session/memory/ingest-records")
+    const response = await ingestMemoryRecords(
+      {
+        source: "analyze",
+        records: [buildRecord("00000000-0000-4000-8000-000000000111")]
+      },
+      "00000000-0000-4000-8000-000000000111"
+    )
+
+    expect(response.acceptedIds).toEqual([])
+    expect(response.rejected).toContainEqual({
+      id: "mem-record-1",
+      reason: "not-storable"
+    })
+  })
+
+  it("propagates infrastructure persistence failures", async () => {
+    mocks.insertMemoryRecord.mockRejectedValueOnce(new Error("database unavailable"))
+
+    const { ingestMemoryRecords } = await import("../../src/session/memory/ingest-records")
+
+    await expect(
+      ingestMemoryRecords(
+        {
+          source: "analyze",
+          records: [buildRecord("00000000-0000-4000-8000-000000000112")]
+        },
+        "00000000-0000-4000-8000-000000000112"
+      )
+    ).rejects.toThrow("database unavailable")
+  })
+})

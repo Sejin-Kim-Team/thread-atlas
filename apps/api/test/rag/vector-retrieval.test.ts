@@ -166,4 +166,39 @@ describe("vector retrieval adapter contract (red)", () => {
 
     expect(result.length).toBeLessThanOrEqual(2)
   })
+
+  it("applies pageKind and sourceDomain filters before vector limit", async () => {
+    const adapter = await loadVectorRetrievalModule()
+    const ownerId = randomUUID()
+    const matchingRecordId = randomUUID()
+
+    for (let index = 0; index < 16; index += 1) {
+      const distractorId = randomUUID()
+      await insertVectorFixture({
+        recordId: distractorId,
+        ownerUserId: ownerId,
+        createdAt: `2026-03-${String(index + 1).padStart(2, "0")}T00:00:00.000Z`,
+        embeddingBase: 0.2
+      })
+      await queryDb("update memory_records set page_kind = 'article' where id = $1", [distractorId])
+    }
+
+    await insertVectorFixture({
+      recordId: matchingRecordId,
+      ownerUserId: ownerId,
+      createdAt: "2026-03-20T00:00:00.000Z",
+      embeddingBase: 0.15
+    })
+
+    const result = await adapter.searchByVector({
+      ownerUserId: ownerId,
+      queryEmbedding: buildEmbeddingVector(768, 0.2),
+      topK: 1,
+      pageKind: "thread",
+      sourceDomain: "news.ycombinator.com"
+    })
+
+    expect(result).toHaveLength(1)
+    expect(result[0]?.recordId).toBe(matchingRecordId)
+  })
 })

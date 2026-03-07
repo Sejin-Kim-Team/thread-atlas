@@ -53,7 +53,7 @@ create table if not exists memory_records (
 );
 
 create table if not exists memory_record_embeddings (
-  record_id text primary key,
+  record_id text primary key references memory_records(id) on delete cascade,
   owner_user_id uuid not null references users(id) on delete cascade,
   embedding_model text not null,
   embedding_dims integer not null check (embedding_dims = 768),
@@ -61,6 +61,20 @@ create table if not exists memory_record_embeddings (
   content_hash text not null,
   created_at timestamptz not null default now()
 );
+
+delete from memory_record_embeddings mre
+where not exists (
+  select 1
+  from memory_records mr
+  where mr.id = mre.record_id
+);
+
+alter table memory_record_embeddings
+  drop constraint if exists memory_record_embeddings_record_id_fkey;
+
+alter table memory_record_embeddings
+  add constraint memory_record_embeddings_record_id_fkey
+  foreign key (record_id) references memory_records(id) on delete cascade;
 
 create table if not exists analysis_runs (
   id uuid primary key,

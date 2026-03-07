@@ -152,4 +152,32 @@ describe("POST /api/ingest/memory (hackathon contract)", () => {
       })
     )
   })
+
+  it("rejects records with invalid provenance.pageKind", async () => {
+    const app = createServer()
+    const issued = await issueToken(app, "google-sub-ingest-epsilon")
+    const invalid = buildStorableMemoryRecord(issued.userId) as Record<string, unknown>
+    invalid.id = "mem-invalid-page-kind-1"
+    invalid.provenance = {
+      ...(invalid.provenance as Record<string, unknown>),
+      pageKind: "forum"
+    }
+
+    const response = await request(app)
+      .post("/api/ingest/memory")
+      .set("Authorization", `Bearer ${issued.token}`)
+      .send({
+        source: "analyze",
+        records: [invalid]
+      })
+
+    expect(response.status).toBe(200)
+    expect(response.body.acceptedIds).toEqual([])
+    expect(response.body.rejected).toContainEqual(
+      expect.objectContaining({
+        id: "mem-invalid-page-kind-1",
+        reason: "missing-provenance"
+      })
+    )
+  })
 })

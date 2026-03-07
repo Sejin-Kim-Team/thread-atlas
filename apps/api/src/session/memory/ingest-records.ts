@@ -1,8 +1,6 @@
 import type { PoolClient } from "pg"
 import { getPool } from "../../db/pool"
-import {
-  buildEmbeddingHash,
-} from "../../rag/embedding"
+import { buildEmbeddingHash } from "../../rag/embedding"
 import { upsertMemoryRecordEmbedding } from "../../rag/memory-record-embeddings-repository"
 import {
   insertMemoryRecord,
@@ -27,11 +25,17 @@ const ALLOWED_KINDS: MemoryRecordKind[] = [
   "claim-evidence-summary"
 ]
 
+const ALLOWED_PAGE_KINDS = ["article", "thread", "post", "generic"] as const
+
 const ALLOWED_SOURCES: IngestMemoryRequestBody["source"][] = [
   "analyze",
   "turn-completion",
   "batch-repair"
 ]
+
+function isPageKind(value: unknown): value is "article" | "thread" | "post" | "generic" {
+  return typeof value === "string" && ALLOWED_PAGE_KINDS.includes(value as (typeof ALLOWED_PAGE_KINDS)[number])
+}
 
 function hasCompleteProvenance(record: MemoryRecord): boolean {
   const provenance = record.provenance
@@ -41,7 +45,7 @@ function hasCompleteProvenance(record: MemoryRecord): boolean {
 
   return Boolean(
     provenance.sourceUrl &&
-      provenance.pageKind &&
+      isPageKind(provenance.pageKind) &&
       provenance.snapshotCapturedAt &&
       provenance.extractorId &&
       provenance.skeletonVersion
@@ -268,10 +272,11 @@ export async function ingestMemoryRecords(
       })
       acceptedIds.push(record.id)
     } catch (error) {
-      if (isEmbeddingProviderError(error)) {
+      if (!isEmbeddingProviderError(error)) {
         throw error
       }
-      // embedding 실패 등 저장 실패는 해당 레코드만 reject한다.
+
+      // provider 오류는 해당 레코드만 reject하고 다음 배치를 계속 처리한다.
       rejected.push({
         id: record.id || "unknown",
         reason: "not-storable"
