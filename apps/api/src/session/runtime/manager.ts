@@ -18,6 +18,7 @@ interface RuntimeHandleContext {
 }
 
 const MAX_RUNTIME_SESSIONS = 256
+const RECALL_CARD_MIN_SIMILARITY = 0.8
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null
@@ -29,6 +30,14 @@ function asNumber(value: unknown): number | null {
 
 function asString(value: unknown): string | null {
   return typeof value === "string" && value.length > 0 ? value : null
+}
+
+function asStringOrNull(value: unknown): string | null {
+  return typeof value === "string" && value.length > 0 ? value : null
+}
+
+function asFiniteNumber(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null
 }
 
 function invalidEvent(message: string): RuntimeResult {
@@ -189,6 +198,49 @@ function makeTimestamp(): string {
   return new Date().toISOString()
 }
 
+function extractSourceDomain(url: string | undefined): string | undefined {
+  const normalized = asStringOrNull(url)
+  if (!normalized) {
+    return undefined
+  }
+  try {
+    return new URL(normalized).hostname
+  } catch {
+    return undefined
+  }
+}
+
+function resolveFocusText(snapshot: SnapshotLike): string {
+  const focusText = asStringOrNull(snapshot.focus?.node?.text)
+  return focusText ?? ""
+}
+
+function buildRecallQueryText(intentText: string, snapshot: SnapshotLike, answerText: string): string {
+  // recall 질의는 intent + focus text + answer 요약을 합쳐 현재 맥락을 최대한 보존한다.
+  return [intentText, resolveFocusText(snapshot), answerText].filter(Boolean).join(" ")
+}
+
+function selectRecallCandidate(
+  candidates: RuntimeRecallCandidate[],
+  ownerUserId: string
+): RuntimeRecallCandidate | null {
+  for (const candidate of candidates) {
+    const similarityScore = asFiniteNumber(candidate.similarityScore)
+    const isSameOwner = candidate.ownerUserId === ownerUserId
+    if (!isSameOwner) {
+      continue
+    }
+    if (similarityScore === null || similarityScore < RECALL_CARD_MIN_SIMILARITY) {
+      continue
+    }
+    if (!asStringOrNull(candidate.canonicalUrl)) {
+      continue
+    }
+    return candidate
+  }
+  return null
+}
+
 export class RuntimeManager {
   private sessionCounter = 0
   private turnCounter = 0
@@ -196,7 +248,7 @@ export class RuntimeManager {
   private sessionByPrincipalClientId = new Map<string, string>()
   private ownerByClientSessionId = new Map<string, string>()
 
-  handle(raw: unknown, context: RuntimeHandleContext): RuntimeResult {
+  async handle(raw: unknown, context: RuntimeHandleContext): Promise<RuntimeResult> {
     const envelope = validateEnvelope(raw)
     if (!envelope) {
       return invalidEvent("invalid envelope")
@@ -355,7 +407,10 @@ export class RuntimeManager {
     }
   }
 
-  private handleUserIntent(envelope: RuntimeEnvelope, session: RuntimeSession): RuntimeResult {
+  private async handleUserIntent(
+    envelope: RuntimeEnvelope,
+    session: RuntimeSession
+  ): Promise<RuntimeResult> {
     const parsed = parseUserIntentPayload(envelope.payload)
     if (!parsed) {
       return invalidEvent("invalid user.intent payload")
@@ -382,8 +437,9 @@ export class RuntimeManager {
 
     const turnId = this.newTurnId()
     session.activeTurnId = turnId
+    const answerText = "current-page answer placeholder"
 
-    const events = [
+    const events: Array<Record<string, unknown>> = [
       {
         type: "progress",
         turnId,
@@ -402,22 +458,86 @@ export class RuntimeManager {
           kind: "present",
           body: {
             type: "answer",
-            text: "current-page answer placeholder",
+            text: answerText,
             responseMode: "answer",
             provenanceSummary: ["current-page"]
           }
         }
-      },
-      {
-        type: "turn.done",
-        turnId,
-        sessionId: session.sessionId,
-        timestamp: makeTimestamp(),
-        payload: {
-          referencedTabIds: [parsed.primaryTabId]
-        }
       }
     ]
+
+    const usedMemoryRecordIds: string[] = []
+
+    try {
+      const { retrieveMemoryCandidates } = await import("../../rag/retrieval-service")
+      const retrievalInput: {
+        ownerUserId: string
+        queryText: string
+        limit: number
+        pageKind?: "article" | "thread" | "post" | "generic"
+        sourceDomain?: string
+      } = {
+        ownerUserId: session.ownerUserId,
+        queryText: buildRecallQueryText(parsed.text, latest, answerText),
+        limit: 2
+      }
+      if (latest.page?.kind) {
+        retrievalInput.pageKind = latest.page.kind
+      }
+      const sourceDomain = extractSourceDomain(latest.page?.url)
+      if (sourceDomain) {
+        retrievalInput.sourceDomain = sourceDomain
+      }
+
+      const recallCandidates = await retrieveMemoryCandidates(retrievalInput)
+      const selectedRecall = selectRecallCandidate(recallCandidates, session.ownerUserId)
+      if (selectedRecall) {
+        const navigation: Record<string, unknown> = {
+          canonicalUrl: selectedRecall.canonicalUrl
+        }
+        if (selectedRecall.nodeAnchor) {
+          navigation.nodeAnchor = selectedRecall.nodeAnchor
+        }
+        if (selectedRecall.openMode) {
+          navigation.openMode = selectedRecall.openMode
+        }
+
+        events.push({
+          type: "projection",
+          turnId,
+          sessionId: session.sessionId,
+          timestamp: makeTimestamp(),
+          payload: {
+            kind: "present",
+            body: {
+              type: "recall-card",
+              summary: selectedRecall.summary,
+              kind: selectedRecall.kind,
+              similarityScore: selectedRecall.similarityScore,
+              navigation
+            }
+          }
+        })
+        usedMemoryRecordIds.push(selectedRecall.recordId)
+      }
+    } catch {
+      // retrieval 오류는 전체 턴 실패로 전파하지 않고 answer 우선 정책을 유지한다.
+    }
+
+    const turnDonePayload: Record<string, unknown> = {
+      referencedTabIds: [parsed.primaryTabId]
+    }
+    if (usedMemoryRecordIds.length > 0) {
+      turnDonePayload.usedMemoryRecordIds = usedMemoryRecordIds
+    }
+
+    events.push({
+      type: "turn.done",
+      turnId,
+      sessionId: session.sessionId,
+      timestamp: makeTimestamp(),
+      payload: turnDonePayload
+    })
 
     return {
       status: 200,
@@ -456,4 +576,14 @@ export class RuntimeManager {
     this.sessionByPrincipalClientId.delete(`${oldest.ownerUserId}:${oldest.clientSessionId}`)
     this.ownerByClientSessionId.delete(oldest.clientSessionId)
   }
+}
+interface RuntimeRecallCandidate {
+  recordId: string
+  ownerUserId: string
+  summary: string
+  kind: "branch-summary" | "section-summary" | "claim-evidence-summary"
+  canonicalUrl: string
+  nodeAnchor?: Record<string, unknown>
+  openMode?: "same-tab" | "new-tab" | "sidepanel-preview"
+  similarityScore: number
 }

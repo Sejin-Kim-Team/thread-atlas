@@ -222,12 +222,14 @@ export type HackathonProjectionBody =
 
 - `answer`는 current-page grounded answer 전달용이다
 - `recall-card`는 current-page answer 이후에만 붙을 수 있는 제한적 recall 결과 전달용이다
+- retrieval no-hit 또는 low-confidence면 `recall-card`를 emit하지 않는다
+- `recall-card`는 `navigation.canonicalUrl`, `navigation.nodeAnchor`, `navigation.openMode`를 passthrough 해야 한다
 - `status-note`는 FE가 보조 상태/메시지를 렌더링할 수 있게 하는 최소 payload다
 - 해커톤 구현에서는 projection body를 이 union subset으로 제한한다
 
 ### 7.3 turn.done
 
-- `usedMemoryRecordIds`는 optional recall이 실제 사용된 경우에만 채워진다
+- `usedMemoryRecordIds`는 optional recall이 실제 사용된 경우 반드시 채워진다
 - `referencedTabIds`는 해커톤 기준 현재 primary tab 1개만 포함하는 것을 기본값으로 둔다
 
 ---

@@ -183,6 +183,7 @@ v0.1 운영 원칙:
 - 로컬 개발에서는 `Application Default Credentials (ADC)`를 사용한다
 - GCP 배포에서는 `Cloud Run` 서비스 계정으로 인증한다
 - API key 전용 분기 구현보다 `project + location + ADC/service account` 경로를 canonical로 둔다
+- 제출 기준으로는 Gemini 모델 연동 계층을 `Google GenAI SDK` 또는 `ADK` 기반으로 정렬한다
 - embedding 연동 필수 env는 `GOOGLE_CLOUD_PROJECT`, `GOOGLE_CLOUD_LOCATION`으로 고정한다
 
 해커톤 canonical embedding 설정:

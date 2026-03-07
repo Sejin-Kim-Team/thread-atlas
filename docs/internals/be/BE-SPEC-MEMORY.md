@@ -400,6 +400,21 @@ memory retrieval 결과는 raw record 전체를 바로 노출하지 않는다.
 - current intent와 primary tab 맥락을 기준으로 memory-link를 생성
 - acceptance policy를 통과한 경우만 보조 근거로 사용
 
+## 8.4 Recall Runtime Bridge Rule (`feature/be-recall-runtime`)
+
+이번 브랜치에서 memory layer와 runtime layer를 연결할 때의 고정 규칙:
+
+- recall 조회는 항상 owner-scoped로 수행한다.
+- recall hit가 없거나 low-confidence면 runtime은 `recall-card`를 만들지 않는다.
+- `recall-card`는 current-page answer 이후의 보조 projection으로만 노출한다.
+- runtime은 recall에 실제 사용한 record id를 `turn.done.usedMemoryRecordIds`에 기록한다.
+- runtime은 `navigation.canonicalUrl`, `navigation.nodeAnchor`, `navigation.openMode`를 projection에 passthrough 한다.
+
+비범위:
+
+- FE 렌더링 컴포넌트 규약
+- `openMode` 실제 실행 정책
+
 ---
 
 ## 9. Helper Function Signatures

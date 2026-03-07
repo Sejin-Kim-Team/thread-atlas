@@ -19,10 +19,15 @@ export interface RuntimeSession {
 }
 
 export interface SnapshotLike {
+  page?: {
+    url?: string
+    kind?: "article" | "thread" | "post" | "generic"
+  }
   focus?: {
     nodeId?: string
     node?: {
       id?: string
+      text?: string
     }
   }
   meta?: {

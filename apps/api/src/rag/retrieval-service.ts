@@ -23,6 +23,7 @@ export interface RetrievedMemoryCandidate {
   canonicalUrl: string
   pageTitle?: string
   nodeAnchor?: Record<string, unknown>
+  openMode?: "same-tab" | "new-tab" | "sidepanel-preview"
   similarityScore: number
 }
 
@@ -35,6 +36,7 @@ interface RetrievalCandidateDbRow {
   canonical_url: string
   page_title: string | null
   node_anchor: Record<string, unknown> | null
+  open_mode: "same-tab" | "new-tab" | "sidepanel-preview" | null
   source_domain: string
   page_kind: "article" | "thread" | "post" | "generic"
   created_at: Date | string
@@ -129,6 +131,9 @@ export async function retrieveMemoryCandidates(
     }
     if (row.node_anchor) {
       candidate.nodeAnchor = row.node_anchor
+    }
+    if (row.open_mode) {
+      candidate.openMode = row.open_mode
     }
     return candidate
   })

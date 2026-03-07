@@ -30,6 +30,11 @@ Companion:
 - 제한적 과거 회상 범위
 - 해커톤 RAG 저장/검색 최소 스키마
 
+추가 제출 조건:
+
+- Gemini 계열 모델 연동은 최종적으로 `Google GenAI SDK` 또는 `ADK`를 사용해야 한다.
+- 현재 브랜치 작업은 recall runtime 연결을 우선 진행하되, SDK 전환은 제출 전 필수 후속 범위로 관리한다.
+
 ---
 
 ## 2. Canonical Scope
@@ -443,6 +448,22 @@ memory는 해커톤에서 보조 기능이지만, 데모 가능한 범위로 포
 - aggressive memory-link acceptance
 - recall/comparison 중심 multi-step orchestration
 - memory-only answer planning
+
+### 8.6 Recall Runtime Bridge Rules (`feature/be-recall-runtime`)
+
+이번 브랜치에서 고정하는 runtime 규칙:
+
+- `recall-card`는 current-page answer 생성 이후에만 추가 projection으로 붙일 수 있다.
+- recall은 primary answer를 대체할 수 없고, answer precedence를 항상 유지해야 한다.
+- retrieval hit가 없거나 low-confidence면 `recall-card`를 생성하지 않는다.
+- `turn.done`에는 실제로 recall에 사용된 `usedMemoryRecordIds`를 기록해야 한다.
+- `recall-card.navigation`에는 `canonicalUrl`, `nodeAnchor`, `openMode`를 그대로 passthrough 해야 한다.
+- recall 후보는 항상 owner-scoped memory로만 조회한다.
+
+비범위:
+
+- FE 렌더링/레이아웃/클릭 UX 확정
+- `openMode` 실제 실행 정책 결정
 
 ---
 

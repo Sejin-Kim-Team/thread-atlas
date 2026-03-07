@@ -9,6 +9,7 @@ export const SELECT_RETRIEVAL_CANDIDATE_ROWS_SQL = `
     mr.canonical_url,
     mr.page_title,
     mr.node_anchor,
+    mr.open_mode,
     mr.source_domain,
     mr.page_kind,
     mr.created_at

@@ -20,7 +20,7 @@ export function createWsSessionEventsRouter(): ReturnType<typeof Router> {
       return
     }
 
-    const result = runtime.handle(req.body, { principalUserId: principal.userId })
+    const result = await runtime.handle(req.body, { principalUserId: principal.userId })
     res.status(result.status).json(result.body)
   }
 
