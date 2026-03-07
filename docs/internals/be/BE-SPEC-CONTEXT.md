@@ -21,6 +21,12 @@ Companion:
 - FE가 보낸 `ContextPack`은 optional hint다
 - planner는 raw snapshot이나 FE pack이 아니라 `NormalizedContextPack`을 본다
 
+해커톤 범위 적용 원칙:
+
+- 본 문서는 full context model과 upgrade-ready 타입까지 함께 담는다
+- 하지만 [BE-PRD-HACKATHON.md](./BE-PRD-HACKATHON.md) 기준 구현에서는 current-page subset만 사용한다
+- cross-tab / shared working set / relation edge의 실제 운용은 해커톤 비적용이다
+
 ---
 
 ## 2. Canonical Input Policy
@@ -121,6 +127,10 @@ export type RetrievalIntentHint =
   | "interactive-explain"
 ```
 
+해커톤 적용 규칙:
+
+- `cross-tab-compare`는 예약 값으로 남기되, 해커톤 구현에서는 생성하지 않는다
+
 ### 4.4 Risk Flags
 
 ```ts
@@ -131,6 +141,10 @@ export type RiskFlag =
   | "weak-structure"
   | "cross-tab-required"
 ```
+
+해커톤 적용 규칙:
+
+- `cross-tab-required`는 예약 값으로 남기되, 해커톤 구현에서는 사용하지 않는다
 
 ### 4.5 Semantic Unit Candidates
 
@@ -248,6 +262,11 @@ v0.1은 focus-first 규칙을 사용한다.
 
 최종 retrieval policy는 normalize 기본값 위에 planner가 intent를 반영해 override한다.
 
+해커톤 적용 규칙:
+
+- 해커톤 current-page 구현에서는 모든 mode에 대해 `crossTabAllowed = false`로 강제한다
+- 즉 full model의 field는 유지하되, runtime policy는 current-page only로 축소한다
+
 ### 5.3 Primary Keyword Derivation
 
 v0.1 keyword extraction은 단순 규칙으로 유지한다.
@@ -317,6 +336,14 @@ generic 모드:
 
 ## 6. Relation Model
 
+본 절은 full-scope / upgrade-ready relation model을 정의한다.
+
+해커톤 current-page 구현에서는:
+
+- `CrossTabEdge`를 생성하지 않는다
+- `MemoryLink` 복잡한 승격 플로우를 사용하지 않는다
+- relation model은 장기 upgrade 대비 정의로만 유지한다
+
 ### 6.1 Base Relation Edge
 
 ```ts
@@ -378,6 +405,14 @@ export type RelationEdge = CrossTabEdge | MemoryLink
 ---
 
 ## 7. Session Context Structures
+
+본 절의 구조는 full session model 기준이다.
+
+해커톤 current-page 구현에서는:
+
+- `TabContext`를 primary tab 1개에 대한 단순 latest snapshot holder로 축소해도 된다
+- `SharedWorkingSet`은 구현하지 않아도 된다
+- current-page runtime의 canonical state는 [BE-SPEC-HACKATHON.md](./BE-SPEC-HACKATHON.md)의 `activeTurn` 중심 모델을 따른다
 
 ### 7.1 TabContext
 
@@ -505,4 +540,3 @@ v0.1 backend 구현 시 권장 파일 분리는 다음과 같다.
 - `apps/api/src/session/context-pack/normalize.ts`
 - `apps/api/src/session/context-pack/units.ts`
 - `apps/api/src/session/context-pack/flags.ts`
-

@@ -86,7 +86,6 @@ export interface AnalyzeRequest {
   snapshot: SemanticSnapshot
   providedPack?: ContextPack
   mode?: "seed" | "memory-candidate" | "visual-summary"
-  persistSessionCache?: boolean
 }
 ```
 
@@ -102,25 +101,55 @@ export interface AnalyzeRequest {
 ```ts
 import type { MemoryRecordKind, VisualDerivedSummary } from "./be-spec-memory"
 
-export interface AnalyzeResponse {
-  analysisId: string
-  normalizedMode: "discussion" | "authored" | "interactive" | "generic"
-  summaryCandidates: Array<{
-    kind: MemoryRecordKind
-    summary: string
-    rootNodeIds: string[]
-    confidence: number
-  }>
-  visualSummaries: VisualDerivedSummary[]
-  persistedSessionCache: boolean
-}
+export type AnalyzeResponse =
+  | {
+      mode: "seed"
+      analysisId: string
+      normalizedMode: "discussion" | "authored" | "interactive" | "generic"
+      summaryCandidates: Array<{
+        kind: MemoryRecordKind
+        summary: string
+        rootNodeIds: string[]
+        confidence: number
+      }>
+      visualSummaries?: VisualDerivedSummary[]
+    }
+  | {
+      mode: "memory-candidate"
+      analysisId: string
+      normalizedMode: "discussion" | "authored" | "interactive" | "generic"
+      summaryCandidates: Array<{
+        kind: MemoryRecordKind
+        summary: string
+        rootNodeIds: string[]
+        confidence: number
+      }>
+      visualSummaries?: VisualDerivedSummary[]
+    }
+  | {
+      mode: "visual-summary"
+      analysisId: string
+      normalizedMode: "discussion" | "authored" | "interactive" | "generic"
+      visualSummaries: VisualDerivedSummary[]
+      summaryCandidates?: Array<{
+        kind: MemoryRecordKind
+        summary: string
+        rootNodeIds: string[]
+        confidence: number
+      }>
+    }
 ```
 
 규칙:
 
+- 모든 mode는 `analysisId`, `normalizedMode`를 반드시 반환한다
+- `seed`는 `summaryCandidates`를 반드시 반환하고 `visualSummaries`는 optional이다
+- `memory-candidate`는 `summaryCandidates`를 반드시 반환하고 저장 후보 수준의 결과만 포함한다
+- `visual-summary`는 `visualSummaries`를 반드시 반환하고 `summaryCandidates`는 optional이다
 - `summaryCandidates`는 memory write 후보군이지, 자동 저장 결과가 아니다
 - `visualSummaries`는 현재 snapshot에서 도출된 visual-derived summary다
 - response는 raw snapshot을 다시 에코하지 않는다
+- analyze는 public contract 차원에서 session cache 동작을 노출하지 않는다
 
 ## 3.3 Behavior Rules
 
@@ -151,6 +180,7 @@ export interface IngestMemoryRequest {
 - `records`는 모두 approved/storable record여야 한다
 - candidate 상태 relation이나 raw snapshot-derived payload는 허용하지 않는다
 - empty `records`는 허용 가능하나 no-op 처리한다
+- 각 record의 `ownerUserId`는 현재 authenticated principal과 일치해야 한다
 
 ## 4.2 Response
 
@@ -178,10 +208,18 @@ export interface IngestMemoryResponse {
 ingest 전 검증:
 
 - 허용된 `MemoryRecordKind`인지
+- `ownerUserId`가 현재 principal과 일치하는지
 - `summary`가 비어 있지 않은지
 - provenance가 충분한지
 - visual-only record가 아닌지
 - 민감값이 포함되지 않았는지
+
+write 허용 규칙:
+
+- `summary`가 비어 있지 않아야 한다
+- `ownerUserId`가 존재하고 현재 principal과 일치해야 한다
+- provenance가 완전해야 한다
+- visual-only 결과는 저장할 수 없다
 
 ---
 

@@ -92,6 +92,7 @@ active 상태에서 client는:
 - `context.update`
 - `snapshot.push`
 - `selection.update`
+- `context.enrich.result`
 - `user.intent`
 - `interrupt`
 - `projection.ack`
@@ -223,7 +224,60 @@ export interface UserIntentPayload {
 - server는 이 이벤트 수신 시 새 `turnId`를 생성할 수 있다
 - `primaryTabId`와 `boundSnapshotCapturedAt`은 active turn binding의 기준이다
 
-## 5.7 `interrupt`
+## 5.7 `context.enrich.result`
+
+목적:
+
+- server가 요청한 추가 컨텍스트를 전달
+
+```ts
+export type EnrichTargetRef =
+  | {
+      type: "semantic-node"
+      tabId: number
+      nodeId: string
+    }
+  | {
+      type: "page-entity"
+      pageUrl: string
+      entityId: string
+    }
+  | {
+      type: "region"
+      tabId: number
+      regionHint: "viewport" | "focus-node-region" | "selection-region"
+    }
+
+export interface ContextEnrichResultPayload {
+  requestKind: "node-screenshot" | "visible-region" | "node-detail"
+  targetRef: EnrichTargetRef
+  imageBase64?: string
+  mimeType?: "image/png" | "image/jpeg"
+  detail?: {
+    text?: string
+    htmlSnippet?: string
+    attributes?: Record<string, string>
+    bounds?: {
+      x: number
+      y: number
+      width: number
+      height: number
+    }
+  }
+  capturedAt: string
+  status?: "ok" | "failed" | "unsupported"
+  failureReason?: string
+}
+```
+
+규칙:
+
+- `context.enrich.result`는 현재 active turn에만 귀속된다
+- `imageBase64` 또는 `detail` 중 최소 하나는 포함해야 한다
+- enrich result는 primary snapshot을 대체하지 않고 보강한다
+- 실패 시에는 `status`와 `failureReason`을 함께 보내는 것이 권장된다
+
+## 5.8 `interrupt`
 
 목적:
 
@@ -240,7 +294,7 @@ export interface InterruptPayload {
 - active turn이 없으면 no-op 허용
 - active turn이 있으면 server는 interruptible 상태로 전이해야 한다
 
-## 5.8 `projection.ack`
+## 5.9 `projection.ack`
 
 목적:
 
@@ -278,13 +332,49 @@ export interface ProgressPayload {
     | "intent-routed"
     | "retrieval-started"
     | "retrieval-completed"
+    | "enrich-requested"
+    | "enrich-received"
     | "relation-analysis"
     | "response-planning"
   message?: string
 }
 ```
 
-## 6.3 `retrieval.result`
+## 6.3 `context.enrich.request`
+
+목적:
+
+- server가 FE에 추가 screenshot / detail을 요청
+
+```ts
+export interface ContextEnrichRequestPayload {
+  requestKind: "node-screenshot" | "visible-region" | "node-detail"
+  targetRef: EnrichTargetRef
+  detailFields?: Array<"text" | "htmlSnippet" | "attributes" | "bounds">
+  reason:
+    | "visual-clarification"
+    | "node-detail-needed"
+    | "ocr-needed"
+    | "region-recapture"
+  visibility: "hidden" | "status-only" | "approval-required"
+  userMessage?: string
+  approvalReason?: string
+  timeoutMs?: number
+}
+```
+
+규칙:
+
+- request는 current primary tab 또는 그 page/entity를 대상으로만 보낼 수 있다
+- request는 현재 active turn에만 유효하다
+- 해커톤 기본값은 `visibility = "status-only"`다
+- request는 FE가 deterministic하게 처리 가능한 구조화 필드만 사용해야 한다
+- request 필드는 backend가 판단한 capture target 명세이며, 실제 캡처 방법은 FE가 결정한다
+- FE가 처리할 수 없으면 실패 상태 또는 대응 error를 반환하는 것이 권장된다
+- `targetRef.type = "page-entity"`는 FE의 `url:entity-id` 기반 lookup API를 수용하기 위한 canonical target form이다
+- `targetRef.type = "region"`은 entity가 아닌 viewport/selection/focus-region recapture를 위한 target form이다
+
+## 6.4 `retrieval.result`
 
 목적:
 
@@ -307,7 +397,7 @@ export interface RetrievalResultPayload {
 - v0.1에서는 summary-first로 전달
 - raw snapshot/body 전체를 직접 stream하지 않는다
 
-## 6.4 `projection`
+## 6.5 `projection`
 
 목적:
 
@@ -328,7 +418,7 @@ export interface ProjectionPayload {
 - navigation / browse 관련 projection이 있을 경우, server는 target과 open hint를 제안할 수 있다
 - 실제 same-tab / new-tab / sidepanel preview 실행은 client가 결정한다
 
-## 6.5 `state.patch`
+## 6.6 `state.patch`
 
 목적:
 
@@ -342,7 +432,7 @@ export interface StatePatchPayload {
 }
 ```
 
-## 6.6 `memory.patch`
+## 6.7 `memory.patch`
 
 목적:
 
@@ -355,7 +445,7 @@ export interface MemoryPatchPayload {
 }
 ```
 
-## 6.7 `turn.done`
+## 6.8 `turn.done`
 
 목적:
 
@@ -376,7 +466,7 @@ export interface TurnDonePayload {
 - 모든 turn은 `turn.done` 또는 `error` 중 하나로 종료된다
 - `turn.done`은 실제 사용한 provenance를 요약해 포함해야 한다
 
-## 6.8 `error`
+## 6.9 `error`
 
 목적:
 

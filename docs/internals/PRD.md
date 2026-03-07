@@ -8,6 +8,25 @@ Target Hackathon: Gemini Live Agent Challenge (Deadline: Mar 16, 2026)
 Category: Live Agents 🗣️
 Companion: Agent Brain Spec v1.1, Semantic Relay Spec v1.0, Scenario Playbook v3.0
 
+> Supersession Note (2026-03-07)
+>
+> 해커톤 제출용 backend 실행 경로와 infra 기준은 기존 `POST /api/evaluate + SSE` 설명보다
+> [BE-PRD-HACKATHON.md](./be/BE-PRD-HACKATHON.md),
+> [BE-SPEC-HACKATHON.md](./be/BE-SPEC-HACKATHON.md),
+> [BE-SPEC-PROTOCOL-HACKATHON.md](./be/BE-SPEC-PROTOCOL-HACKATHON.md),
+> [BE-SPEC-INFRA.md](./be/BE-SPEC-INFRA.md)
+> 를 우선 SoT로 본다.
+>
+> 즉 해커톤 기준의 canonical backend path는:
+>
+> - `WebSocket session`
+> - `current-page semantic snapshot`
+> - `turn-oriented evidence orchestration`
+> - `on-demand enrich`
+> - `Cloud Run + Cloud SQL(pgvector) + Vertex AI`
+>
+> 이다.
+
 ---
 
 # 1. Problem
@@ -63,15 +82,15 @@ ThreadAtlas는 커뮤니티 스레드를 함께 읽는 **음성 기반 실시간
 | Real-time interaction (Audio/Vision) | 음성 대화 + 스크린샷 기반 Vision |
 | Natural conversation | 스레드 탐색 중 자유로운 음성 질의 |
 | Interruption handling | Gemini Live API 네이티브 Barge-in |
-| Gemini Live API or ADK | Gemini Live API (Ephemeral Token, 클라이언트 직접 연결) |
-| Google Cloud hosted | Cloud Run + Firestore |
+| Gemini Live API or ADK | Gemini Live API + BE turn orchestration (`WebSocket session` canonical path) |
+| Google Cloud hosted | Cloud Run + Cloud SQL(pgvector) + Vertex AI |
 
 ## 3.2 Judging Criteria Mapping
 
 | 심사 기준 (비중) | 전략 |
 |----------------|------|
 | Innovation & Multimodal UX (40%) | "text box" 패러다임 탈피. 음성으로 묻고, DOM 센서로 컨텍스트를 읽고, 음성+하이라이트로 답하는 루프. ContentGraph DAG로 원문↔토론 관계 추적. DOM 스냅샷 원칙: 사용자와 같은 세계를 보는 투명한 에이전트 |
-| Technical Implementation (30%) | Semantic Relay + Agent Brain 분리. Gemini Live를 센서/프로젝션으로 추상화. BE 에이전틱 루프 + SSE 스트리밍. 동적 Content Script inject. Monorepo 공유 타입 시스템 |
+| Technical Implementation (30%) | Semantic Relay + BE turn orchestrator 분리. current-page semantic snapshot, targeted enrich, conservative recall, WebSocket protocol, 동적 Content Script inject, Monorepo 공유 타입 시스템 |
 | Demo & Presentation (30%) | 실제 HN 스레드에서 에이전트가 자율적으로 도구를 선택하며 음성 대화하는 4분 데모 |
 
 ---
@@ -175,9 +194,14 @@ Output (음성 + 페이지 이동 or 사이드바):
 - Argument Map 시각화 (사이드패널 UI)
 - Multi-platform 지원 (Reddit, LessWrong 등) — ContentGraph DAG 구조로 확장 준비됨
 - 자동 댓글 작성 / 브라우징 자동화
-- 벡터 검색 기반 시맨틱 유사도 매칭 (MVP에서는 키워드/토픽 기반 매칭)
 - 서버사이드 원문 fetch (원문은 브라우저 탭에서만 읽음)
 - HN 외 사이트의 Content Script inject (HN 컨텍스트의 원문 탭만 동적 inject)
+
+해커톤 backend supersession 기준 보완:
+
+- memory는 보조 기능이지만 MVP 범위에 포함한다
+- memory recall은 provenance와 browse metadata를 갖는 제한적 유사 사례 회상으로 동작한다
+- vector similarity / embedding 사용은 해커톤 backend 기준 허용 범위다
 
 ---
 

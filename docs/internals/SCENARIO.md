@@ -5,6 +5,26 @@
 Version: 1.0
 Companion to: PRD v1.0
 
+> Supersession Note (2026-03-07)
+>
+> 본 문서의 상세 시나리오는 초기 `POST /api/evaluate + SSE` 흐름을 설명하는 legacy scenario playbook 성격을 가진다.
+> 해커톤 제출용 backend의 현행 실행 사양은 아래 문서를 우선 SoT로 본다.
+>
+> - [BE-PRD-HACKATHON.md](./be/BE-PRD-HACKATHON.md)
+> - [BE-SPEC-HACKATHON.md](./be/BE-SPEC-HACKATHON.md)
+> - [BE-SPEC-PROTOCOL-HACKATHON.md](./be/BE-SPEC-PROTOCOL-HACKATHON.md)
+>
+> 해커톤 기준 canonical path는:
+>
+> - `WebSocket session`
+> - `snapshot.push`
+> - `user.intent`
+> - `optional context.enrich.request / result`
+> - `projection`
+> - `turn.done`
+>
+> 이며, 아래의 `POST /api/evaluate + SSE` 시퀀스는 현행 구현 기준이 아니다.
+
 ---
 
 # 0. 공통 전제
@@ -78,10 +98,10 @@ keyComments:
 ── BE ──    Agent Brain (Cloud Run) 영역
 
 Internal Tool:  BE 내부 실행, 결과가 Gemini에 반환됨
-Projection Tool: SSE로 FE에 즉시 스트리밍됨
+Projection Tool: 현재 해커톤 기준으로는 WS projection/event로 FE에 전달됨
 
-→ SSE:     BE → FE 스트리밍 이벤트
-← POST:   FE → BE HTTP 요청
+→ WS:      BE → FE 스트리밍 이벤트
+← WS:      FE → BE session event
 ```
 
 ---

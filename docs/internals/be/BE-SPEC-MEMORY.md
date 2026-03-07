@@ -59,6 +59,7 @@ export type MemoryRecordKind =
 
 export interface MemoryRecord {
   id: string
+  ownerUserId: string
   kind: MemoryRecordKind
   summary: string
   keywords: string[]
@@ -101,6 +102,7 @@ export interface MemoryRecord {
 
 설명:
 
+- `ownerUserId`는 해당 memory record의 소유 auth principal이다
 - `summary`는 retrieval과 recall의 기본 검색 대상이다
 - `keywords`, `entities`는 lightweight retrieval/filter 보조 필드다
 - `provenance`는 memory-link acceptance policy의 핵심 입력이다
@@ -115,6 +117,12 @@ export interface MemoryRecord {
 - comment, section, claim scope에 따라 다른 anchor를 줄 수 있다
 - `openMode`는 강제값이 아니라 backend 추천 힌트다
 - 실제 same-tab / new-tab / sidepanel preview 실행은 FE가 결정한다
+
+ownership 규칙:
+
+- memory record는 항상 단일 `ownerUserId`에 귀속된다
+- recall lookup은 현재 authenticated principal의 record 범위 안에서만 수행한다
+- 다른 principal의 record를 cross-user recall 대상으로 사용하지 않는다
 
 ---
 
@@ -290,10 +298,11 @@ export interface VisualDerivedSummary {
 
 다음 조건을 만족할 때만 `MemoryRecord`를 쓴다.
 
-- summary가 충분히 안정적임
-- provenance가 명확함
-- 허용된 record kind임
-- user intent와 relevance가 확인되었거나 planner가 회상 가치가 높다고 판단함
+- `summary`가 비어 있지 않다
+- `ownerUserId`가 존재한다
+- provenance가 완전하다
+- 허용된 record kind다
+- visual-only record가 아니다
 
 ## 7.2 Non-Storable Conditions
 
@@ -301,6 +310,7 @@ export interface VisualDerivedSummary {
 
 - raw noisy snapshot
 - malformed summary
+- `ownerUserId` 누락
 - provenance가 약한 candidate relation
 - 민감한 interactive value
 - visual-only 분석 결과
@@ -334,6 +344,12 @@ Long-term RAG는 다음을 기준으로 검색한다.
 ## 8.2 Recall Output Rule
 
 memory retrieval 결과는 raw record 전체를 바로 노출하지 않는다.
+
+규칙:
+
+- recall은 current-page answer가 먼저 생성된 뒤에만 붙을 수 있다
+- recall hit는 primary answer로 승격하지 않는다
+- recall 결과는 `recall-card` projection으로만 노출한다
 
 최소 반환:
 
