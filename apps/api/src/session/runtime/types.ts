@@ -57,6 +57,11 @@ export interface UserIntentPayload {
 }
 
 export interface RuntimeErrorPayload {
-  code: "INVALID_EVENT" | "INVALID_SNAPSHOT" | "UNAUTHORIZED" | "MODEL_CONFIG_MISSING"
+  code:
+    | "INVALID_EVENT"
+    | "INVALID_SNAPSHOT"
+    | "UNAUTHORIZED"
+    | "MODEL_CONFIG_MISSING"
+    | "GENERATION_FAILED"
   message: string
 }

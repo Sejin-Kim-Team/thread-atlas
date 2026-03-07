@@ -92,6 +92,19 @@ function modelConfigMissing(message: string): RuntimeResult {
   }
 }
 
+function generationFailed(message: string): RuntimeResult {
+  return {
+    status: 400,
+    body: {
+      type: "error",
+      payload: {
+        code: "GENERATION_FAILED",
+        message
+      }
+    }
+  }
+}
+
 function validateEnvelope(input: unknown): RuntimeEnvelope | null {
   if (!isObject(input)) {
     return null
@@ -475,7 +488,8 @@ export class RuntimeManager {
           error instanceof Error ? error.message : "model configuration is missing"
         return modelConfigMissing(message)
       }
-      return invalidEvent("generation failed")
+      // 모델 호출 실패는 설정 오류와 분리해 전용 코드로 반환한다.
+      return generationFailed("generation failed")
     }
 
     const events: Array<Record<string, unknown>> = [

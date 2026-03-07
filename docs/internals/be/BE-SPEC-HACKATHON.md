@@ -125,6 +125,7 @@ grounding input 최소 규칙:
 오류/폴백 규칙:
 
 - `GOOGLE_CLOUD_PROJECT` 또는 `GOOGLE_CLOUD_LOCATION` 누락 시 `MODEL_CONFIG_MISSING` 오류를 명시적으로 반환해야 한다
+- 모델 호출 자체 실패(네트워크/응답 파싱/empty response 포함)는 `GENERATION_FAILED` 오류를 명시적으로 반환해야 한다
 - optional fallback 모드에서는 `clarify` 또는 근거 제한 `answer`를 반환할 수 있다
 - fallback 응답은 retrieval evidence에만 기반해야 하며, 모델 생성 문장처럼 가장하면 안 된다
 

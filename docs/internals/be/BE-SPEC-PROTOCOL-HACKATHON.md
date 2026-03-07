@@ -232,6 +232,21 @@ export type HackathonProjectionBody =
 - `usedMemoryRecordIds`는 optional recall이 실제 사용된 경우 반드시 채워진다
 - `referencedTabIds`는 해커톤 기준 현재 primary tab 1개만 포함하는 것을 기본값으로 둔다
 
+### 7.4 error
+
+해커톤 protocol subset에서 `error.payload.code`는 최소 다음 값을 지원해야 한다.
+
+- `INVALID_EVENT`
+- `INVALID_SNAPSHOT`
+- `UNAUTHORIZED`
+- `MODEL_CONFIG_MISSING`
+- `GENERATION_FAILED`
+
+규칙:
+
+- `MODEL_CONFIG_MISSING`은 generation 설정(`GOOGLE_CLOUD_PROJECT`, `GOOGLE_CLOUD_LOCATION`) 누락일 때만 사용한다
+- `GENERATION_FAILED`는 설정은 유효하지만 모델 호출/응답 처리 자체가 실패한 경우에 사용한다
+
 ---
 
 ## 8. Explicitly Deferred from This Protocol

@@ -193,6 +193,7 @@ v0.1 운영 원칙:
 - Vertex 초기화는 `project + location` 기반으로만 수행한다
 - current-page grounding input은 최소 `snapshot focus text + intent text`를 포함해야 한다
 - `GOOGLE_CLOUD_PROJECT` 또는 `GOOGLE_CLOUD_LOCATION` 누락 시 명시적 오류(`MODEL_CONFIG_MISSING`)를 반환한다
+- generation 설정은 유효하지만 모델 호출이 실패하면 명시적 오류(`GENERATION_FAILED`)를 반환한다
 - optional conservative fallback 모드가 아니면 모델 비정상 상태에서 답변 생성을 시도하지 않는다
 - placeholder/stub answer output은 금지한다
 

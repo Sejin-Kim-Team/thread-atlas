@@ -95,13 +95,25 @@ export async function retrieveMemoryCandidates(
     queryText,
     "RETRIEVAL_QUERY"
   )
-  const vectorHits = await searchByVector({
+  const vectorSearchInput: {
+    ownerUserId: string
+    queryEmbedding: number[]
+    topK: number
+    pageKind?: "article" | "thread" | "post" | "generic"
+    sourceDomain?: string
+  } = {
     ownerUserId,
     queryEmbedding: queryEmbeddingResult.embedding,
-    topK: vectorTopK,
-    pageKind: pageKind ?? undefined,
-    sourceDomain: sourceDomain ?? undefined
-  })
+    topK: vectorTopK
+  }
+  if (pageKind) {
+    vectorSearchInput.pageKind = pageKind
+  }
+  if (sourceDomain) {
+    vectorSearchInput.sourceDomain = sourceDomain
+  }
+
+  const vectorHits = await searchByVector(vectorSearchInput)
   if (vectorHits.length === 0) {
     return []
   }

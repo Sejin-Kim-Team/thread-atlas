@@ -174,4 +174,57 @@ describe("ws generation runtime flow", () => {
       }
     }
   })
+
+  it("returns GENERATION_FAILED when generation call fails with valid model config", async () => {
+    // 설정이 유효해도 모델 호출 자체가 실패하면 GENERATION_FAILED여야 한다.
+    vi.doMock("../../src/services/gemini", () => ({
+      createGeminiClient: () => ({
+        generateText: vi.fn(async () => {
+          throw new Error("upstream model failure")
+        })
+      }),
+      isModelConfigError: vi.fn(() => false)
+    }))
+
+    const previousProject = process.env.GOOGLE_CLOUD_PROJECT
+    const previousLocation = process.env.GOOGLE_CLOUD_LOCATION
+    process.env.GOOGLE_CLOUD_PROJECT = previousProject ?? "threadatlas"
+    process.env.GOOGLE_CLOUD_LOCATION = previousLocation ?? "us-central1"
+
+    try {
+      const app = await createApp()
+      const client = request(app)
+      const token = await issueAuthToken(client)
+      const sessionId = await openSession(client, token)
+
+      const intent = await postWsEventWithAuth(
+        client,
+        createEnvelope(
+          "user.intent",
+          createUserIntentPayload(128, "2026-03-07T14:00:01.500Z"),
+          {
+            requestId: "req-intent-gen-4",
+            sessionId
+          }
+        ),
+        token
+      )
+
+      expect(intent.status).toBe(400)
+      expect(intent.body?.type).toBe("error")
+      expect(intent.body?.payload?.code).toBe("GENERATION_FAILED")
+      expect(intent.body?.payload?.code).not.toBe("INVALID_EVENT")
+    } finally {
+      if (previousProject === undefined) {
+        delete process.env.GOOGLE_CLOUD_PROJECT
+      } else {
+        process.env.GOOGLE_CLOUD_PROJECT = previousProject
+      }
+      if (previousLocation === undefined) {
+        delete process.env.GOOGLE_CLOUD_LOCATION
+      } else {
+        process.env.GOOGLE_CLOUD_LOCATION = previousLocation
+      }
+    }
+  })
 })

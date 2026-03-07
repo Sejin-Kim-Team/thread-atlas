@@ -248,6 +248,7 @@ current-page answer generation canonical 규칙:
 - Vertex 초기화: `GOOGLE_CLOUD_PROJECT` + `GOOGLE_CLOUD_LOCATION`
 - grounding input 최소 구성: `snapshot focus text + user intent text`
 - config 누락 시: 명시적 오류(`MODEL_CONFIG_MISSING`) 또는 conservative fallback
+- 모델 호출 자체 실패 시: 명시적 오류(`GENERATION_FAILED`) 또는 conservative fallback
 - 금지: stub/placeholder answer output
 
 ---
