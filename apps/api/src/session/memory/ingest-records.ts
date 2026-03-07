@@ -33,6 +33,10 @@ const ALLOWED_SOURCES: IngestMemoryRequestBody["source"][] = [
   "batch-repair"
 ]
 
+function hasNonBlankText(value: unknown): value is string {
+  return typeof value === "string" && value.trim().length > 0
+}
+
 function isPageKind(value: unknown): value is "article" | "thread" | "post" | "generic" {
   return typeof value === "string" && ALLOWED_PAGE_KINDS.includes(value as (typeof ALLOWED_PAGE_KINDS)[number])
 }
@@ -44,10 +48,10 @@ function hasCompleteProvenance(record: MemoryRecord): boolean {
   }
 
   return Boolean(
-    provenance.sourceUrl &&
+    hasNonBlankText(provenance.sourceUrl) &&
       isPageKind(provenance.pageKind) &&
-      provenance.snapshotCapturedAt &&
-      provenance.extractorId &&
+      hasNonBlankText(provenance.snapshotCapturedAt) &&
+      hasNonBlankText(provenance.extractorId) &&
       provenance.skeletonVersion
   )
 }
@@ -59,8 +63,8 @@ function isVisualOnly(record: MemoryRecord): boolean {
 
 function hasPersistenceFields(record: MemoryRecord): boolean {
   return Boolean(
-    record.source?.pageId &&
-      record.navigation?.canonicalUrl &&
+    hasNonBlankText(record.source?.pageId) &&
+      hasNonBlankText(record.navigation?.canonicalUrl) &&
       record.evidence &&
       typeof record.evidence === "object"
   )
@@ -132,6 +136,12 @@ async function persistMemoryRecord(input: {
     throw new Error("retrievalText is empty")
   }
 
+  // 외부 embedding RPC는 트랜잭션 밖에서 수행해 DB connection 점유 시간을 줄인다.
+  const embeddingResult = await embedTextWithVertex(
+    retrievalText,
+    "RETRIEVAL_DOCUMENT"
+  )
+
   await withRecordTransaction(async (client) => {
     const insertInput: InsertMemoryRecordInput = {
       id: input.record.id,
@@ -178,12 +188,6 @@ async function persistMemoryRecord(input: {
     }
 
     const inserted = await insertMemoryRecord(insertInput, client)
-
-    // 임시 벡터를 금지하고, 실제 Vertex embedding 결과만 저장한다.
-    const embeddingResult = await embedTextWithVertex(
-      retrievalText,
-      "RETRIEVAL_DOCUMENT"
-    )
     await upsertMemoryRecordEmbedding(
       {
         recordId: inserted.id,

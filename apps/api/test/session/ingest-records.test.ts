@@ -130,4 +130,37 @@ describe("ingestMemoryRecords", () => {
       )
     ).rejects.toThrow("database unavailable")
   })
+
+  it("calls embedding provider before opening DB transaction", async () => {
+    const calls: string[] = []
+    mocks.embedTextWithVertex.mockImplementationOnce(async () => {
+      calls.push("embed")
+      return {
+        embeddingModel: "gemini-embedding-001",
+        embeddingDims: 768,
+        embedding: Array.from({ length: 768 }, () => 0.01)
+      }
+    })
+    mocks.clientQuery.mockImplementation(async (sql: string) => {
+      if (sql === "begin") {
+        calls.push("begin")
+      }
+      return {
+        rowCount: 0,
+        rows: []
+      }
+    })
+
+    const { ingestMemoryRecords } = await import("../../src/session/memory/ingest-records")
+    const response = await ingestMemoryRecords(
+      {
+        source: "analyze",
+        records: [buildRecord("00000000-0000-4000-8000-000000000113")]
+      },
+      "00000000-0000-4000-8000-000000000113"
+    )
+
+    expect(response.acceptedIds).toEqual(["mem-record-1"])
+    expect(calls.slice(0, 2)).toEqual(["embed", "begin"])
+  })
 })

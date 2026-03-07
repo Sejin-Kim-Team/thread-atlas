@@ -21,7 +21,7 @@ function normalizeMode(mode: AnalyzeRequestBody["mode"]): AnalyzeMode {
 }
 
 function isValidTabId(tabId: unknown): tabId is number {
-  return typeof tabId === "number" && Number.isFinite(tabId)
+  return typeof tabId === "number" && Number.isInteger(tabId)
 }
 
 const handleAnalyze: RequestHandler = async (req, res) => {

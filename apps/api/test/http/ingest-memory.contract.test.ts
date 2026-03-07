@@ -180,4 +180,36 @@ describe("POST /api/ingest/memory (hackathon contract)", () => {
       })
     )
   })
+
+  it("rejects records with blank persistence fields instead of returning 500", async () => {
+    const app = createServer()
+    const issued = await issueToken(app, "google-sub-ingest-zeta")
+    const invalid = buildStorableMemoryRecord(issued.userId) as Record<string, unknown>
+    invalid.id = "mem-blank-persistence-1"
+    invalid.source = {
+      ...(invalid.source as Record<string, unknown>),
+      pageId: "   "
+    }
+    invalid.navigation = {
+      ...(invalid.navigation as Record<string, unknown>),
+      canonicalUrl: "   "
+    }
+
+    const response = await request(app)
+      .post("/api/ingest/memory")
+      .set("Authorization", `Bearer ${issued.token}`)
+      .send({
+        source: "analyze",
+        records: [invalid]
+      })
+
+    expect(response.status).toBe(200)
+    expect(response.body.acceptedIds).toEqual([])
+    expect(response.body.rejected).toContainEqual(
+      expect.objectContaining({
+        id: "mem-blank-persistence-1",
+        reason: "not-storable"
+      })
+    )
+  })
 })
