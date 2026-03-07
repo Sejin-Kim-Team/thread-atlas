@@ -209,6 +209,62 @@ describe("POST /api/ingest/memory (hackathon contract)", () => {
     )
   })
 
+  it("rejects records with invalid provenance.snapshotCapturedAt", async () => {
+    const app = createServer()
+    const issued = await issueToken(app, "google-sub-ingest-iota")
+    const invalid = buildStorableMemoryRecord(issued.userId) as Record<string, unknown>
+    invalid.id = "mem-invalid-captured-at-1"
+    invalid.provenance = {
+      ...(invalid.provenance as Record<string, unknown>),
+      snapshotCapturedAt: "not-a-date"
+    }
+
+    const response = await request(app)
+      .post("/api/ingest/memory")
+      .set("Authorization", `Bearer ${issued.token}`)
+      .send({
+        source: "analyze",
+        records: [invalid]
+      })
+
+    expect(response.status).toBe(200)
+    expect(response.body.acceptedIds).toEqual([])
+    expect(response.body.rejected).toContainEqual(
+      expect.objectContaining({
+        id: "mem-invalid-captured-at-1",
+        reason: "missing-provenance"
+      })
+    )
+  })
+
+  it("rejects records with unsupported navigation.openMode", async () => {
+    const app = createServer()
+    const issued = await issueToken(app, "google-sub-ingest-kappa")
+    const invalid = buildStorableMemoryRecord(issued.userId) as Record<string, unknown>
+    invalid.id = "mem-invalid-open-mode-1"
+    invalid.navigation = {
+      ...(invalid.navigation as Record<string, unknown>),
+      openMode: "popup"
+    }
+
+    const response = await request(app)
+      .post("/api/ingest/memory")
+      .set("Authorization", `Bearer ${issued.token}`)
+      .send({
+        source: "analyze",
+        records: [invalid]
+      })
+
+    expect(response.status).toBe(200)
+    expect(response.body.acceptedIds).toEqual([])
+    expect(response.body.rejected).toContainEqual(
+      expect.objectContaining({
+        id: "mem-invalid-open-mode-1",
+        reason: "not-storable"
+      })
+    )
+  })
+
   it("rejects records with blank persistence fields instead of returning 500", async () => {
     const app = createServer()
     const issued = await issueToken(app, "google-sub-ingest-zeta")

@@ -176,6 +176,58 @@ describe("ingestMemoryRecords", () => {
     expect(response.rejected).toEqual([])
   })
 
+  it("rejects records with invalid snapshotCapturedAt before DB write", async () => {
+    const invalidRecord = buildRecord(
+      "00000000-0000-4000-8000-000000000116"
+    ) as Record<string, unknown>
+    invalidRecord.provenance = {
+      ...(invalidRecord.provenance as Record<string, unknown>),
+      snapshotCapturedAt: "not-a-date"
+    }
+
+    const { ingestMemoryRecords } = await import("../../src/session/memory/ingest-records")
+    const response = await ingestMemoryRecords(
+      {
+        source: "analyze",
+        records: [invalidRecord as unknown as ReturnType<typeof buildRecord>]
+      },
+      "00000000-0000-4000-8000-000000000116"
+    )
+
+    expect(response.acceptedIds).toEqual([])
+    expect(response.rejected).toContainEqual({
+      id: "mem-record-1",
+      reason: "missing-provenance"
+    })
+    expect(mocks.insertMemoryRecord).not.toHaveBeenCalled()
+  })
+
+  it("rejects records with unsupported navigation openMode before DB write", async () => {
+    const invalidRecord = buildRecord(
+      "00000000-0000-4000-8000-000000000117"
+    ) as Record<string, unknown>
+    invalidRecord.navigation = {
+      ...(invalidRecord.navigation as Record<string, unknown>),
+      openMode: "popup"
+    }
+
+    const { ingestMemoryRecords } = await import("../../src/session/memory/ingest-records")
+    const response = await ingestMemoryRecords(
+      {
+        source: "analyze",
+        records: [invalidRecord as unknown as ReturnType<typeof buildRecord>]
+      },
+      "00000000-0000-4000-8000-000000000117"
+    )
+
+    expect(response.acceptedIds).toEqual([])
+    expect(response.rejected).toContainEqual({
+      id: "mem-record-1",
+      reason: "not-storable"
+    })
+    expect(mocks.insertMemoryRecord).not.toHaveBeenCalled()
+  })
+
   it("calls embedding provider before opening DB transaction", async () => {
     const calls: string[] = []
     mocks.embedTextWithVertex.mockImplementationOnce(async () => {

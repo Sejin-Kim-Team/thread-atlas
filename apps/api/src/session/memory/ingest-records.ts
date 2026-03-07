@@ -26,6 +26,7 @@ const ALLOWED_KINDS: MemoryRecordKind[] = [
 ]
 
 const ALLOWED_PAGE_KINDS = ["article", "thread", "post", "generic"] as const
+const ALLOWED_OPEN_MODES = ["same-tab", "new-tab", "sidepanel-preview"] as const
 
 const ALLOWED_SOURCES: IngestMemoryRequestBody["source"][] = [
   "analyze",
@@ -45,6 +46,14 @@ function isPositiveInteger(value: unknown): value is number {
   return typeof value === "number" && Number.isInteger(value) && value > 0
 }
 
+function isValidTimestamp(value: unknown): value is string {
+  return hasNonBlankText(value) && !Number.isNaN(Date.parse(value))
+}
+
+function isOpenMode(value: unknown): value is "same-tab" | "new-tab" | "sidepanel-preview" {
+  return typeof value === "string" && ALLOWED_OPEN_MODES.includes(value as (typeof ALLOWED_OPEN_MODES)[number])
+}
+
 function hasCompleteProvenance(record: MemoryRecord): boolean {
   const provenance = record.provenance
   if (!provenance) {
@@ -54,7 +63,7 @@ function hasCompleteProvenance(record: MemoryRecord): boolean {
   return Boolean(
     hasNonBlankText(provenance.sourceUrl) &&
       isPageKind(provenance.pageKind) &&
-      hasNonBlankText(provenance.snapshotCapturedAt) &&
+      isValidTimestamp(provenance.snapshotCapturedAt) &&
       hasNonBlankText(provenance.extractorId) &&
       isPositiveInteger(provenance.skeletonVersion)
   )
@@ -72,6 +81,11 @@ function hasPersistenceFields(record: MemoryRecord): boolean {
       record.evidence &&
       typeof record.evidence === "object"
   )
+}
+
+function hasSupportedNavigation(record: MemoryRecord): boolean {
+  const openMode = record.navigation?.openMode
+  return openMode == null || isOpenMode(openMode)
 }
 
 function normalizeTextItems(values: unknown): string[] {
@@ -230,6 +244,10 @@ function validateRecord(record: MemoryRecord, principalUserId: string): RejectRe
   }
 
   if (!hasPersistenceFields(record)) {
+    return "not-storable"
+  }
+
+  if (!hasSupportedNavigation(record)) {
     return "not-storable"
   }
 
