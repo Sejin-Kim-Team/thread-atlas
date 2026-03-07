@@ -5,4 +5,11 @@ dist
 coverage
 .env
 *.log
+.idea
+.codex
+.claude
+.gemini
+.vscode
 .DS_Store
+AGENTS.md
+local-only-docs

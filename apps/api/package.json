@@ -9,15 +9,18 @@
     "build": "tsc -p tsconfig.json",
     "start": "node dist/index.js",
     "test": "vitest run --config vitest.config.mts",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "typecheck:test": "tsc -p tsconfig.test.json --noEmit"
   },
   "dependencies": {
     "@threadatlas/shared": "workspace:*",
-    "express": "^4.21.2"
+    "express": "^4.21.2",
+    "pg": "^8.16.3"
   },
   "devDependencies": {
     "@types/express": "^5.0.0",
     "@types/node": "^22.13.14",
+    "@types/pg": "^8.15.6",
     "@types/supertest": "^6.0.3",
     "supertest": "^7.1.0",
     "tsx": "^4.19.3",
