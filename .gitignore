@@ -12,3 +12,4 @@ coverage
 .vscode
 .DS_Store
 AGENTS.md
+local-only-docs
