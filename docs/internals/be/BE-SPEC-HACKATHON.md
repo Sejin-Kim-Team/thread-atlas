@@ -56,6 +56,8 @@ Companion:
 - 하지만 sidepanel 내부의 local workspace memory와 페이지 이동간 semantic graph의 1차 소유권은 FE에 있다
 - backend session은 FE workspace를 대상으로 한 reasoning/execution channel로 본다
 - session 내부에서 실질적 reasoning scope는 `현재 primary tab 1개`로 제한한다
+- backend의 canonical WS session ownership key는 `(principalUserId, clientSessionId)`다
+- 동일 `clientSessionId`라도 `principalUserId`가 다르면 기존 session 재사용을 허용하지 않고 `401 UNAUTHORIZED`로 거부한다
 
 ### 3.2 State Shape
 
@@ -115,10 +117,12 @@ Companion:
 
 - session ownership과 memory ownership의 기준은 session cache가 아니라 authenticated user principal이다
 - WebSocket session과 HTTP companion endpoint는 동일한 auth principal을 사용해야 한다
-- 해커톤 구현에서는 token claim의 `userId` 또는 동등한 stable principal을 canonical user identity로 사용한다
+- canonical identity chain은 `extension-provided stable user id -> /api/token -> token claim.userId`다
+- 해커톤 구현의 canonical user identity는 검증된 token claim의 `userId`다
 - long-term memory record는 모두 해당 principal에 귀속된다
 - `/api/token` 응답은 `token`, `expiresAt`만 반환한다
 - 검증된 token claim에는 반드시 `userId: string`이 포함되어야 한다
+- token 검증 실패, `userId` 누락, 또는 session owner principal 불일치 시 `401 UNAUTHORIZED`를 반환한다
 
 ---
 

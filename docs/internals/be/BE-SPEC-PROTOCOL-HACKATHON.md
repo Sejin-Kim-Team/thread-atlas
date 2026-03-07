@@ -100,11 +100,18 @@ export interface WsEnvelope<TType extends string, TPayload> {
 ### 5.0 User Principal
 
 - session ownership과 memory ownership의 기준은 authenticated user principal이다
-- 해커톤 구현에서는 token claim의 `userId` 또는 동등한 stable principal을 canonical user identity로 사용한다
+- canonical identity chain은 `extension-provided stable user id -> /api/token -> token claim.userId`다
+- 해커톤 구현의 canonical user identity는 검증된 token claim의 `userId`다
 - 같은 principal만 자신의 long-term memory record를 조회하고 저장할 수 있다
 - `/api/token` 응답은 `token`, `expiresAt`만 반환한다
 - 검증된 token claim에는 반드시 `userId: string`이 포함되어야 한다
 - token 검증 실패 또는 `userId` 누락 시 WS 연결과 HTTP companion 요청은 `UNAUTHORIZED`로 거부한다
+
+### 5.0.1 Session Reuse Guard
+
+- WS session ownership key는 `(principalUserId, clientSessionId)`다
+- 기존 session이 같은 `clientSessionId`로 존재해도 principal이 다르면 session 재사용을 허용하지 않는다
+- 이 경우 서버는 반드시 `401 UNAUTHORIZED`를 반환하고 새 session을 암묵적으로 생성하지 않는다
 
 ### 5.1 Primary Tab
 

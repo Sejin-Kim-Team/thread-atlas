@@ -3,10 +3,19 @@ import { describe, expect, it } from "vitest"
 import { createServer } from "../../src/server"
 import { buildAnalyzeRequest } from "./helpers/payloads"
 
+async function issueAuthHeader(app: ReturnType<typeof createServer>): Promise<string> {
+  const tokenResponse = await request(app).post("/api/token").send({ userId: "user_sungwoo" })
+  return `Bearer ${tokenResponse.body.token as string}`
+}
+
 describe("POST /api/analyze (hackathon contract)", () => {
   it("mode=seed returns required summaryCandidates and no legacy cache fields", async () => {
     const app = createServer()
-    const response = await request(app).post("/api/analyze").send(buildAnalyzeRequest("seed"))
+    const authorization = await issueAuthHeader(app)
+    const response = await request(app)
+      .post("/api/analyze")
+      .set("Authorization", authorization)
+      .send(buildAnalyzeRequest("seed"))
 
     expect(response.status).toBe(200)
     expect(response.body.mode).toBe("seed")
@@ -25,8 +34,10 @@ describe("POST /api/analyze (hackathon contract)", () => {
 
   it("mode=memory-candidate returns required summaryCandidates", async () => {
     const app = createServer()
+    const authorization = await issueAuthHeader(app)
     const response = await request(app)
       .post("/api/analyze")
+      .set("Authorization", authorization)
       .send(buildAnalyzeRequest("memory-candidate"))
 
     expect(response.status).toBe(200)
@@ -37,8 +48,10 @@ describe("POST /api/analyze (hackathon contract)", () => {
 
   it("mode=visual-summary returns required visualSummaries", async () => {
     const app = createServer()
+    const authorization = await issueAuthHeader(app)
     const response = await request(app)
       .post("/api/analyze")
+      .set("Authorization", authorization)
       .send(buildAnalyzeRequest("visual-summary"))
 
     expect(response.status).toBe(200)
@@ -49,15 +62,37 @@ describe("POST /api/analyze (hackathon contract)", () => {
 
   it("returns INVALID_SNAPSHOT when snapshot is missing", async () => {
     const app = createServer()
-    const response = await request(app).post("/api/analyze").send({
-      tabId: 128,
-      mode: "seed"
-    })
+    const authorization = await issueAuthHeader(app)
+    const response = await request(app)
+      .post("/api/analyze")
+      .set("Authorization", authorization)
+      .send({
+        tabId: 128,
+        mode: "seed"
+      })
 
     expect(response.status).toBeGreaterThanOrEqual(400)
     expect(response.status).toBeLessThan(500)
     expect(response.body).toMatchObject({
       code: "INVALID_SNAPSHOT"
+    })
+  })
+
+  it("returns INVALID_EVENT when tabId is missing", async () => {
+    const app = createServer()
+    const authorization = await issueAuthHeader(app)
+    const requestBody = buildAnalyzeRequest("seed")
+    const { tabId: _ignored, ...withoutTabId } = requestBody
+
+    const response = await request(app)
+      .post("/api/analyze")
+      .set("Authorization", authorization)
+      .send(withoutTabId)
+
+    expect(response.status).toBeGreaterThanOrEqual(400)
+    expect(response.status).toBeLessThan(500)
+    expect(response.body).toMatchObject({
+      code: "INVALID_EVENT"
     })
   })
 })

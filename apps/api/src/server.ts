@@ -1,8 +1,9 @@
 import express from "express"
 import type { Express } from "express"
 import analyzeRouter from "./routes/analyze"
-import evaluateRouter from "./routes/evaluate"
+import ingestMemoryRouter from "./routes/ingest-memory"
 import tokenRouter from "./routes/token"
+import wsSessionEventsRouter from "./routes/ws-session-events"
 
 export function createServer(): Express {
   const app = express()
@@ -14,7 +15,8 @@ export function createServer(): Express {
 
   app.use("/api/token", tokenRouter)
   app.use("/api/analyze", analyzeRouter)
-  app.use("/api/evaluate", evaluateRouter)
+  app.use("/api/ingest/memory", ingestMemoryRouter)
+  app.use("/ws/session/events", wsSessionEventsRouter)
 
   return app
 }

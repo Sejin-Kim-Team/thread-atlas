@@ -6,9 +6,10 @@ import {
   createContextUpdatePayload,
   createEnvelope,
   createSessionOpenPayload,
+  issueAuthToken,
   createUserIntentPayload,
   createValidSnapshot,
-  postWsEvent
+  postWsEventWithAuth
 } from "./helpers/ws-contract"
 
 const app = createServer()
@@ -16,23 +17,26 @@ const app = createServer()
 describe("ws current-page turn flow", () => {
   it("follows open -> context.update -> snapshot.push -> user.intent and returns progress/projection/turn.done", async () => {
     const client = request(app)
+    const token = await issueAuthToken(client)
 
-    const open = await postWsEvent(
+    const open = await postWsEventWithAuth(
       client,
-      createEnvelope("session.open", createSessionOpenPayload(), { requestId: "req-open-1" })
+      createEnvelope("session.open", createSessionOpenPayload(), { requestId: "req-open-1" }),
+      token
     )
 
     const sessionId = open.body?.payload?.sessionId
 
-    const context = await postWsEvent(
+    const context = await postWsEventWithAuth(
       client,
       createEnvelope("context.update", createContextUpdatePayload(), {
         requestId: "req-ctx-1",
         sessionId
-      })
+      }),
+      token
     )
 
-    const snapshot = await postWsEvent(
+    const snapshot = await postWsEventWithAuth(
       client,
       createEnvelope(
         "snapshot.push",
@@ -44,15 +48,17 @@ describe("ws current-page turn flow", () => {
           requestId: "req-snapshot-1",
           sessionId
         }
-      )
+      ),
+      token
     )
 
-    const intent = await postWsEvent(
+    const intent = await postWsEventWithAuth(
       client,
       createEnvelope("user.intent", createUserIntentPayload(), {
         requestId: "req-intent-1",
         sessionId
-      })
+      }),
+      token
     )
 
     expect(open.status).toBe(200)
@@ -71,22 +77,25 @@ describe("ws current-page turn flow", () => {
 
   it("keeps referencedTabIds in turn.done within current-page scope", async () => {
     const client = request(app)
+    const token = await issueAuthToken(client)
 
-    const open = await postWsEvent(
+    const open = await postWsEventWithAuth(
       client,
-      createEnvelope("session.open", createSessionOpenPayload(), { requestId: "req-open-1" })
+      createEnvelope("session.open", createSessionOpenPayload(), { requestId: "req-open-1" }),
+      token
     )
     const sessionId = open.body?.payload?.sessionId
 
-    await postWsEvent(
+    await postWsEventWithAuth(
       client,
       createEnvelope("context.update", createContextUpdatePayload(128), {
         requestId: "req-ctx-1",
         sessionId
-      })
+      }),
+      token
     )
 
-    await postWsEvent(
+    await postWsEventWithAuth(
       client,
       createEnvelope(
         "snapshot.push",
@@ -98,15 +107,17 @@ describe("ws current-page turn flow", () => {
           requestId: "req-snapshot-1",
           sessionId
         }
-      )
+      ),
+      token
     )
 
-    const intent = await postWsEvent(
+    const intent = await postWsEventWithAuth(
       client,
       createEnvelope("user.intent", createUserIntentPayload(128), {
         requestId: "req-intent-1",
         sessionId
-      })
+      }),
+      token
     )
 
     expect(intent.status).toBe(200)
@@ -121,22 +132,25 @@ describe("ws current-page turn flow", () => {
 
   it("does not rely on TURN_CONFLICT for follow-up intents", async () => {
     const client = request(app)
+    const token = await issueAuthToken(client)
 
-    const open = await postWsEvent(
+    const open = await postWsEventWithAuth(
       client,
-      createEnvelope("session.open", createSessionOpenPayload(), { requestId: "req-open-1" })
+      createEnvelope("session.open", createSessionOpenPayload(), { requestId: "req-open-1" }),
+      token
     )
     const sessionId = open.body?.payload?.sessionId
 
-    await postWsEvent(
+    await postWsEventWithAuth(
       client,
       createEnvelope("context.update", createContextUpdatePayload(128), {
         requestId: "req-ctx-1",
         sessionId
-      })
+      }),
+      token
     )
 
-    await postWsEvent(
+    await postWsEventWithAuth(
       client,
       createEnvelope(
         "snapshot.push",
@@ -148,23 +162,26 @@ describe("ws current-page turn flow", () => {
           requestId: "req-snapshot-1",
           sessionId
         }
-      )
+      ),
+      token
     )
 
-    await postWsEvent(
+    await postWsEventWithAuth(
       client,
       createEnvelope("user.intent", createUserIntentPayload(128), {
         requestId: "req-intent-1",
         sessionId
-      })
+      }),
+      token
     )
 
-    const followUp = await postWsEvent(
+    const followUp = await postWsEventWithAuth(
       client,
       createEnvelope("user.intent", createUserIntentPayload(128), {
         requestId: "req-intent-2",
         sessionId
-      })
+      }),
+      token
     )
 
     expect(followUp.status).toBe(200)

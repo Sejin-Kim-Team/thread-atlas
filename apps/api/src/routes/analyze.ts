@@ -1,45 +1,99 @@
 import { Router, type RequestHandler } from "express"
+import { resolvePrincipalFromAuthorizationHeader } from "../auth/principal"
+import { buildCanonicalContextPack } from "../session/context-pack/build"
+import { normalizeForAnalyze } from "../session/context-pack/normalize"
 import type {
-  AnalyzeRequest,
-  AnalyzeResponse,
-  KeyComment,
-  ThreadSemantics
-} from "@threadatlas/shared"
+  AnalyzeMode,
+  AnalyzeRequestBody,
+  AnalyzeResponseBody,
+  SemanticSnapshot
+} from "../session/context-pack/types"
+import { validateSemanticSnapshot } from "../session/context-pack/validate"
 
 const router: ReturnType<typeof Router> = Router()
 
+function normalizeMode(mode: AnalyzeRequestBody["mode"]): AnalyzeMode {
+  if (mode === "memory-candidate" || mode === "visual-summary") {
+    return mode
+  }
+  return "seed"
+}
+
+function createAnalysisId(): string {
+  return `analysis_${Date.now().toString(36)}`
+}
+
+function isValidTabId(tabId: unknown): tabId is number {
+  return typeof tabId === "number" && Number.isFinite(tabId)
+}
+
 const handleAnalyze: RequestHandler = (req, res) => {
-  const body = req.body as AnalyzeRequest
-  const comments = body.threadDoc.comments.slice(0, 3)
-
-  const claims = comments.map((comment, idx) => ({
-    id: `claim_${idx + 1}`,
-    statement: comment.text.slice(0, 120) || `Claim derived from comment ${comment.id}`,
-    stance: "neutral" as const,
-    evidence: [comment.text.slice(0, 80)],
-    supportingComments: [comment.id],
-    counters: []
-  }))
-
-  const keyComments: KeyComment[] = comments.map((comment, idx) => ({
-    commentId: comment.id,
-    role: idx === 0 ? "defines_argument" : idx === 1 ? "provides_evidence" : "summarizes",
-    claimId: `claim_${idx + 1}`
-  }))
-
-  const semantics: ThreadSemantics = {
-    topic: body.threadDoc.title || "Untitled thread",
-    claims,
-    keyComments,
-    generatedAt: Date.now()
+  const principal = resolvePrincipalFromAuthorizationHeader(req.header("authorization"))
+  if (!principal.ok) {
+    res.status(401).json({
+      code: "UNAUTHORIZED",
+      message: principal.message
+    })
+    return
   }
 
-  const response: AnalyzeResponse = {
-    threadSemantics: semantics,
-    cached: false
+  const body = req.body as AnalyzeRequestBody
+  if (!isValidTabId(body.tabId)) {
+    res.status(400).json({
+      code: "INVALID_EVENT",
+      message: "tabId is required"
+    })
+    return
   }
 
-  res.status(200).json(response)
+  const validation = validateSemanticSnapshot(body.snapshot)
+  if (!validation.ok || !body.snapshot) {
+    res.status(400).json({
+      code: "INVALID_SNAPSHOT",
+      message: validation.errors[0] ?? "snapshot is required"
+    })
+    return
+  }
+
+  try {
+    const mode = normalizeMode(body.mode)
+    const snapshot = body.snapshot as SemanticSnapshot
+    const canonicalPack = buildCanonicalContextPack(snapshot)
+    const normalized = normalizeForAnalyze(snapshot, canonicalPack, mode)
+    const base = {
+      mode,
+      analysisId: createAnalysisId(),
+      normalizedMode: normalized.normalizedMode
+    }
+
+    let response: AnalyzeResponseBody
+    if (mode === "visual-summary") {
+      response = {
+        ...base,
+        mode: "visual-summary",
+        visualSummaries: normalized.visualSummaries
+      }
+    } else if (mode === "memory-candidate") {
+      response = {
+        ...base,
+        mode: "memory-candidate",
+        summaryCandidates: normalized.summaryCandidates
+      }
+    } else {
+      response = {
+        ...base,
+        mode: "seed",
+        summaryCandidates: normalized.summaryCandidates
+      }
+    }
+
+    res.status(200).json(response)
+  } catch (error) {
+    res.status(500).json({
+      code: "ANALYZE_FAILED",
+      message: "analyze failed"
+    })
+  }
 }
 
 router.post("/", handleAnalyze)

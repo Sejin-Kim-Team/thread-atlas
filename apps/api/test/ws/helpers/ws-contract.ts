@@ -107,6 +107,22 @@ export async function postWsEvent(client: any, envelope: unknown) {
   return client.post(WS_EVENTS_ENDPOINT).send(envelope)
 }
 
+export async function issueAuthToken(client: any, userId = "user_sungwoo"): Promise<string> {
+  const response = await client.post("/api/token").send({ userId })
+  return response.body.token as string
+}
+
+export async function postWsEventWithAuth(
+  client: any,
+  envelope: unknown,
+  token: string
+) {
+  return client
+    .post(WS_EVENTS_ENDPOINT)
+    .set("Authorization", `Bearer ${token}`)
+    .send(envelope)
+}
+
 export function assertOrderedEventTypes(events: Array<{ type?: string }>, expectedOrder: string[]) {
   let cursor = -1
   for (const type of expectedOrder) {

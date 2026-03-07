@@ -12,5 +12,26 @@ describe("POST /api/token", () => {
     expect(typeof response.body.token).toBe("string")
     expect(typeof response.body.expiresAt).toBe("number")
     expect(response.body.expiresAt).toBeGreaterThan(now)
+    expect(response.body.userId).toBeUndefined()
+  })
+
+  it("rejects token issue when stable user id is missing", async () => {
+    const app = createServer()
+    const response = await request(app).post("/api/token").send({})
+
+    expect(response.status).toBe(400)
+    expect(response.body).toMatchObject({
+      code: "INVALID_EVENT"
+    })
+  })
+
+  it("rejects token issue when stable user id is blank", async () => {
+    const app = createServer()
+    const response = await request(app).post("/api/token").send({ userId: "   " })
+
+    expect(response.status).toBe(400)
+    expect(response.body).toMatchObject({
+      code: "INVALID_EVENT"
+    })
   })
 })

@@ -32,6 +32,12 @@ v0.1에서 고정하는 HTTP endpoint:
 
 ## 2. Endpoint Roles
 
+공통 인증 모델:
+
+- canonical identity chain은 `extension-provided stable user id -> /api/token -> token claim.userId`다
+- `/api/analyze`, `/api/ingest/memory`는 검증된 bearer token의 `claim.userId`를 principal로 사용한다
+- token 검증 실패 또는 `claim.userId` 누락 시 `401 UNAUTHORIZED`로 거부한다
+
 ## 2.1 `/api/analyze`
 
 역할:
@@ -95,6 +101,7 @@ export interface AnalyzeRequest {
 - `providedPack`은 optional hint다
 - canonical truth는 항상 `snapshot`
 - `mode`가 없으면 기본값은 `seed`
+- 요청 principal은 bearer token의 `claim.userId`로 고정한다
 
 ## 3.2 Response
 
@@ -181,6 +188,7 @@ export interface IngestMemoryRequest {
 - candidate 상태 relation이나 raw snapshot-derived payload는 허용하지 않는다
 - empty `records`는 허용 가능하나 no-op 처리한다
 - 각 record의 `ownerUserId`는 현재 authenticated principal과 일치해야 한다
+- 현재 authenticated principal은 검증된 bearer token의 `claim.userId`다
 
 ## 4.2 Response
 
@@ -271,6 +279,7 @@ turn 완료 후 accepted/promoted 사실을 `/api/ingest/memory`로 넘길 수 �
 
 실패 코드 예시:
 
+- `UNAUTHORIZED`
 - `INVALID_SNAPSHOT`
 - `NORMALIZATION_FAILED`
 - `ANALYZE_FAILED`
@@ -279,6 +288,7 @@ turn 완료 후 accepted/promoted 사실을 `/api/ingest/memory`로 넘길 수 �
 
 실패 코드 예시:
 
+- `UNAUTHORIZED`
 - `INVALID_RECORD`
 - `STORAGE_FAILED`
 - `INTERNAL_ERROR`
