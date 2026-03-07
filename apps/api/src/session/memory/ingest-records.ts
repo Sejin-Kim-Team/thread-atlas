@@ -88,6 +88,10 @@ function hasSupportedNavigation(record: MemoryRecord): boolean {
   return openMode == null || isOpenMode(openMode)
 }
 
+function hasValidCreatedAt(record: MemoryRecord): boolean {
+  return record.createdAt == null || isValidTimestamp(record.createdAt)
+}
+
 function normalizeTextItems(values: unknown): string[] {
   if (!Array.isArray(values)) {
     return []
@@ -248,6 +252,10 @@ function validateRecord(record: MemoryRecord, principalUserId: string): RejectRe
   }
 
   if (!hasSupportedNavigation(record)) {
+    return "not-storable"
+  }
+
+  if (!hasValidCreatedAt(record)) {
     return "not-storable"
   }
 

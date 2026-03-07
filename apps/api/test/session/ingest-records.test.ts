@@ -228,6 +228,29 @@ describe("ingestMemoryRecords", () => {
     expect(mocks.insertMemoryRecord).not.toHaveBeenCalled()
   })
 
+  it("rejects records with invalid createdAt before DB write", async () => {
+    const invalidRecord = buildRecord(
+      "00000000-0000-4000-8000-000000000118"
+    ) as Record<string, unknown>
+    invalidRecord.createdAt = "not-a-date"
+
+    const { ingestMemoryRecords } = await import("../../src/session/memory/ingest-records")
+    const response = await ingestMemoryRecords(
+      {
+        source: "analyze",
+        records: [invalidRecord as unknown as ReturnType<typeof buildRecord>]
+      },
+      "00000000-0000-4000-8000-000000000118"
+    )
+
+    expect(response.acceptedIds).toEqual([])
+    expect(response.rejected).toContainEqual({
+      id: "mem-record-1",
+      reason: "not-storable"
+    })
+    expect(mocks.insertMemoryRecord).not.toHaveBeenCalled()
+  })
+
   it("calls embedding provider before opening DB transaction", async () => {
     const calls: string[] = []
     mocks.embedTextWithVertex.mockImplementationOnce(async () => {

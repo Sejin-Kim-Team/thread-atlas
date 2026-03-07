@@ -265,6 +265,31 @@ describe("POST /api/ingest/memory (hackathon contract)", () => {
     )
   })
 
+  it("rejects records with invalid createdAt instead of returning 500", async () => {
+    const app = createServer()
+    const issued = await issueToken(app, "google-sub-ingest-lambda")
+    const invalid = buildStorableMemoryRecord(issued.userId) as Record<string, unknown>
+    invalid.id = "mem-invalid-created-at-1"
+    invalid.createdAt = "not-a-date"
+
+    const response = await request(app)
+      .post("/api/ingest/memory")
+      .set("Authorization", `Bearer ${issued.token}`)
+      .send({
+        source: "analyze",
+        records: [invalid]
+      })
+
+    expect(response.status).toBe(200)
+    expect(response.body.acceptedIds).toEqual([])
+    expect(response.body.rejected).toContainEqual(
+      expect.objectContaining({
+        id: "mem-invalid-created-at-1",
+        reason: "not-storable"
+      })
+    )
+  })
+
   it("rejects records with blank persistence fields instead of returning 500", async () => {
     const app = createServer()
     const issued = await issueToken(app, "google-sub-ingest-zeta")
