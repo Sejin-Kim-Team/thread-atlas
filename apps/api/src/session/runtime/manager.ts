@@ -252,6 +252,7 @@ export class RuntimeManager {
 
     const existingOwner = this.ownerByClientSessionId.get(parsed.clientSessionId)
     if (existingOwner && existingOwner !== principalUserId) {
+      // 보안 경계: 다른 주체가 같은 세션 식별자를 재사용하지 못하게 막는다.
       return unauthorized("clientSessionId is owned by another principal")
     }
 
@@ -326,6 +327,7 @@ export class RuntimeManager {
     }
 
     if (parsed.tabId !== session.primaryTabId) {
+      // 현재 페이지 계약: 기준 탭과 다른 스냅샷은 수용하지 않는다.
       return invalidSnapshot("snapshot.push tabId must match primary tab")
     }
 
@@ -373,7 +375,7 @@ export class RuntimeManager {
       return invalidSnapshot("bound snapshot mismatch")
     }
 
-    // interrupt-first policy: always replace active turn when a new intent arrives.
+    // 선점 중단 정책: 새 요청이 오면 기존 턴을 중단하고 교체한다.
     if (session.activeTurnId) {
       session.activeTurnId = null
     }

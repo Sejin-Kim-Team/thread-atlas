@@ -7,8 +7,9 @@ import {
 
 const router: ReturnType<typeof Router> = Router()
 
-const handleIngestMemory: RequestHandler = (req, res) => {
-  const principal = resolvePrincipalFromAuthorizationHeader(req.header("authorization"))
+const handleIngestMemory: RequestHandler = async (req, res) => {
+  // 보안 경계: 메모리 적재는 인증 주체 기준으로만 허용한다.
+  const principal = await resolvePrincipalFromAuthorizationHeader(req.header("authorization"))
   if (!principal.ok) {
     res.status(401).json({
       code: "UNAUTHORIZED",
@@ -30,6 +31,7 @@ const handleIngestMemory: RequestHandler = (req, res) => {
       typeof record.ownerUserId === "string" && record.ownerUserId !== principal.userId
   )
   if (hasOwnerMismatch) {
+    // 소유권 불일치 레코드는 인증 주체 경계를 넘는 쓰기이므로 즉시 거부한다.
     res.status(403).json({
       code: "FORBIDDEN",
       message: "ownerUserId does not match principal"

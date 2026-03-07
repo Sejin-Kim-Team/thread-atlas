@@ -1,10 +1,17 @@
 import request from "supertest"
 import { describe, expect, it } from "vitest"
 import { createServer } from "../../src/server"
+import { requireEnv } from "../helpers/env"
 import { buildAnalyzeRequest } from "./helpers/payloads"
 
 async function issueAuthHeader(app: ReturnType<typeof createServer>): Promise<string> {
-  const tokenResponse = await request(app).post("/api/token").send({ userId: "user_sungwoo" })
+  const tokenResponse = await request(app)
+    .post("/api/token")
+    .set("X-Bootstrap-Key", requireEnv("AUTH_BOOTSTRAP_KEY"))
+    .send({
+      grantType: "dev-bootstrap",
+      bootstrapSubject: "google-sub-analyze-sungwoo"
+    })
   return `Bearer ${tokenResponse.body.token as string}`
 }
 

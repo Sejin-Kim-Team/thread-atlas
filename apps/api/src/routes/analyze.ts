@@ -27,8 +27,9 @@ function isValidTabId(tabId: unknown): tabId is number {
   return typeof tabId === "number" && Number.isFinite(tabId)
 }
 
-const handleAnalyze: RequestHandler = (req, res) => {
-  const principal = resolvePrincipalFromAuthorizationHeader(req.header("authorization"))
+const handleAnalyze: RequestHandler = async (req, res) => {
+  // 보안 경계: 분석 요청은 인증된 주체만 처리한다.
+  const principal = await resolvePrincipalFromAuthorizationHeader(req.header("authorization"))
   if (!principal.ok) {
     res.status(401).json({
       code: "UNAUTHORIZED",
@@ -56,6 +57,7 @@ const handleAnalyze: RequestHandler = (req, res) => {
   }
 
   try {
+    // 스냅샷을 표준 문맥으로 재구성한 뒤 요청 유형별 응답 계약으로 축약한다.
     const mode = normalizeMode(body.mode)
     const snapshot = body.snapshot as SemanticSnapshot
     const canonicalPack = buildCanonicalContextPack(snapshot)

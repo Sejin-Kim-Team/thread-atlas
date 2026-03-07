@@ -13,11 +13,13 @@
   },
   "dependencies": {
     "@threadatlas/shared": "workspace:*",
-    "express": "^4.21.2"
+    "express": "^4.21.2",
+    "pg": "^8.16.3"
   },
   "devDependencies": {
     "@types/express": "^5.0.0",
     "@types/node": "^22.13.14",
+    "@types/pg": "^8.15.6",
     "@types/supertest": "^6.0.3",
     "supertest": "^7.1.0",
     "tsx": "^4.19.3",

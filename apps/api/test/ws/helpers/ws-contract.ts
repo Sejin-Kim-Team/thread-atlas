@@ -1,3 +1,5 @@
+import { requireEnv } from "../../helpers/env"
+
 export const WS_EVENTS_ENDPOINT = "/ws/session/events"
 
 export function createEnvelope<TPayload>(
@@ -108,7 +110,13 @@ export async function postWsEvent(client: any, envelope: unknown) {
 }
 
 export async function issueAuthToken(client: any, userId = "user_sungwoo"): Promise<string> {
-  const response = await client.post("/api/token").send({ userId })
+  const response = await client
+    .post("/api/token")
+    .set("X-Bootstrap-Key", requireEnv("AUTH_BOOTSTRAP_KEY"))
+    .send({
+      grantType: "dev-bootstrap",
+      bootstrapSubject: `google-sub-${userId}`
+    })
   return response.body.token as string
 }
 

@@ -1,58 +1,17 @@
-import crypto from "node:crypto"
+import { resolveAuthSession } from "./auth-sessions-repository"
 
-const TOKEN_TTL_SECONDS = 600
-
-interface PrincipalTokenRecord {
-  userId: string
-  expiresAt: number
-}
-
-const tokenStore = new Map<string, PrincipalTokenRecord>()
-
-function nowSeconds(): number {
-  return Math.floor(Date.now() / 1000)
-}
-
-function isValidUserId(value: unknown): value is string {
-  return typeof value === "string" && value.trim().length > 0
-}
-
-export function issuePrincipalToken(userId: unknown): {
-  ok: true
-  token: string
-  expiresAt: number
-} | {
-  ok: false
-  message: string
-} {
-  if (!isValidUserId(userId)) {
-    return {
-      ok: false,
-      message: "userId is required"
+export async function resolvePrincipalFromAuthorizationHeader(
+  authorizationHeader: unknown
+): Promise<
+  | {
+      ok: true
+      userId: string
     }
-  }
-
-  const expiresAt = nowSeconds() + TOKEN_TTL_SECONDS
-  const token = `stub-${userId}-${crypto.randomBytes(8).toString("hex")}`
-  tokenStore.set(token, {
-    userId: userId.trim(),
-    expiresAt
-  })
-
-  return {
-    ok: true,
-    token,
-    expiresAt
-  }
-}
-
-export function resolvePrincipalFromAuthorizationHeader(authorizationHeader: unknown): {
-  ok: true
-  userId: string
-} | {
-  ok: false
-  message: string
-} {
+  | {
+      ok: false
+      message: string
+    }
+> {
   if (typeof authorizationHeader !== "string") {
     return {
       ok: false,
@@ -68,24 +27,25 @@ export function resolvePrincipalFromAuthorizationHeader(authorizationHeader: unk
     }
   }
 
-  const record = tokenStore.get(token)
-  if (!record) {
+  let resolved: Awaited<ReturnType<typeof resolveAuthSession>>
+  try {
+    // 토큰 내부값 해석 대신 세션 해시 조회로 인증 주체를 복원한다.
+    resolved = await resolveAuthSession(token)
+  } catch (error) {
     return {
       ok: false,
-      message: "invalid token"
+      message: "token resolution failed"
     }
   }
-
-  if (record.expiresAt <= nowSeconds()) {
-    tokenStore.delete(token)
+  if (!resolved.ok) {
     return {
       ok: false,
-      message: "token expired"
+      message: resolved.message
     }
   }
 
   return {
     ok: true,
-    userId: record.userId
+    userId: resolved.userId
   }
 }
