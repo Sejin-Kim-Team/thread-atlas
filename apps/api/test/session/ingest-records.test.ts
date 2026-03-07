@@ -131,6 +131,51 @@ describe("ingestMemoryRecords", () => {
     ).rejects.toThrow("database unavailable")
   })
 
+  it("rejects records with non-numeric skeletonVersion before DB write", async () => {
+    const invalidRecord = buildRecord(
+      "00000000-0000-4000-8000-000000000114"
+    ) as Record<string, unknown>
+    invalidRecord.provenance = {
+      ...(invalidRecord.provenance as Record<string, unknown>),
+      skeletonVersion: "v8"
+    }
+
+    const { ingestMemoryRecords } = await import("../../src/session/memory/ingest-records")
+    const response = await ingestMemoryRecords(
+      {
+        source: "analyze",
+        records: [invalidRecord as unknown as ReturnType<typeof buildRecord>]
+      },
+      "00000000-0000-4000-8000-000000000114"
+    )
+
+    expect(response.acceptedIds).toEqual([])
+    expect(response.rejected).toContainEqual({
+      id: "mem-record-1",
+      reason: "missing-provenance"
+    })
+    expect(mocks.insertMemoryRecord).not.toHaveBeenCalled()
+    expect(mocks.upsertMemoryRecordEmbedding).not.toHaveBeenCalled()
+  })
+
+  it("returns persisted id when repository normalizes blank record id", async () => {
+    mocks.insertMemoryRecord.mockResolvedValueOnce({
+      id: "generated-memory-id"
+    })
+
+    const { ingestMemoryRecords } = await import("../../src/session/memory/ingest-records")
+    const response = await ingestMemoryRecords(
+      {
+        source: "analyze",
+        records: [buildRecord("00000000-0000-4000-8000-000000000115", "   ")]
+      },
+      "00000000-0000-4000-8000-000000000115"
+    )
+
+    expect(response.acceptedIds).toEqual(["generated-memory-id"])
+    expect(response.rejected).toEqual([])
+  })
+
   it("calls embedding provider before opening DB transaction", async () => {
     const calls: string[] = []
     mocks.embedTextWithVertex.mockImplementationOnce(async () => {

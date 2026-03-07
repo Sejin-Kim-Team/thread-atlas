@@ -41,6 +41,10 @@ function isPageKind(value: unknown): value is "article" | "thread" | "post" | "g
   return typeof value === "string" && ALLOWED_PAGE_KINDS.includes(value as (typeof ALLOWED_PAGE_KINDS)[number])
 }
 
+function isPositiveInteger(value: unknown): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value > 0
+}
+
 function hasCompleteProvenance(record: MemoryRecord): boolean {
   const provenance = record.provenance
   if (!provenance) {
@@ -52,7 +56,7 @@ function hasCompleteProvenance(record: MemoryRecord): boolean {
       isPageKind(provenance.pageKind) &&
       hasNonBlankText(provenance.snapshotCapturedAt) &&
       hasNonBlankText(provenance.extractorId) &&
-      provenance.skeletonVersion
+      isPositiveInteger(provenance.skeletonVersion)
   )
 }
 
@@ -130,7 +134,7 @@ async function persistMemoryRecord(input: {
   record: MemoryRecord
   principalUserId: string
   source: IngestMemoryRequestBody["source"]
-}): Promise<void> {
+}): Promise<string> {
   const retrievalText = buildCanonicalRetrievalText(input.record)
   if (!retrievalText) {
     throw new Error("retrievalText is empty")
@@ -142,7 +146,7 @@ async function persistMemoryRecord(input: {
     "RETRIEVAL_DOCUMENT"
   )
 
-  await withRecordTransaction(async (client) => {
+  return withRecordTransaction(async (client) => {
     const insertInput: InsertMemoryRecordInput = {
       id: input.record.id,
       ownerUserId: input.principalUserId,
@@ -199,6 +203,8 @@ async function persistMemoryRecord(input: {
       },
       client
     )
+
+    return inserted.id
   })
 }
 
@@ -269,12 +275,12 @@ export async function ingestMemoryRecords(
     }
 
     try {
-      await persistMemoryRecord({
+      const persistedId = await persistMemoryRecord({
         record,
         principalUserId,
         source: body.source
       })
-      acceptedIds.push(record.id)
+      acceptedIds.push(persistedId)
     } catch (error) {
       if (!isEmbeddingProviderError(error)) {
         throw error
