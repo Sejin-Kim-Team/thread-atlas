@@ -25,11 +25,17 @@ const ALLOWED_KINDS: MemoryRecordKind[] = [
   "claim-evidence-summary"
 ]
 
+const ALLOWED_PAGE_KINDS = ["article", "thread", "post", "generic"] as const
+
 const ALLOWED_SOURCES: IngestMemoryRequestBody["source"][] = [
   "analyze",
   "turn-completion",
   "batch-repair"
 ]
+
+function isPageKind(value: unknown): value is "article" | "thread" | "post" | "generic" {
+  return typeof value === "string" && ALLOWED_PAGE_KINDS.includes(value as (typeof ALLOWED_PAGE_KINDS)[number])
+}
 
 function hasCompleteProvenance(record: MemoryRecord): boolean {
   const provenance = record.provenance
@@ -39,7 +45,7 @@ function hasCompleteProvenance(record: MemoryRecord): boolean {
 
   return Boolean(
     provenance.sourceUrl &&
-      provenance.pageKind &&
+      isPageKind(provenance.pageKind) &&
       provenance.snapshotCapturedAt &&
       provenance.extractorId &&
       provenance.skeletonVersion

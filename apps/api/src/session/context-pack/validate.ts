@@ -21,7 +21,7 @@ export function validateSemanticSnapshot(snapshot: unknown): SnapshotValidationR
   const errors: string[] = []
   const casted = snapshot as Partial<SemanticSnapshot>
 
-  if (!casted.page || !isObject(casted.page) || typeof casted.page.id !== "string") {
+  if (!casted.page || !isObject(casted.page) || !hasNonBlankString(casted.page.id)) {
     errors.push("page is required")
   }
 
