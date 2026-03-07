@@ -10,7 +10,9 @@ import type {
   SiteEnhancer
 } from "@threadatlas/shared/browser-runtime"
 import type { SemanticSelectionTarget } from "@threadatlas/shared/runtime"
+import { DocsEnhancer } from "./docs-enhancer"
 import { HackerNewsEnhancer } from "./hacker-news-enhancer"
+import { SearchEnhancer } from "./search-enhancer"
 import type { RegionDump } from "./core/observability"
 import { createDefaultRecognizers } from "./core/detection/recognizers"
 import {
@@ -53,7 +55,7 @@ export class GenericSemanticExtractor implements PageExtractor {
 
   private readonly recognizers: GenericRecognizer[] = createDefaultRecognizers()
   private readonly pipeline = new SemanticPipeline(this.recognizers)
-  private readonly enhancers: SiteEnhancer[] = [new HackerNewsEnhancer()]
+  private readonly enhancers: SiteEnhancer[] = [new HackerNewsEnhancer(), new DocsEnhancer(), new SearchEnhancer()]
   private readonly regionIndex = new Map<string, RoledRegion>()
   private lastPage: PageNode | null = null
 

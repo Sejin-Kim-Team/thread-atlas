@@ -1,6 +1,6 @@
 import type { SemanticRegion } from "@threadatlas/shared/browser-runtime"
 import type { SemanticNode } from "@threadatlas/shared"
-import type { RoledRegion } from "../types"
+import type { PipelineRegionState, RoledRegion } from "../types"
 import type { RegionDump, RegionDumpBoundingRect, RegionDumpDecisionLog } from "./types"
 
 function toBoundingRect(rect: DOMRect): RegionDumpBoundingRect {
@@ -30,6 +30,7 @@ export class RegionDumper {
     timestamp: string
     regions: RoledRegion[]
     expandRegion: (regionId: string) => SemanticRegion | null
+    getState: (regionId: string) => PipelineRegionState | null
     decisions: RegionDumpDecisionLog
   }): RegionDump {
     return {
@@ -37,12 +38,14 @@ export class RegionDumper {
       timestamp: input.timestamp,
       regions: input.regions.map((region) => {
         const expanded = input.expandRegion(region.id)
+        const state = input.getState(region.id)
         const rect = region.element.getBoundingClientRect()
 
         return {
           id: region.id,
           primitive: region.primitive,
           ...(region.subtype ? { subtype: region.subtype } : {}),
+          category: region.category,
           layoutRole: region.layoutRole,
           dominanceScore: region.dominanceScore,
           roleRank: region.roleRank,
@@ -53,6 +56,8 @@ export class RegionDumper {
           signals: [...region.signals],
           nodeCount: expanded?.nodes.length ?? 0,
           textLength: expanded?.nodes.reduce((sum, node) => sum + textLengthForNode(node), 0) ?? 0,
+          assembledItemCount: state?.assembled.assembledItems?.length ?? 0,
+          ...(state?.normalized?.kind ? { normalizedKind: state.normalized.kind } : {}),
           boundingRect: toBoundingRect(rect)
         }
       }),

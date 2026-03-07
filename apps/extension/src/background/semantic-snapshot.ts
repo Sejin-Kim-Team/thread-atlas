@@ -8,6 +8,7 @@ import type {
   ServiceWorkerToSidePanelMessage
 } from "@threadatlas/shared/runtime"
 import { isSemanticCaptureSupportedUrl } from "../common/semantic-url"
+import type { RegionDump } from "../content/semantic/core/observability"
 
 export const SEMANTIC_SNAPSHOT_COMMAND = "capture-snapshot"
 export const SEMANTIC_SELECTION_COMMAND = "toggle-selection"
@@ -29,6 +30,16 @@ type SelectionStatePayload = Extract<
   { type: "SEMANTIC_SELECTION_STATE_CHANGED" }
 >["payload"]
 
+export interface SemanticRegionDumpResponse {
+  tabId: number | null
+  dump: RegionDump | null
+  error: string | null
+}
+
+interface ContentRegionDumpResponse {
+  dump: RegionDump | null
+}
+
 export interface SemanticSnapshotTabLike {
   id?: number | null | undefined
   url?: string | undefined
@@ -40,7 +51,7 @@ interface SemanticSnapshotBridge {
   sendToContentScript(
     tabId: number,
     message: ServiceWorkerToContentMessage
-  ): Promise<SemanticSnapshotCaptureResponse | SemanticSelectionStateResponse>
+  ): Promise<SemanticSnapshotCaptureResponse | SemanticSelectionStateResponse | ContentRegionDumpResponse>
   openSidePanel(tabId: number): Promise<void>
   notifyRuntime(message: ServiceWorkerToSidePanelMessage): void
 }
@@ -83,6 +94,18 @@ function normalizeSelectionResponse(
   return {
     enabled: false,
     selectedTarget: null
+  }
+}
+
+function normalizeRegionDumpResponse(
+  result: ContentRegionDumpResponse | null | undefined
+): ContentRegionDumpResponse {
+  if (result && typeof result === "object" && "dump" in result) {
+    return result
+  }
+
+  return {
+    dump: null
   }
 }
 
@@ -285,6 +308,50 @@ export function createSemanticSnapshotCoordinator(bridge: SemanticSnapshotBridge
     return payload
   }
 
+  async function getRegionDump(preferredTabId?: number): Promise<SemanticRegionDumpResponse> {
+    let tabId = preferredTabId ?? null
+    if (tabId === null) {
+      tabId = (await bridge.getActiveTab())?.id ?? null
+    }
+
+    if (tabId === null) {
+      return {
+        tabId: null,
+        dump: null,
+        error: "No active tab available for semantic region dump."
+      }
+    }
+
+    const tab = await bridge.getTab(tabId)
+    if (!tab || !isSemanticCaptureSupportedUrl(tab.url)) {
+      return {
+        tabId,
+        dump: null,
+        error: "Semantic region dumps are only supported on standard web pages."
+      }
+    }
+
+    try {
+      const response = normalizeRegionDumpResponse(
+        (await bridge.sendToContentScript(tabId, {
+          type: "GET_SEMANTIC_REGION_DUMP"
+        })) as ContentRegionDumpResponse | null
+      )
+
+      return {
+        tabId,
+        dump: response.dump,
+        error: response.dump ? null : "Semantic region dump unavailable on this page."
+      }
+    } catch (error) {
+      return {
+        tabId,
+        dump: null,
+        error: error instanceof Error ? error.message : "Semantic region dump lookup failed."
+      }
+    }
+  }
+
   function syncSelectionState(
     tabId: number | null,
     response: SemanticSelectionStateResponse,
@@ -326,6 +393,7 @@ export function createSemanticSnapshotCoordinator(bridge: SemanticSnapshotBridge
     getHistory,
     toggleSelectionMode,
     getSelectionState,
+    getRegionDump,
     clearSelection,
     syncSelectionState
   }

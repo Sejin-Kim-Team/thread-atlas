@@ -97,17 +97,38 @@ function buildFrontPageMarkup(): string {
         <tr id="meta-1">
           <td><span class="subtext">111 points by alice 1 hour ago <a href="https://news.ycombinator.com/item?id=1">42 comments</a></span></td>
         </tr>
+        <tr class="spacer"><td></td></tr>
         <tr class="athing" id="story-2">
           <td><span class="titleline"><a href="https://example.com/story-2">Story Two</a></span></td>
         </tr>
         <tr id="meta-2">
           <td><span class="subtext">98 points by bob 2 hours ago <a href="https://news.ycombinator.com/item?id=2">18 comments</a></span></td>
         </tr>
+        <tr class="spacer"><td></td></tr>
         <tr class="athing jobs" id="story-3">
           <td><span class="titleline"><a href="https://example.com/job-3">Jobs: Builder</a></span></td>
         </tr>
       </tbody>
     </table>
+  `
+}
+
+function buildProseListNegativeMarkup(): string {
+  return `
+    <main>
+      <article>
+        <h1>Semantic Systems Reading Notes</h1>
+        <p>This article body should remain an authored block even when it contains a short supporting reading list.</p>
+        <p>The list below is supporting prose and should not become a repeated card or feed region.</p>
+        <ul class="related-reading">
+          <li><a href="/guide/one">Assembly heuristics overview</a></li>
+          <li><a href="/guide/two">How layout role suppression works</a></li>
+          <li><a href="/guide/three">When to keep a navigation cluster</a></li>
+          <li><a href="/guide/four">Designing stable regression fixtures</a></li>
+        </ul>
+        <p>After the list, the authored article should continue normally.</p>
+      </article>
+    </main>
   `
 }
 
@@ -468,18 +489,22 @@ describe("SemanticCaptureSession", () => {
     expect(result.snapshot?.focus.region).toBe("interactive-block-1")
     expect(result.snapshot?.focus.node).toMatchObject({
       kind: "interactive",
-      controlType: "input",
+      controlType: "group",
+      label: "Docs search",
       action: "search",
-      valuePreview: "rate limiter"
+      metadata: expect.objectContaining({
+        controlCount: "2",
+        subtype: "search"
+      })
     })
     expect(result.snapshot?.context).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          relation: "parent",
-          node: expect.objectContaining({ id: "interactive-block-1-cluster" })
+          relation: "child",
+          node: expect.objectContaining({ controlType: "input", action: "search" })
         }),
         expect.objectContaining({
-          relation: "sibling",
+          relation: "child",
           node: expect.objectContaining({ controlType: "button" })
         })
       ])
@@ -612,6 +637,32 @@ describe("SemanticCaptureSession", () => {
     session.dispose()
   })
 
+  it("avoids repeated-item focus for short prose reading lists", () => {
+    window.history.replaceState({}, "", "/blog/semantic-systems")
+    document.body.innerHTML = buildProseListNegativeMarkup()
+
+    const session = new SemanticCaptureSession(document, window)
+    session.initialize()
+
+    const readingLink = document.querySelector(".related-reading a")
+    expect(readingLink).toBeTruthy()
+
+    const result = session.captureSnapshot({
+      source: "command",
+      activeElement: document.body,
+      selection: window.getSelection(),
+      triggerTarget: readingLink ?? null,
+      selectedElement: null,
+      lastHoveredElement: readingLink ?? null
+    })
+
+    expect(result.error).toBeNull()
+    expect(session.getSkeleton()?.regions.some((region) => region.primitive === "repeated-item")).toBe(false)
+    expect(result.snapshot?.focus.region).toBe("authored-block-1")
+
+    session.dispose()
+  })
+
   it("assigns layout roles and suppression metadata for docs layouts", () => {
     window.history.replaceState({}, "", "/guide")
     document.body.innerHTML = buildDocsLayoutMarkup()
@@ -667,7 +718,8 @@ describe("SemanticCaptureSession", () => {
     expect(explicitResult.snapshot?.focus.region).toBe("interactive-block-1")
     expect(explicitResult.snapshot?.focus.node).toMatchObject({
       kind: "interactive",
-      controlType: "input",
+      controlType: "group",
+      label: "Docs search",
       action: "search"
     })
 
