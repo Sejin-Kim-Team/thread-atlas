@@ -12,6 +12,8 @@ import type {
 import { validateSemanticSnapshot } from "../session/context-pack/validate"
 
 const router: ReturnType<typeof Router> = Router()
+const POSTGRES_INT32_MIN = -2147483648
+const POSTGRES_INT32_MAX = 2147483647
 
 function normalizeMode(mode: AnalyzeRequestBody["mode"]): AnalyzeMode {
   if (mode === "memory-candidate" || mode === "visual-summary") {
@@ -21,7 +23,12 @@ function normalizeMode(mode: AnalyzeRequestBody["mode"]): AnalyzeMode {
 }
 
 function isValidTabId(tabId: unknown): tabId is number {
-  return typeof tabId === "number" && Number.isFinite(tabId)
+  return (
+    typeof tabId === "number" &&
+    Number.isInteger(tabId) &&
+    tabId >= POSTGRES_INT32_MIN &&
+    tabId <= POSTGRES_INT32_MAX
+  )
 }
 
 const handleAnalyze: RequestHandler = async (req, res) => {

@@ -26,6 +26,7 @@ const ALLOWED_KINDS: MemoryRecordKind[] = [
 ]
 
 const ALLOWED_PAGE_KINDS = ["article", "thread", "post", "generic"] as const
+const ALLOWED_OPEN_MODES = ["same-tab", "new-tab", "sidepanel-preview"] as const
 
 const ALLOWED_SOURCES: IngestMemoryRequestBody["source"][] = [
   "analyze",
@@ -33,8 +34,24 @@ const ALLOWED_SOURCES: IngestMemoryRequestBody["source"][] = [
   "batch-repair"
 ]
 
+function hasNonBlankText(value: unknown): value is string {
+  return typeof value === "string" && value.trim().length > 0
+}
+
 function isPageKind(value: unknown): value is "article" | "thread" | "post" | "generic" {
   return typeof value === "string" && ALLOWED_PAGE_KINDS.includes(value as (typeof ALLOWED_PAGE_KINDS)[number])
+}
+
+function isPositiveInteger(value: unknown): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value > 0
+}
+
+function isValidTimestamp(value: unknown): value is string {
+  return hasNonBlankText(value) && !Number.isNaN(Date.parse(value))
+}
+
+function isOpenMode(value: unknown): value is "same-tab" | "new-tab" | "sidepanel-preview" {
+  return typeof value === "string" && ALLOWED_OPEN_MODES.includes(value as (typeof ALLOWED_OPEN_MODES)[number])
 }
 
 function hasCompleteProvenance(record: MemoryRecord): boolean {
@@ -44,11 +61,11 @@ function hasCompleteProvenance(record: MemoryRecord): boolean {
   }
 
   return Boolean(
-    provenance.sourceUrl &&
+    hasNonBlankText(provenance.sourceUrl) &&
       isPageKind(provenance.pageKind) &&
-      provenance.snapshotCapturedAt &&
-      provenance.extractorId &&
-      provenance.skeletonVersion
+      isValidTimestamp(provenance.snapshotCapturedAt) &&
+      hasNonBlankText(provenance.extractorId) &&
+      isPositiveInteger(provenance.skeletonVersion)
   )
 }
 
@@ -59,11 +76,20 @@ function isVisualOnly(record: MemoryRecord): boolean {
 
 function hasPersistenceFields(record: MemoryRecord): boolean {
   return Boolean(
-    record.source?.pageId &&
-      record.navigation?.canonicalUrl &&
+    hasNonBlankText(record.source?.pageId) &&
+      hasNonBlankText(record.navigation?.canonicalUrl) &&
       record.evidence &&
       typeof record.evidence === "object"
   )
+}
+
+function hasSupportedNavigation(record: MemoryRecord): boolean {
+  const openMode = record.navigation?.openMode
+  return openMode == null || isOpenMode(openMode)
+}
+
+function hasValidCreatedAt(record: MemoryRecord): boolean {
+  return record.createdAt == null || isValidTimestamp(record.createdAt)
 }
 
 function normalizeTextItems(values: unknown): string[] {
@@ -126,13 +152,19 @@ async function persistMemoryRecord(input: {
   record: MemoryRecord
   principalUserId: string
   source: IngestMemoryRequestBody["source"]
-}): Promise<void> {
+}): Promise<string> {
   const retrievalText = buildCanonicalRetrievalText(input.record)
   if (!retrievalText) {
     throw new Error("retrievalText is empty")
   }
 
-  await withRecordTransaction(async (client) => {
+  // 외부 embedding RPC는 트랜잭션 밖에서 수행해 DB connection 점유 시간을 줄인다.
+  const embeddingResult = await embedTextWithVertex(
+    retrievalText,
+    "RETRIEVAL_DOCUMENT"
+  )
+
+  return withRecordTransaction(async (client) => {
     const insertInput: InsertMemoryRecordInput = {
       id: input.record.id,
       ownerUserId: input.principalUserId,
@@ -178,12 +210,6 @@ async function persistMemoryRecord(input: {
     }
 
     const inserted = await insertMemoryRecord(insertInput, client)
-
-    // 임시 벡터를 금지하고, 실제 Vertex embedding 결과만 저장한다.
-    const embeddingResult = await embedTextWithVertex(
-      retrievalText,
-      "RETRIEVAL_DOCUMENT"
-    )
     await upsertMemoryRecordEmbedding(
       {
         recordId: inserted.id,
@@ -195,6 +221,8 @@ async function persistMemoryRecord(input: {
       },
       client
     )
+
+    return inserted.id
   })
 }
 
@@ -220,6 +248,14 @@ function validateRecord(record: MemoryRecord, principalUserId: string): RejectRe
   }
 
   if (!hasPersistenceFields(record)) {
+    return "not-storable"
+  }
+
+  if (!hasSupportedNavigation(record)) {
+    return "not-storable"
+  }
+
+  if (!hasValidCreatedAt(record)) {
     return "not-storable"
   }
 
@@ -265,12 +301,12 @@ export async function ingestMemoryRecords(
     }
 
     try {
-      await persistMemoryRecord({
+      const persistedId = await persistMemoryRecord({
         record,
         principalUserId,
         source: body.source
       })
-      acceptedIds.push(record.id)
+      acceptedIds.push(persistedId)
     } catch (error) {
       if (!isEmbeddingProviderError(error)) {
         throw error

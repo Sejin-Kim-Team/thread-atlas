@@ -7,6 +7,8 @@ import { embedTextWithVertex } from "../../src/rag/vertex-embedding-adapter"
 import { requireEnv } from "../helpers/env"
 
 const BOOTSTRAP_KEY = requireEnv("AUTH_BOOTSTRAP_KEY")
+const UUID_V4_REGEX =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 
 const embedTextWithVertexMock = vi.hoisted(() => vi.fn())
 
@@ -328,5 +330,36 @@ describe("POST /api/ingest/memory (persistence red)", () => {
     ])
     expect(acceptedRow.rowCount).toBe(1)
     expect(failedRow.rowCount).toBe(0)
+  })
+
+  it("returns the persisted generated id when request id is blank", async () => {
+    const app = createServer()
+    const issued = await issueToken(app, "google-sub-ingest-persistence-iota")
+    const record = buildStorableRecord(issued.userId, "   ")
+
+    const response = await request(app)
+      .post("/api/ingest/memory")
+      .set("Authorization", `Bearer ${issued.token}`)
+      .send({
+        source: "analyze",
+        records: [record]
+      })
+
+    expect(response.status).toBe(200)
+    expect(response.body.acceptedIds).toHaveLength(1)
+    const persistedId = response.body.acceptedIds[0] as string
+    expect(persistedId).toMatch(UUID_V4_REGEX)
+    expect(persistedId).not.toBe(record.id)
+
+    const writtenRecord = await queryDb<{
+      id: string
+      owner_user_id: string
+    }>("select id, owner_user_id from memory_records where id = $1", [persistedId])
+
+    expect(writtenRecord.rowCount).toBe(1)
+    expect(writtenRecord.rows[0]).toMatchObject({
+      id: persistedId,
+      owner_user_id: issued.userId
+    })
   })
 })

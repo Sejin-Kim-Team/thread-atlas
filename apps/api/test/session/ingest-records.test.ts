@@ -130,4 +130,157 @@ describe("ingestMemoryRecords", () => {
       )
     ).rejects.toThrow("database unavailable")
   })
+
+  it("rejects records with non-numeric skeletonVersion before DB write", async () => {
+    const invalidRecord = buildRecord(
+      "00000000-0000-4000-8000-000000000114"
+    ) as Record<string, unknown>
+    invalidRecord.provenance = {
+      ...(invalidRecord.provenance as Record<string, unknown>),
+      skeletonVersion: "v8"
+    }
+
+    const { ingestMemoryRecords } = await import("../../src/session/memory/ingest-records")
+    const response = await ingestMemoryRecords(
+      {
+        source: "analyze",
+        records: [invalidRecord as unknown as ReturnType<typeof buildRecord>]
+      },
+      "00000000-0000-4000-8000-000000000114"
+    )
+
+    expect(response.acceptedIds).toEqual([])
+    expect(response.rejected).toContainEqual({
+      id: "mem-record-1",
+      reason: "missing-provenance"
+    })
+    expect(mocks.insertMemoryRecord).not.toHaveBeenCalled()
+    expect(mocks.upsertMemoryRecordEmbedding).not.toHaveBeenCalled()
+  })
+
+  it("returns persisted id when repository normalizes blank record id", async () => {
+    mocks.insertMemoryRecord.mockResolvedValueOnce({
+      id: "generated-memory-id"
+    })
+
+    const { ingestMemoryRecords } = await import("../../src/session/memory/ingest-records")
+    const response = await ingestMemoryRecords(
+      {
+        source: "analyze",
+        records: [buildRecord("00000000-0000-4000-8000-000000000115", "   ")]
+      },
+      "00000000-0000-4000-8000-000000000115"
+    )
+
+    expect(response.acceptedIds).toEqual(["generated-memory-id"])
+    expect(response.rejected).toEqual([])
+  })
+
+  it("rejects records with invalid snapshotCapturedAt before DB write", async () => {
+    const invalidRecord = buildRecord(
+      "00000000-0000-4000-8000-000000000116"
+    ) as Record<string, unknown>
+    invalidRecord.provenance = {
+      ...(invalidRecord.provenance as Record<string, unknown>),
+      snapshotCapturedAt: "not-a-date"
+    }
+
+    const { ingestMemoryRecords } = await import("../../src/session/memory/ingest-records")
+    const response = await ingestMemoryRecords(
+      {
+        source: "analyze",
+        records: [invalidRecord as unknown as ReturnType<typeof buildRecord>]
+      },
+      "00000000-0000-4000-8000-000000000116"
+    )
+
+    expect(response.acceptedIds).toEqual([])
+    expect(response.rejected).toContainEqual({
+      id: "mem-record-1",
+      reason: "missing-provenance"
+    })
+    expect(mocks.insertMemoryRecord).not.toHaveBeenCalled()
+  })
+
+  it("rejects records with unsupported navigation openMode before DB write", async () => {
+    const invalidRecord = buildRecord(
+      "00000000-0000-4000-8000-000000000117"
+    ) as Record<string, unknown>
+    invalidRecord.navigation = {
+      ...(invalidRecord.navigation as Record<string, unknown>),
+      openMode: "popup"
+    }
+
+    const { ingestMemoryRecords } = await import("../../src/session/memory/ingest-records")
+    const response = await ingestMemoryRecords(
+      {
+        source: "analyze",
+        records: [invalidRecord as unknown as ReturnType<typeof buildRecord>]
+      },
+      "00000000-0000-4000-8000-000000000117"
+    )
+
+    expect(response.acceptedIds).toEqual([])
+    expect(response.rejected).toContainEqual({
+      id: "mem-record-1",
+      reason: "not-storable"
+    })
+    expect(mocks.insertMemoryRecord).not.toHaveBeenCalled()
+  })
+
+  it("rejects records with invalid createdAt before DB write", async () => {
+    const invalidRecord = buildRecord(
+      "00000000-0000-4000-8000-000000000118"
+    ) as Record<string, unknown>
+    invalidRecord.createdAt = "not-a-date"
+
+    const { ingestMemoryRecords } = await import("../../src/session/memory/ingest-records")
+    const response = await ingestMemoryRecords(
+      {
+        source: "analyze",
+        records: [invalidRecord as unknown as ReturnType<typeof buildRecord>]
+      },
+      "00000000-0000-4000-8000-000000000118"
+    )
+
+    expect(response.acceptedIds).toEqual([])
+    expect(response.rejected).toContainEqual({
+      id: "mem-record-1",
+      reason: "not-storable"
+    })
+    expect(mocks.insertMemoryRecord).not.toHaveBeenCalled()
+  })
+
+  it("calls embedding provider before opening DB transaction", async () => {
+    const calls: string[] = []
+    mocks.embedTextWithVertex.mockImplementationOnce(async () => {
+      calls.push("embed")
+      return {
+        embeddingModel: "gemini-embedding-001",
+        embeddingDims: 768,
+        embedding: Array.from({ length: 768 }, () => 0.01)
+      }
+    })
+    mocks.clientQuery.mockImplementation(async (sql: string) => {
+      if (sql === "begin") {
+        calls.push("begin")
+      }
+      return {
+        rowCount: 0,
+        rows: []
+      }
+    })
+
+    const { ingestMemoryRecords } = await import("../../src/session/memory/ingest-records")
+    const response = await ingestMemoryRecords(
+      {
+        source: "analyze",
+        records: [buildRecord("00000000-0000-4000-8000-000000000113")]
+      },
+      "00000000-0000-4000-8000-000000000113"
+    )
+
+    expect(response.acceptedIds).toEqual(["mem-record-1"])
+    expect(calls.slice(0, 2)).toEqual(["embed", "begin"])
+  })
 })

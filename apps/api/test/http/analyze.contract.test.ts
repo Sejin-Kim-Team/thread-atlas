@@ -145,6 +145,42 @@ describe("POST /api/analyze (hackathon contract)", () => {
     })
   })
 
+  it("returns INVALID_EVENT when tabId is not an integer", async () => {
+    const app = createServer()
+    const issued = await issueAuthHeader(app)
+    const payload = buildAnalyzeRequest("seed")
+    payload.tabId = 1.5
+
+    const response = await request(app)
+      .post("/api/analyze")
+      .set("Authorization", issued.authorization)
+      .send(payload)
+
+    expect(response.status).toBeGreaterThanOrEqual(400)
+    expect(response.status).toBeLessThan(500)
+    expect(response.body).toMatchObject({
+      code: "INVALID_EVENT"
+    })
+  })
+
+  it("returns INVALID_EVENT when tabId exceeds postgres integer range", async () => {
+    const app = createServer()
+    const issued = await issueAuthHeader(app)
+    const payload = buildAnalyzeRequest("seed")
+    payload.tabId = 3000000000
+
+    const response = await request(app)
+      .post("/api/analyze")
+      .set("Authorization", issued.authorization)
+      .send(payload)
+
+    expect(response.status).toBeGreaterThanOrEqual(400)
+    expect(response.status).toBeLessThan(500)
+    expect(response.body).toMatchObject({
+      code: "INVALID_EVENT"
+    })
+  })
+
   it("records owner-scoped analysis_runs row", async () => {
     const app = createServer()
     const issued = await issueAuthHeader(app)
