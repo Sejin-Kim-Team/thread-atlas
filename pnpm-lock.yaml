@@ -32,6 +32,9 @@ importers:
       '@threadatlas/shared':
         specifier: workspace:*
         version: link:../../packages/shared
+      dotenv:
+        specifier: ^17.3.1
+        version: 17.3.1
       express:
         specifier: ^4.21.2
         version: 4.22.1
@@ -922,6 +925,10 @@ packages:
 
   dom-to-semantic-markdown@1.5.0:
     resolution: {integrity: sha512-pFXYwst8ajK3jDmoUmglu3wdBOq4gMGhriD2i0is/Ge9f1DwldohstQIg+TABRav5IFHisnwtQM64laMs1M/kw==}
+
+  dotenv@17.3.1:
+    resolution: {integrity: sha512-IO8C/dzEb6O3F9/twg6ZLXz164a2fhTnEWb95H23Dm4OuN+92NmEAlTrupP9VW6Jm3sO26tQlqyvyi4CsnY9GA==}
+    engines: {node: '>=12'}
 
   dunder-proto@1.0.1:
     resolution: {integrity: sha512-KIN/nDJBQRcXw0MLVhZE9iQHmG68qAVIBg9CqmUYjmQIhgij9U5MFvrqkUL5FbtyyzZuOeOt0zdeRe4UY7ct+A==}
@@ -2389,6 +2396,8 @@ snapshots:
       wrappy: 1.0.2
 
   dom-to-semantic-markdown@1.5.0: {}
+
+  dotenv@17.3.1: {}
 
   dunder-proto@1.0.1:
     dependencies:
