@@ -60,6 +60,7 @@ Companion:
 주의:
 
 - canonical path는 WebSocket session이다.
+- canonical endpoint는 `/ws/session`이다.
 - 다만 FE migration이 완료되기 전까지 `/api/evaluate`는 legacy compatibility route로 유지한다.
 - `/api/evaluate`는 신규 기능 추가 대상이 아니라, 기존 extension 호출 호환 목적의 유지 경로다.
 
@@ -81,6 +82,22 @@ Companion:
 - full production prompt tuning
 
 따라서 4장 이후의 WS/event/turn 내용은 `해커톤 최종 목표 계약`이며, 본 브랜치의 완료 판정 기준은 [BE-SPEC-RAG-HACKATHON.md](./BE-SPEC-RAG-HACKATHON.md)의 브랜치 완료 조건을 따른다.
+
+### 2.4 Real WebSocket Transport Scope Clarification
+
+해커톤 다음 구현 범위에서 transport는 아래로 고정한다.
+
+- canonical runtime transport: `/ws/session` (WebSocket)
+- test/debug adapter: `/ws/session/events` (HTTP)
+- 해커톤 절충안으로 인증 전달은 `?token=<opaque-app-session-token>` query를 사용하되, 검증은 반드시 `upgrade` 단계에서 완료해야 한다.
+- `/ws/session` 이외의 upgrade path는 연결 전에 종료해야 한다.
+- `Origin` 검증은 header가 안정적으로 제공되는 환경에서는 적용하되, Chrome extension runtime처럼 강제하기 어려운 환경에서는 release-blocking 필수 조건으로 두지 않는다.
+
+역할 차이:
+
+- `/ws/session`은 FE runtime이 실제로 사용하는 경로다.
+- `/ws/session/events`는 테스트/디버그 ingress이며 canonical이 아니다.
+- 두 경로는 동일 runtime manager/event semantics를 재사용해야 한다.
 
 ### 2.2 RAG Embedding Canonical Path
 
@@ -210,7 +227,8 @@ grounding input 최소 규칙:
 - long-term memory record는 모두 해당 principal에 귀속된다
 - `/api/token` 응답은 최소 `token`, `expiresAt(epoch seconds number)`, `user.id`를 반환한다
 - FE legacy 호출 호환을 위해 해커톤 기간에는 `{ userId }` 입력을 임시 허용한다
-- HTTP/WS principal 해석은 `Authorization: Bearer <opaque-app-token>`를 `auth_sessions.session_token_hash`로 조회하는 방식으로 동작해야 한다
+- HTTP principal 해석은 `Authorization: Bearer <opaque-app-token>`를 `auth_sessions.session_token_hash`로 조회하는 방식으로 동작해야 한다
+- WebSocket principal 해석은 `/ws/session?token=<opaque-app-token>`를 `auth_sessions.session_token_hash`로 조회하는 방식으로 동작해야 한다
 - token 검증 실패, revoked/expired session, 또는 session owner principal 불일치 시 `401 UNAUTHORIZED`를 반환한다
 
 ---
@@ -246,6 +264,24 @@ grounding input 최소 규칙:
 - `memory.patch`
 - `state.patch`
 - `context.enrich.request`
+
+### 4.5 WebSocket Connection/Auth Contract
+
+- FE는 `/ws/session` 연결 시 `token` query parameter로 opaque app session token을 전달한다.
+- 서버는 handshake 단계에서 token을 `auth_sessions.session_token_hash` 조회로 검증한다.
+- 검증 실패/만료/revoked session은 `UNAUTHORIZED`로 거부하고 session을 생성하지 않는다.
+- principal이 다른 `clientSessionId` 재사용은 허용하지 않는다.
+- 이벤트 처리 중 principal/session 불일치도 `UNAUTHORIZED`로 처리한다.
+
+### 4.6 Real WebSocket Transport Done Criteria
+
+해커톤 범위에서 real WebSocket transport 완료 조건:
+
+- `/ws/session` handshake 인증이 실제로 동작한다.
+- `session.open -> context.update -> snapshot.push -> user.intent` 흐름이 WebSocket 경로에서 동작한다.
+- `session.ready/progress/projection/turn.done/error`를 push 전달한다.
+- session reuse guard를 WebSocket 경로에도 동일하게 강제한다.
+- `/ws/session/events`는 canonical path가 아닌 테스트/디버그 adapter로 문서/구현이 일치한다.
 
 ---
 

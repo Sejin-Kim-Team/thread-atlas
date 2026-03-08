@@ -2,9 +2,10 @@ import { Router, type RequestHandler } from "express"
 import { resolvePrincipalFromAuthorizationHeader } from "../auth/principal"
 import { RuntimeManager } from "../session/runtime/manager"
 
-export function createWsSessionEventsRouter(): ReturnType<typeof Router> {
+export function createWsSessionEventsRouter(
+  runtime: RuntimeManager = new RuntimeManager()
+): ReturnType<typeof Router> {
   const router: ReturnType<typeof Router> = Router()
-  const runtime = new RuntimeManager()
 
   const handleWsSessionEvents: RequestHandler = async (req, res) => {
     // 보안 경계: 이벤트 입력은 인증 주체를 검증한 뒤에만 런타임으로 전달한다.

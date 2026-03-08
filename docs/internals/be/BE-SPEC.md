@@ -144,7 +144,11 @@ backend session의 주인은 `sidepanel`이다.
 
 backend의 canonical evaluation path는 `WebSocket session`이다.
 
+canonical endpoint는 `/ws/session`이다.
+
 `POST /api/evaluate + SSE`는 v0.1 canonical path가 아니다.
+
+`/ws/session/events`는 테스트/디버그용 HTTP ingress adapter로 유지할 수 있지만 canonical path가 아니다.
 
 ### 5.2 Remaining HTTP Surface
 
@@ -188,6 +192,7 @@ server는 최소한 다음 이벤트를 전송해야 한다.
 - `turn.done`은 사용된 provenance와 referenced tabs를 명시해야 한다
 - `interrupt`는 현재 active turn을 중단 가능한 상태로 전이시켜야 한다
 - navigation/projection 관련 실제 UX 실행은 client가 결정하고, backend는 target과 hint를 제안한다
+- WebSocket handshake 인증과 HTTP ingress 인증은 동일 principal 해석 규약을 따라야 한다
 
 ---
 

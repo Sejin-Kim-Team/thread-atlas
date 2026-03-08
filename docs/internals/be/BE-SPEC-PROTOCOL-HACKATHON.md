@@ -45,8 +45,53 @@ Companion:
 호환성 규칙:
 
 - canonical transport는 WebSocket session이다.
+- canonical endpoint는 `/ws/session`이다.
 - 단, 기존 extension 호환을 위해 `/api/evaluate`는 별도 legacy compatibility route로 유지한다.
 - `/api/evaluate`는 본 문서의 protocol subset 확장 경로가 아니다.
+
+### 2.1 Canonical `/ws/session` Connection and Auth Model
+
+연결 모델:
+
+- FE runtime은 `wss://<api-host>/ws/session`로 연결한다.
+- 해커톤 절충안으로, WebSocket 연결 수립 시 `token` query parameter로 opaque app session token을 전달한다.
+- 이 token은 `/api/token`에서 발급한 값이어야 한다.
+- 이 방식은 해커톤 기간의 FE/BE 연결 단순화를 위한 임시 계약이며, 장기적으로는 header 또는 subprotocol 기반 인증으로 대체할 수 있다.
+
+인증 모델:
+
+- 서버는 반드시 `upgrade` 단계에서 token을 `auth_sessions.session_token_hash` 조회로 검증한다.
+- 검증 성공 시 principal(`local users.id`)을 connection context에 고정한다.
+- 검증 실패, 만료, revoked session이면 `handleUpgrade` 이전에 연결을 거부하고 session을 생성하지 않는다.
+- 동일 `(principalUserId, clientSessionId)` 재연결은 허용하되, principal이 다르면 거부한다.
+
+오류 처리:
+
+- 인증 실패 handshake는 `UNAUTHORIZED` 의미로 처리한다.
+- 이벤트 처리 중 principal/session 불일치도 `UNAUTHORIZED`로 처리한다.
+
+보안 하드닝 규칙:
+
+- 서버는 `Origin` header가 존재하는 환경에서는 `upgrade` 단계에서 허용된 `Origin`만 수락해야 한다.
+- Chrome extension runtime처럼 `Origin`을 안정적으로 강제하기 어려운 환경에서는, `Origin` 검증 부재만으로 연결을 거부하지 않는다.
+- `/ws/session`이 아닌 path로 들어온 upgrade socket은 즉시 종료해야 한다.
+- query token은 opaque app session token만 허용하며, Google identity token이나 외부 provider token을 직접 query에 싣지 않는다.
+- query token은 로그에 남기지 않아야 하며, 디버그 로그에도 마스킹 없이 출력하면 안 된다.
+
+### 2.2 WebSocket vs HTTP Event Ingress Role
+
+- `/ws/session`:
+  - FE와 실제 런타임이 사용하는 canonical transport 경로
+  - server push(`progress`, `projection`, `turn.done`)를 지원하는 경로
+- `/ws/session/events`:
+  - 테스트/디버그용 HTTP ingress adapter
+  - canonical transport가 아니다
+  - FE 실서비스 경로로 사용하지 않는다
+
+동등성 원칙:
+
+- 두 경로는 동일 runtime manager/event semantics를 재사용해야 한다.
+- 즉 transport만 다르고, 이벤트 계약/검증/오류 규약은 같아야 한다.
 
 ---
 
@@ -112,7 +157,8 @@ export interface WsEnvelope<TType extends string, TPayload> {
 - 같은 principal만 자신의 long-term memory record를 조회하고 저장할 수 있다
 - `/api/token` 응답은 `token`, `expiresAt(epoch seconds number)`, `user`를 반환한다
 - FE legacy 호출 호환을 위해 해커톤 기간에는 `{ userId }` 입력을 임시 허용한다
-- HTTP/WS principal 해석은 `Authorization: Bearer <opaque-app-token>`를 `auth_sessions.session_token_hash`로 조회하는 방식으로 동작해야 한다
+- HTTP principal 해석은 `Authorization: Bearer <opaque-app-token>`를 `auth_sessions.session_token_hash`로 조회하는 방식으로 동작해야 한다
+- WebSocket principal 해석은 `/ws/session?token=<opaque-app-token>`를 `auth_sessions.session_token_hash`로 조회하는 방식으로 동작해야 한다
 - token 검증 실패, revoked/expired session, 또는 principal 불일치 시 WS 연결과 HTTP companion 요청은 `UNAUTHORIZED`로 거부한다
 
 ### 5.0.1 Session Reuse Guard
@@ -260,3 +306,33 @@ export type HackathonProjectionBody =
 - multi-tab `tabContexts` 운용 의미
 
 이 항목들은 [BE-SPEC-PROTOCOL.md](./BE-SPEC-PROTOCOL.md)와 업그레이드 문서에서 계속 관리한다.
+
+---
+
+## 9. Done Criteria for Real WebSocket Transport
+
+해커톤 범위에서 `Real WebSocket Transport` 완료로 판정하려면 다음을 충족해야 한다.
+
+- `/ws/session`에서 token handshake 인증이 실제로 동작한다.
+- `session.open -> context.update -> snapshot.push -> user.intent` 흐름을 WebSocket 경로로 처리한다.
+- `session.ready`, `progress`, `projection`, `turn.done`, `error`를 server push로 전달한다.
+- session reuse guard(`(principalUserId, clientSessionId)`)를 WebSocket 경로에서도 동일하게 강제한다.
+- `/ws/session/events`는 테스트/디버그 adapter로 유지하되 canonical이 아님을 문서와 구현에서 일치시킨다.
+
+### 9.1 Minimum TDD Contracts
+
+`Real WebSocket Transport` 착수 시 최소 TDD 계약은 다음 5개로 고정한다.
+
+1. handshake 인증 계약
+   - 유효 token 연결 성공, 무효/만료/revoked token은 `upgrade` 단계에서 연결 거부(`UNAUTHORIZED`)
+2. canonical 이벤트 왕복 계약
+   - `session.open -> context.update -> snapshot.push -> user.intent` 처리 후 `progress/projection/turn.done` 수신
+3. session reuse guard 계약
+   - 동일 `clientSessionId` + 다른 principal 연결 거부
+4. snapshot binding 오류 계약
+   - bound snapshot mismatch 시 `INVALID_SNAPSHOT` 유지
+5. adapter 동등성 계약
+   - `/ws/session`과 `/ws/session/events`가 같은 입력에 대해 동일 오류코드/핵심 payload 의미를 유지
+6. upgrade hardening 계약
+   - 비대상 path upgrade socket은 연결 전에 종료
+   - `Origin` header가 존재하는 경우에만 allowlist 검증을 적용

@@ -102,6 +102,8 @@ flowchart TB
 역할:
 
 - WebSocket session gateway
+- canonical WebSocket endpoint `/ws/session`
+- 테스트/디버그용 HTTP ingress adapter `/ws/session/events`
 - `/api/token`
 - `/api/analyze`
 - `/api/ingest/memory`
@@ -119,6 +121,7 @@ v0.1 운영 원칙:
 - session state는 프로세스 메모리에 둔다
 - 인스턴스 재시작 또는 재배치 시 active session 유실 가능성을 감수한다
 - reconnect는 지원하되, 완전한 session recovery는 v0.1 필수가 아니다
+- `/ws/session/events`는 canonical transport가 아니며 FE 실서비스 경로로 사용하지 않는다
 
 ### 5.2 Cloud SQL for PostgreSQL + pgvector
 

@@ -222,7 +222,9 @@ export interface GoogleAuthExchangeResponse {
 규칙:
 
 - FE는 이후 Google token이 아니라 backend-issued `token`을 사용한다
-- HTTP/WS 모두 `Authorization: Bearer <app-token>`을 사용한다
+- HTTP는 `Authorization: Bearer <app-token>`을 사용한다
+- WS는 해커톤 절충안으로 `/ws/session?token=<app-token>`을 사용한다
+- WS query token 사용은 임시 계약이며, 토큰 검증은 반드시 `upgrade` 단계에서 완료해야 한다
 
 ### 7.3 Hackathon Transition: `dev-bootstrap` Grant
 

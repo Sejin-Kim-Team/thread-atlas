@@ -288,7 +288,6 @@ describe("ingestMemoryRecords", () => {
     })
   })
 
-
   it("ensures migrations before acquiring transaction connection", async () => {
     const calls: string[] = []
     mocks.ensureDatabaseMigrations.mockImplementationOnce(async () => {
