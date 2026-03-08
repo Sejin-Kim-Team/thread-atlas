@@ -105,6 +105,14 @@ v0.1-hackathon backend는 다음으로 정의한다.
 4. 가능한 경우 recall 결과에 링크/anchor 같은 browse metadata를 함께 제시
 5. 단, memory는 current-page explanation을 대체하지 않고 보강한다
 
+### 5.4 Authentication
+
+1. canonical auth path는 `Google OAuth -> BE verify -> app session token`이다
+2. FE는 실사용 경로에서 Google `id_token`을 BE에 전달한다
+3. BE는 Google `sub`를 기준으로 local user/session ownership을 결정한다
+4. `dev-bootstrap`는 local/test 전용 전환 경로로만 허용한다
+5. FE의 `{ userId }` 단독 입력은 canonical contract가 아니며 제거 대상이다
+
 ---
 
 ## 6. Explicit Out of Scope

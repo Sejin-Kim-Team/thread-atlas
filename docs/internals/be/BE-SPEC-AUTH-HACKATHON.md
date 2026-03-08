@@ -230,14 +230,25 @@ export interface GoogleAuthExchangeResponse {
 
 해커톤 구현에서는 Google 검증 연결 전 단계로 `dev-bootstrap` grant를 허용한다.
 
+핵심 원칙:
+
+- `dev-bootstrap`는 **local/test 전용 전환 경로**다.
+- canonical public auth contract는 `google-id-token`이다.
+- FE가 실사용 경로에서 `{ userId }`만 보내는 방식은 더 이상 canonical contract로 보지 않는다.
+- `{ userId }` 입력은 해커톤 마이그레이션 중 임시 호환에 불과하며, Google OAuth 경로 연결 전후로 제거 대상이다.
+- `dev-bootstrap`로 생성되는 identity는 실제 Google identity namespace와 분리되어야 한다.
+
 요청 호환 규칙:
 
 - 신규 입력:
   - `grantType: "dev-bootstrap"`
   - `bootstrapSubject: string`
+- canonical Google 입력:
+  - `grantType: "google-id-token"`
+  - `idToken: string`
 - legacy compatibility 입력:
   - `{ userId: string }`
-- 해커톤 기간에는 위 2가지 입력을 모두 허용한다.
+- FE migration 완료 전까지는 legacy compatibility 입력을 임시로 둘 수 있으나, local/test 편의 경로 이상으로 승격하지 않는다.
 - FE migration 완료 후 legacy compatibility 입력은 제거 대상으로 본다.
 
 요구사항:
@@ -248,6 +259,7 @@ export interface GoogleAuthExchangeResponse {
 - fallback key 또는 hardcoded dev key는 허용하지 않는다.
 - bootstrap key mismatch는 `403 FORBIDDEN`를 반환한다.
 - `google-id-token` grant는 verifier 연동 전까지 `501 NOT_IMPLEMENTED`를 반환한다.
+- `dev-bootstrap` 경로는 운영 경로가 아니라 local/test 경로로만 취급한다.
 
 응답 규칙:
 
@@ -276,6 +288,12 @@ BE는 Google credential을 검증할 때 최소한 아래를 확인해야 한다
 3. 있으면 `users.last_login_at`, `user_identities.last_login_at` 갱신
 4. `auth_sessions` insert
 5. app session token 발급
+
+`dev-bootstrap` 경로의 identity 저장 규칙:
+
+- `dev-bootstrap`에서 생성되는 identity는 `provider='bootstrap'`와 같은 별도 namespace를 사용해야 한다.
+- `provider='google'` namespace를 점유해서는 안 된다.
+- 따라서 임시 bootstrap subject가 실제 Google `sub` 공간을 선점하지 못해야 한다.
 
 ---
 
