@@ -276,6 +276,7 @@ describe("ws /ws/session flow contract (red)", () => {
 
     expect(types).toContain("session.ready")
     expect(types.filter((type) => type === "session.ready")).toHaveLength(1)
+    expect(types[0]).toBe("session.ready")
     expect(types).toContain("progress")
     expect(types).toContain("projection")
     expect(types).toContain("turn.done")

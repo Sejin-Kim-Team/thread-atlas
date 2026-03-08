@@ -283,6 +283,24 @@ function generationFailed(message: string): RuntimeResult {
   }
 }
 
+function interruptedTurnBatch(
+  requestId: string | undefined,
+  session: RuntimeSession,
+  turnId: string
+): RuntimeResult {
+  return {
+    status: 200,
+    body: {
+      type: "event.batch",
+      requestId,
+      sessionId: session.sessionId,
+      turnId,
+      timestamp: makeTimestamp(),
+      events: []
+    }
+  }
+}
+
 function validateEnvelope(input: unknown): RuntimeEnvelope | null {
   if (!isObject(input)) {
     return null
@@ -1467,6 +1485,9 @@ export class RuntimeManager {
       this.clearActiveTurn(session)
       return generation.error
     }
+    if (session.activeTurnId !== turnId) {
+      return interruptedTurnBatch(requestId, session, turnId)
+    }
 
     const events: Array<Record<string, unknown>> = []
     for (const stage of progressStages) {
@@ -1513,6 +1534,9 @@ export class RuntimeManager {
       }
 
       const recallCandidates = await retrieveMemoryCandidates(retrievalInput)
+      if (session.activeTurnId !== turnId) {
+        return interruptedTurnBatch(requestId, session, turnId)
+      }
       const selectedRecall = selectRecallCandidate(recallCandidates, session.ownerUserId)
       if (selectedRecall) {
         const navigation: Record<string, unknown> = {
