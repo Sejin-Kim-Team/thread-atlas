@@ -5,6 +5,7 @@ import { getPool } from "../db/pool"
 import {
   INSERT_GOOGLE_IDENTITY_SQL,
   INSERT_USER_FOR_GOOGLE_IDENTITY_SQL,
+  LOCK_GOOGLE_IDENTITY_SUBJECT_SQL,
   SELECT_EXISTING_GOOGLE_IDENTITY_SQL,
   UPDATE_GOOGLE_IDENTITY_SQL,
   UPDATE_USER_FROM_GOOGLE_IDENTITY_SQL
@@ -76,6 +77,9 @@ export async function upsertGoogleIdentity(
   const rawClaims = input.rawClaims ?? { sub: providerSubject }
 
   return withTransaction(async (client) => {
+    // 동일 Google sub 로그인은 한 트랜잭션씩만 처리해 중복 바인딩 경쟁 조건을 막는다.
+    await client.query(LOCK_GOOGLE_IDENTITY_SUBJECT_SQL, [`google:${providerSubject}`])
+
     // 제공자와 주체 식별자 조합이 이미 연결된 사용자가 있는지 먼저 확인한다.
     const existingIdentity = await client.query<{ user_id: string }>(
       SELECT_EXISTING_GOOGLE_IDENTITY_SQL,

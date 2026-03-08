@@ -195,13 +195,18 @@ create table if not exists auth_sessions (
 
 ## 7. Recommended Token Contract
 
-### 7.1 Google Exchange Request
+### 7.1 Canonical Token Request
 
 ```ts
-export interface GoogleAuthExchangeRequest {
-  provider: "google"
-  idToken: string
-}
+export type TokenRequest =
+  | {
+      grantType: "google-id-token"
+      idToken: string
+    }
+  | {
+      grantType: "dev-bootstrap"
+      bootstrapSubject: string
+    }
 ```
 
 ### 7.2 Google Exchange Response
@@ -238,18 +243,16 @@ export interface GoogleAuthExchangeResponse {
 - `{ userId }` 입력은 해커톤 마이그레이션 중 임시 호환에 불과하며, Google OAuth 경로 연결 전후로 제거 대상이다.
 - `dev-bootstrap`로 생성되는 identity는 실제 Google identity namespace와 분리되어야 한다.
 
-요청 호환 규칙:
+요청 규칙:
 
-- 신규 입력:
-  - `grantType: "dev-bootstrap"`
-  - `bootstrapSubject: string`
 - canonical Google 입력:
   - `grantType: "google-id-token"`
   - `idToken: string`
-- legacy compatibility 입력:
-  - `{ userId: string }`
-- FE migration 완료 전까지는 legacy compatibility 입력을 임시로 둘 수 있으나, local/test 편의 경로 이상으로 승격하지 않는다.
-- FE migration 완료 후 legacy compatibility 입력은 제거 대상으로 본다.
+- local/test 입력:
+  - `grantType: "dev-bootstrap"`
+  - `bootstrapSubject: string`
+- `{ userId }` 단독 입력은 canonical contract가 아니다.
+- FE는 auth realization 이후 `{ userId }` 단독 입력을 사용하지 않는다.
 
 요구사항:
 
@@ -258,7 +261,7 @@ export interface GoogleAuthExchangeResponse {
 - `AUTH_BOOTSTRAP_KEY` 미설정 상태에서는 `dev-bootstrap` grant를 처리하지 않고 `503 SERVICE_UNAVAILABLE`를 반환한다.
 - fallback key 또는 hardcoded dev key는 허용하지 않는다.
 - bootstrap key mismatch는 `403 FORBIDDEN`를 반환한다.
-- `google-id-token` grant는 verifier 연동 전까지 `501 NOT_IMPLEMENTED`를 반환한다.
+- `google-id-token` grant는 verifier 연동 이후 canonical success path가 된다.
 - `dev-bootstrap` 경로는 운영 경로가 아니라 local/test 경로로만 취급한다.
 
 응답 규칙:
@@ -280,6 +283,10 @@ BE는 Google credential을 검증할 때 최소한 아래를 확인해야 한다
 검증 실패 시:
 
 - `401 UNAUTHORIZED`
+
+검증/Google 통신 장애 시:
+
+- `503 SERVICE_UNAVAILABLE`
 
 검증 성공 시:
 
@@ -338,3 +345,11 @@ BE는 Google credential을 검증할 때 최소한 아래를 확인해야 한다
 즉 해커톤 canonical auth는 단순 stub token이 아니라,
 **Google verified login + backend-issued session token + DB-backed user/session ownership**
 이다.
+
+---
+
+## 12. Shared Contract Note
+
+- 현재 `packages/shared`의 `TokenRequest { userId }`는 해커톤 canonical auth 계약과 다르다.
+- 이번 auth realization 구현에서는 `packages/shared`를 변경하지 않고, BE route contract를 우선 적용한다.
+- shared 동기화는 사용자 승인 후 별도 작업으로 진행한다.

@@ -65,7 +65,7 @@ describe("POST /api/token", () => {
     }
   })
 
-  it("rejects unsupported grantType before oauth integration is implemented", async () => {
+  it("rejects invalid google-id-token grant request with unauthorized", async () => {
     const app = createServer()
     const response = await request(app)
       .post("/api/token")
@@ -75,9 +75,9 @@ describe("POST /api/token", () => {
         idToken: "dummy-token"
       })
 
-    expect(response.status).toBe(501)
+    expect(response.status).toBe(401)
     expect(response.body).toMatchObject({
-      code: "NOT_IMPLEMENTED"
+      code: "UNAUTHORIZED"
     })
   })
 
@@ -129,16 +129,15 @@ describe("POST /api/token", () => {
     })
   })
 
-  it("accepts legacy compatibility payload with userId only", async () => {
+  it("rejects legacy userId-only payload after canonical contract migration", async () => {
     const app = createServer()
     const response = await request(app).post("/api/token").send({
       userId: "user_sungwoo"
     })
 
-    expect(response.status).toBe(200)
-    expect(typeof response.body.token).toBe("string")
-    expect(typeof response.body.expiresAt).toBe("number")
-    expect(typeof response.body.user?.id).toBe("string")
-    expect(response.body.user.id).toMatch(UUID_V4_REGEX)
+    expect(response.status).toBe(400)
+    expect(response.body).toMatchObject({
+      code: "INVALID_EVENT"
+    })
   })
 })

@@ -47,7 +47,7 @@ describe("principal resolver and token transition contract (red)", () => {
     })
   })
 
-  it("returns 501 for google-id-token grant before oauth verifier is implemented", async () => {
+  it("returns 401 for invalid google-id-token grant", async () => {
     const app = createServer()
 
     const response = await request(app).post("/api/token").send({
@@ -56,9 +56,9 @@ describe("principal resolver and token transition contract (red)", () => {
       idToken: "dummy.google.id.token"
     })
 
-    expect(response.status).toBe(501)
+    expect(response.status).toBe(401)
     expect(response.body).toMatchObject({
-      code: "NOT_IMPLEMENTED"
+      code: "UNAUTHORIZED"
     })
   })
 

@@ -10,7 +10,7 @@ export const FIND_USER_BY_ID_SQL = `
 export const SELECT_EXISTING_BOOTSTRAP_IDENTITY_SQL = `
   select user_id
   from user_identities
-  where provider = 'google' and provider_subject = $1
+  where provider = 'bootstrap' and provider_subject = $1
   limit 1
 `
 
@@ -32,7 +32,7 @@ export const UPDATE_BOOTSTRAP_IDENTITY_SQL = `
     email = coalesce($2, email),
     raw_claims = coalesce(raw_claims, '{}'::jsonb),
     last_login_at = now()
-  where provider = 'google' and provider_subject = $1
+  where provider = 'bootstrap' and provider_subject = $1
 `
 
 // 신규 부트스트랩 사용자를 users 테이블에 생성한다.
@@ -57,7 +57,7 @@ export const INSERT_BOOTSTRAP_IDENTITY_SQL = `
     email_verified,
     raw_claims,
     last_login_at
-  ) values ($1, $2, 'google', $3, $4, false, $5::jsonb, now())
+  ) values ($1, $2, 'bootstrap', $3, $4, false, $5::jsonb, now())
 `
 
 // 부트스트랩 주체 기준으로 최종 사용자 정보를 조인 조회한다.
@@ -65,6 +65,6 @@ export const RESOLVE_USER_FROM_BOOTSTRAP_SUBJECT_SQL = `
   select u.id, u.display_name, u.primary_email, u.avatar_url, u.created_at
   from user_identities ui
   join users u on u.id = ui.user_id
-  where ui.provider = 'google' and ui.provider_subject = $1
+  where ui.provider = 'bootstrap' and ui.provider_subject = $1
   limit 1
 `
