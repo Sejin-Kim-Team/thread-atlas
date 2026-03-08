@@ -105,6 +105,24 @@ function generationFailed(message: string): RuntimeResult {
   }
 }
 
+function interruptedTurnBatch(
+  envelope: RuntimeEnvelope,
+  session: RuntimeSession,
+  turnId: string
+): RuntimeResult {
+  return {
+    status: 200,
+    body: {
+      type: "event.batch",
+      requestId: envelope.requestId,
+      sessionId: session.sessionId,
+      turnId,
+      timestamp: makeTimestamp(),
+      events: []
+    }
+  }
+}
+
 function validateEnvelope(input: unknown): RuntimeEnvelope | null {
   if (!isObject(input)) {
     return null
@@ -492,6 +510,10 @@ export class RuntimeManager {
       return generationFailed("generation failed")
     }
 
+    if (session.activeTurnId !== turnId) {
+      return interruptedTurnBatch(envelope, session, turnId)
+    }
+
     const events: Array<Record<string, unknown>> = [
       {
         type: "progress",
@@ -543,6 +565,9 @@ export class RuntimeManager {
       }
 
       const recallCandidates = await retrieveMemoryCandidates(retrievalInput)
+      if (session.activeTurnId !== turnId) {
+        return interruptedTurnBatch(envelope, session, turnId)
+      }
       const selectedRecall = selectRecallCandidate(recallCandidates, session.ownerUserId)
       if (selectedRecall) {
         const navigation: Record<string, unknown> = {
@@ -591,6 +616,12 @@ export class RuntimeManager {
       timestamp: makeTimestamp(),
       payload: turnDonePayload
     })
+
+    if (session.activeTurnId !== turnId) {
+      return interruptedTurnBatch(envelope, session, turnId)
+    }
+
+    session.activeTurnId = null
 
     return {
       status: 200,

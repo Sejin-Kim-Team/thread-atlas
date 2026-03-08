@@ -12,10 +12,12 @@ import {
   postWsEventWithAuth
 } from "./helpers/ws-contract"
 
+const generateTextMock = vi.fn(async () => "GENAI_FLOW_TEST_ANSWER")
+
 vi.mock("../../src/services/gemini", () => ({
   createGeminiClient: () => ({
     // generation 품질 검증은 별도 테스트에서 다루고, 본 흐름 테스트는 이벤트 계약만 고정한다.
-    generateText: vi.fn(async () => "GENAI_FLOW_TEST_ANSWER")
+    generateText: generateTextMock
   }),
   isModelConfigError: () => false
 }))
@@ -195,5 +197,97 @@ describe("ws current-page turn flow", () => {
     expect(followUp.status).toBe(200)
     expect(followUp.body.type).not.toBe("error")
     expect(followUp.body.payload?.code).not.toBe("TURN_CONFLICT")
+  })
+
+  it("does not emit stale events when an earlier intent is interrupted", async () => {
+    const client = request(app)
+    const token = await issueAuthToken(client)
+
+    let releaseFirstGeneration: (() => void) | null = null
+    generateTextMock.mockReset()
+    generateTextMock
+      .mockImplementationOnce(
+        () =>
+          new Promise<string>((resolve) => {
+            releaseFirstGeneration = () => resolve("FIRST_ANSWER")
+          })
+      )
+      .mockResolvedValueOnce("SECOND_ANSWER")
+
+    const open = await postWsEventWithAuth(
+      client,
+      createEnvelope("session.open", createSessionOpenPayload(), { requestId: "req-open-1" }),
+      token
+    )
+    const sessionId = open.body?.payload?.sessionId
+
+    await postWsEventWithAuth(
+      client,
+      createEnvelope("context.update", createContextUpdatePayload(128), {
+        requestId: "req-ctx-1",
+        sessionId
+      }),
+      token
+    )
+
+    await postWsEventWithAuth(
+      client,
+      createEnvelope(
+        "snapshot.push",
+        {
+          tabId: 128,
+          snapshot: createValidSnapshot()
+        },
+        {
+          requestId: "req-snapshot-1",
+          sessionId
+        }
+      ),
+      token
+    )
+
+    const firstIntentPromise = postWsEventWithAuth(
+      client,
+      createEnvelope("user.intent", createUserIntentPayload(128), {
+        requestId: "req-intent-1",
+        sessionId
+      }),
+      token
+    )
+
+    await vi.waitFor(() => {
+      expect(generateTextMock).toHaveBeenCalledTimes(1)
+    })
+
+    const secondIntentPromise = postWsEventWithAuth(
+      client,
+      createEnvelope("user.intent", createUserIntentPayload(128), {
+        requestId: "req-intent-2",
+        sessionId
+      }),
+      token
+    )
+
+    await vi.waitFor(() => {
+      expect(generateTextMock).toHaveBeenCalledTimes(2)
+    })
+
+    releaseFirstGeneration?.()
+
+    const [firstIntent, secondIntent] = await Promise.all([firstIntentPromise, secondIntentPromise])
+
+    expect(firstIntent.status).toBe(200)
+    expect(firstIntent.body.type).toBe("event.batch")
+    expect(firstIntent.body.events).toEqual([])
+
+    expect(secondIntent.status).toBe(200)
+    expect(Array.isArray(secondIntent.body.events)).toBe(true)
+    expect(
+      assertOrderedEventTypes(secondIntent.body.events as Array<{ type?: string }>, [
+        "progress",
+        "projection",
+        "turn.done"
+      ])
+    ).toBe(true)
   })
 })
