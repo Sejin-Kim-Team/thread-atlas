@@ -43,7 +43,11 @@ export function createValidSnapshot(capturedAt = "2026-03-07T14:00:01.500Z") {
       id: "hn-43210000",
       url: "https://news.ycombinator.com/item?id=43210000",
       title: "Ask HN: WebSocket vs SSE",
-      kind: "thread"
+      kind: "thread",
+      metadata: {
+        site: "hacker-news",
+        locale: "en-US"
+      }
     },
     focus: {
       nodeId: "comment-43210091",
@@ -73,7 +77,14 @@ export function createValidSnapshot(capturedAt = "2026-03-07T14:00:01.500Z") {
     meta: {
       capturedAt,
       skeletonVersion: 12,
-      extractorId: "generic+hacker-news-enhancer"
+      extractorId: "generic+hacker-news-enhancer",
+      coverage: {
+        kind: "focus-branch",
+        rootNodeId: "comment-43210010",
+        capturedNodeCount: 10,
+        omittedNodeCount: 2,
+        omittedRootCount: 1
+      }
     }
   }
 }

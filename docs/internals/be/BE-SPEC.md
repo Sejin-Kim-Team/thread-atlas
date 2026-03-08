@@ -103,6 +103,8 @@ LLM responsibility:
 - backend는 raw DOM을 reasoning truth로 사용하지 않는다
 - backend는 `SemanticSnapshot`을 canonical input truth로 사용한다
 - `ContextPack`은 snapshot-derived input이며 authoritative source가 아니다
+- 입력 계약 타입은 `@threadatlas/shared`를 canonical source로 사용한다
+- BE는 입력 계약 타입을 자체 축약/재정의하지 않고, 내부 모델은 `NormalizedContextPack`으로 분리한다
 
 ---
 

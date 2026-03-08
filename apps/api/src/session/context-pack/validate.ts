@@ -13,6 +13,30 @@ function hasNonBlankString(value: unknown): value is string {
   return typeof value === "string" && value.trim().length > 0
 }
 
+function isValidCoverage(coverage: unknown): boolean {
+  if (!isObject(coverage)) {
+    return false
+  }
+
+  const kind = coverage.kind
+  const rootNodeId = coverage.rootNodeId
+  const capturedNodeCount = coverage.capturedNodeCount
+  const omittedNodeCount = coverage.omittedNodeCount
+  const omittedRootCount = coverage.omittedRootCount
+
+  const validKind = kind === "focus-branch" || kind === "focus-section"
+  return (
+    validKind &&
+    hasNonBlankString(rootNodeId) &&
+    typeof capturedNodeCount === "number" &&
+    capturedNodeCount >= 0 &&
+    typeof omittedNodeCount === "number" &&
+    omittedNodeCount >= 0 &&
+    typeof omittedRootCount === "number" &&
+    omittedRootCount >= 0
+  )
+}
+
 export function validateSemanticSnapshot(snapshot: unknown): SnapshotValidationResult {
   if (!isObject(snapshot)) {
     return { ok: false, errors: ["snapshot must be an object"] }
@@ -70,6 +94,12 @@ export function validateSemanticSnapshot(snapshot: unknown): SnapshotValidationR
 
   if (!casted.meta || !isObject(casted.meta) || typeof casted.meta.capturedAt !== "string") {
     errors.push("meta is required")
+  }
+
+  if (casted.meta && isObject(casted.meta) && casted.meta.coverage !== undefined) {
+    if (!isValidCoverage(casted.meta.coverage)) {
+      errors.push("meta.coverage is invalid")
+    }
   }
 
   return {

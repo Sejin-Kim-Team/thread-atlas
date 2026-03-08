@@ -366,7 +366,33 @@ function isSnapshotLike(snapshot: unknown): snapshot is SnapshotLike {
   }
   const focus = snapshot.focus
   const meta = snapshot.meta
-  return isObject(focus) && isObject(meta)
+  if (!isObject(focus) || !isObject(meta)) {
+    return false
+  }
+
+  if (!("visualSignals" in snapshot)) {
+    return true
+  }
+
+  const visualSignals = snapshot.visualSignals
+  if (visualSignals === undefined) {
+    return true
+  }
+  if (!isObject(visualSignals)) {
+    return false
+  }
+
+  const uiSuspicious = visualSignals.uiSuspicious
+  if (uiSuspicious !== undefined && typeof uiSuspicious !== "boolean") {
+    return false
+  }
+
+  const anomalyScore = visualSignals.anomalyScore
+  if (anomalyScore !== undefined && asFiniteNumber(anomalyScore) === null) {
+    return false
+  }
+
+  return true
 }
 
 function parseSnapshotPushPayload(payload: unknown): SnapshotPushPayload | null {
@@ -766,8 +792,10 @@ function buildEnrichRequestPayload(
 }
 
 function hasFocusIdMismatch(snapshot: SnapshotLike): boolean {
-  const focusNodeId = snapshot.focus?.nodeId
-  const focusNodeObjectId = snapshot.focus?.node?.id
+  const focusNodeId = asStringOrNull(snapshot.focus?.nodeId)
+  const focusNodeObjectId = isObject(snapshot.focus?.node)
+    ? asStringOrNull(snapshot.focus.node.id)
+    : null
   if (!focusNodeId || !focusNodeObjectId) {
     return true
   }
@@ -791,7 +819,18 @@ function extractSourceDomain(url: string | undefined): string | undefined {
 }
 
 function resolveFocusText(snapshot: SnapshotLike): string {
-  const focusText = asStringOrNull(snapshot.focus?.node?.text)
+  const focusNodeRaw = snapshot.focus?.node
+  if (!isObject(focusNodeRaw)) {
+    return ""
+  }
+  const focusNode = focusNodeRaw as Record<string, unknown>
+
+  // union node의 텍스트 표현 차이를 흡수해 suspicious 판정/프롬프트 입력을 안정화한다.
+  const focusText =
+    asStringOrNull(focusNode.text) ??
+    asStringOrNull(focusNode.label) ??
+    asStringOrNull(focusNode.valuePreview)
+
   return focusText ?? ""
 }
 

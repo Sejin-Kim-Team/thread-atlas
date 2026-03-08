@@ -1,3 +1,11 @@
+import type { SemanticSnapshot } from "@threadatlas/shared"
+
+type DeepPartial<T> = T extends readonly (infer Item)[]
+  ? Array<DeepPartial<Item>>
+  : T extends object
+    ? { [K in keyof T]?: DeepPartial<T[K]> }
+    : T
+
 export interface RuntimeEnvelope {
   type: string
   timestamp: string
@@ -19,21 +27,7 @@ export interface RuntimeSession {
   activeTurn?: RuntimeActiveTurn
 }
 
-export interface SnapshotLike {
-  page?: {
-    url?: string
-    kind?: "article" | "thread" | "post" | "generic"
-  }
-  focus?: {
-    nodeId?: string
-    node?: {
-      id?: string
-      text?: string
-    }
-  }
-  meta?: {
-    capturedAt?: string
-  }
+export type SnapshotLike = DeepPartial<SemanticSnapshot> & {
   visualSignals?: {
     uiSuspicious?: boolean
     anomalyScore?: number

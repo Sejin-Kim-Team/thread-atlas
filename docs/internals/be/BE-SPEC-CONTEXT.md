@@ -20,6 +20,8 @@ Companion:
 - `SemanticSnapshot`이 canonical truth다
 - FE가 보낸 `ContextPack`은 optional hint다
 - planner는 raw snapshot이나 FE pack이 아니라 `NormalizedContextPack`을 본다
+- 입력 계약 타입은 `@threadatlas/shared`를 canonical source로 사용한다
+- BE는 shared 입력 계약을 축약/재정의하지 않는다
 
 해커톤 범위 적용 원칙:
 
@@ -41,6 +43,11 @@ SoT 의미:
 - 주변 semantic context의 기준
 - provenance와 capture metadata의 기준
 
+경계 규칙:
+- `snapshot.push.payload.snapshot`의 공개 입력 계약은 shared `SemanticSnapshot`이다.
+- 해커톤 runtime manager는 내부 캐시 안정성을 위해 `SnapshotLike = DeepPartial<SemanticSnapshot> & { visualSignals?: { ... } }` 경계를 사용할 수 있다.
+- 위 `SnapshotLike`는 runtime 내부 저장 모델이며, 외부 wire contract를 대체하지 않는다.
+
 ### 2.2 ContextPack Is Derived Input
 
 backend는 shared contract의 `ContextPack`을 optional derived input으로 수용할 수 있다.
@@ -61,6 +68,11 @@ SemanticSnapshot
 -> NormalizedContextPack
 -> Planner
 ```
+
+정렬 원칙:
+- `NormalizedContextPack`만 BE 내부 모델로 관리한다.
+- 이번 범위는 shared 승격이 아니라 BE 구현 정렬이다.
+- shared 계약 변경이 필요하면 별도 승인 범위로 분리한다.
 
 ---
 

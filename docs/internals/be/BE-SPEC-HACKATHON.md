@@ -300,16 +300,21 @@ grounding input 최소 규칙:
 - canonical input truth
 - 반드시 required
 - FE local workspace memory에서 파생된 최신 snapshot을 기준으로 한다
+- 타입 계약은 `@threadatlas/shared`의 `SemanticSnapshot`을 그대로 사용한다
+- BE에서 입력 계약을 축약/재정의하지 않는다
 
 ### 5.2 ContextPack
 
 - optional input
 - FE가 보내면 수용 가능
 - backend는 snapshot 기준으로 canonical pack을 재구성 가능해야 함
+- 타입 계약은 `@threadatlas/shared`의 `ContextPack`을 그대로 사용한다
 
 ### 5.3 Planner Input
 
 planner는 raw snapshot이나 FE pack 대신 `NormalizedContextPack`을 사용한다.
+- `NormalizedContextPack`은 planner/reasoner용 BE 내부 모델이며 shared 입력 계약이 아니다.
+- 이번 정렬 작업은 shared 승격이 아니라 BE 구현이 기존 shared 입력 계약에 맞추는 작업이다.
 
 ---
 

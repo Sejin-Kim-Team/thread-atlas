@@ -4,7 +4,11 @@ export function buildSemanticSnapshot() {
       id: "hn-43210000",
       url: "https://news.ycombinator.com/item?id=43210000",
       title: "Ask HN: WebSocket vs SSE",
-      kind: "thread"
+      kind: "thread",
+      metadata: {
+        site: "hacker-news",
+        locale: "en-US"
+      }
     },
     focus: {
       nodeId: "comment-43210091",
@@ -32,7 +36,14 @@ export function buildSemanticSnapshot() {
     meta: {
       capturedAt: "2026-03-07T14:00:01.500Z",
       skeletonVersion: 12,
-      extractorId: "generic+hacker-news-enhancer"
+      extractorId: "generic+hacker-news-enhancer",
+      coverage: {
+        kind: "focus-branch",
+        rootNodeId: "comment-43210010",
+        capturedNodeCount: 12,
+        omittedNodeCount: 2,
+        omittedRootCount: 1
+      }
     }
   }
 }
@@ -43,11 +54,46 @@ export function buildAnalyzeRequest(mode: "seed" | "memory-candidate" | "visual-
     mode,
     snapshot: buildSemanticSnapshot(),
     providedPack: {
-      focus: {
-        nodeId: "comment-43210091",
-        text: "WebSocket is better for interruption and bidirectional updates."
+      version: 1,
+      scope: {
+        kind: "focus-branch",
+        rootNodeId: "comment-43210010",
+        focusNodeId: "comment-43210091"
       },
-      summaries: ["The focused comment prefers WebSocket over SSE."]
+      page: {
+        id: "hn-43210000",
+        url: "https://news.ycombinator.com/item?id=43210000",
+        title: "Ask HN: WebSocket vs SSE",
+        kind: "thread",
+        metadata: {
+          site: "hacker-news"
+        }
+      },
+      focus: {
+        id: "comment-43210091",
+        kind: "comment",
+        relation: "focus",
+        distance: 0,
+        text: "WebSocket is better for interruption and bidirectional updates.",
+        author: "alice",
+        depth: 1
+      },
+      groups: {
+        ancestors: [],
+        descendants: [],
+        siblings: [],
+        containers: []
+      },
+      omitted: {
+        nodeCount: 2,
+        rootCount: 1,
+        note: "collapsed replies"
+      },
+      provenance: {
+        extractorId: "generic+hacker-news-enhancer",
+        capturedAt: "2026-03-07T14:00:01.500Z",
+        skeletonVersion: 12
+      }
     }
   }
 }

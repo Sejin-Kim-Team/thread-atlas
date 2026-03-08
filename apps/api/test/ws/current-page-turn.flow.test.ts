@@ -1,6 +1,6 @@
 import request from "supertest"
-import { describe, expect, it, vi } from "vitest"
-import { createServer } from "../../src/server"
+import { beforeEach, describe, expect, it, vi } from "vitest"
+import type { Express } from "express"
 import {
   assertOrderedEventTypes,
   createContextUpdatePayload,
@@ -14,18 +14,28 @@ import {
 
 const generateTextMock = vi.fn(async () => "GENAI_FLOW_TEST_ANSWER")
 
-vi.mock("../../src/services/gemini", () => ({
-  createGeminiClient: () => ({
-    // generation 품질 검증은 별도 테스트에서 다루고, 본 흐름 테스트는 이벤트 계약만 고정한다.
-    generateText: generateTextMock
-  }),
-  isModelConfigError: () => false
-}))
-
-const app = createServer()
+async function createApp(): Promise<Express> {
+  const mod = await import("../../src/server")
+  return mod.createServer()
+}
 
 describe("ws current-page turn flow", () => {
+  beforeEach(() => {
+    vi.resetModules()
+    vi.clearAllMocks()
+    process.env.GOOGLE_CLOUD_PROJECT = process.env.GOOGLE_CLOUD_PROJECT ?? "threadatlas"
+    process.env.GOOGLE_CLOUD_LOCATION = process.env.GOOGLE_CLOUD_LOCATION ?? "us-central1"
+    vi.doMock("../../src/services/gemini", () => ({
+      createGeminiClient: () => ({
+        // generation 품질 검증은 별도 테스트에서 다루고, 본 흐름 테스트는 이벤트 계약만 고정한다.
+        generateText: generateTextMock
+      }),
+      isModelConfigError: () => false
+    }))
+  })
+
   it("follows open -> context.update -> snapshot.push -> user.intent and returns progress/projection/turn.done", async () => {
+    const app = await createApp()
     const client = request(app)
     const token = await issueAuthToken(client)
 
@@ -86,6 +96,7 @@ describe("ws current-page turn flow", () => {
   })
 
   it("keeps referencedTabIds in turn.done within current-page scope", async () => {
+    const app = await createApp()
     const client = request(app)
     const token = await issueAuthToken(client)
 
@@ -141,6 +152,7 @@ describe("ws current-page turn flow", () => {
   })
 
   it("does not rely on TURN_CONFLICT for follow-up intents", async () => {
+    const app = await createApp()
     const client = request(app)
     const token = await issueAuthToken(client)
 
@@ -204,7 +216,7 @@ describe("ws current-page turn flow", () => {
     process.env.ENRICH_TRIGGER_MODE = "rule"
 
     try {
-      const isolatedApp = createServer()
+      const isolatedApp = await createApp()
       const client = request(isolatedApp)
       const token = await issueAuthToken(client)
 

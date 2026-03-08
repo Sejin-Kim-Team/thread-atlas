@@ -176,9 +176,12 @@ export interface WsEnvelope<TType extends string, TPayload> {
 ### 5.2 Snapshot Binding
 
 - `snapshot.push`는 항상 primary tab의 latest snapshot을 갱신한다
+- `snapshot.push.payload.snapshot`의 공개 계약은 shared `SemanticSnapshot`이며, runtime hint 용도 `visualSignals?: { uiSuspicious?: boolean; anomalyScore?: number }`를 교차 필드로만 추가 허용한다
 - `user.intent.boundSnapshotCapturedAt`은 실제 latest snapshot과 검증 가능해야 한다
+- `visualSignals`가 있을 때 `uiSuspicious`는 boolean, `anomalyScore`는 finite number여야 하며 타입 위반은 `INVALID_SNAPSHOT`으로 거부한다
 - mismatch, malformed snapshot, binding failure는 모두 `INVALID_SNAPSHOT`으로 반환한다
 - `INVALID_SNAPSHOT`는 항상 recoverable error로 취급한다
+- runtime 내부 최신 스냅샷 캐시는 `SnapshotLike(DeepPartial<SemanticSnapshot> + visualSignals)` 경계를 사용해도 되지만, 외부 공개 계약은 위 snapshot.push 입력 계약으로 고정한다
 
 ### 5.3 Turn Binding
 

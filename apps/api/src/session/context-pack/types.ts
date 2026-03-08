@@ -1,62 +1,14 @@
+import type {
+  ContextRelation,
+  PageKind,
+  SemanticNode,
+  SemanticSnapshot,
+  ContextPack
+} from "@threadatlas/shared"
+
 export type AnalyzeMode = "seed" | "memory-candidate" | "visual-summary"
 
 export type NormalizedMode = "discussion" | "authored" | "interactive" | "generic"
-
-export type PageKind = "article" | "thread" | "post" | "generic"
-export type SemanticNodeKind = "content" | "comment" | "interactive"
-export type ContextRelation = "parent" | "child" | "sibling" | "container" | "ancestor"
-
-export interface SemanticNode {
-  kind: SemanticNodeKind
-  id: string
-  text?: string
-  label?: string
-  parentId?: string
-}
-
-export interface SemanticSnapshot {
-  page: {
-    id: string
-    url: string
-    title?: string
-    kind: PageKind
-  }
-  focus: {
-    nodeId: string
-    node: SemanticNode
-    region: string
-  }
-  context: Array<{
-    relation: ContextRelation
-    node: SemanticNode
-    distance: number
-  }>
-  meta: {
-    capturedAt: string
-    skeletonVersion: number
-    extractorId: string
-  }
-}
-
-export interface ContextPack {
-  version: 1
-  page: {
-    id: string
-    url: string
-    title?: string
-    kind: PageKind
-  }
-  focus: {
-    id: string
-    kind: SemanticNodeKind
-    text: string
-  }
-  provenance: {
-    extractorId: string
-    capturedAt: string
-    skeletonVersion: number
-  }
-}
 
 export type MemoryRecordKind =
   | "branch-summary"
@@ -109,4 +61,13 @@ export type AnalyzeResponseBody =
 export interface SnapshotValidationResult {
   ok: boolean
   errors: string[]
+}
+
+// shared 입력 계약을 BE가 직접 사용하도록 re-export 한다.
+export type {
+  ContextPack,
+  ContextRelation,
+  PageKind,
+  SemanticNode,
+  SemanticSnapshot
 }
