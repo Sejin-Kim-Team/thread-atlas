@@ -18,6 +18,11 @@ interface AuthenticatedUpgradeRequest extends IncomingMessage {
   authContext?: UpgradeAuthContext
 }
 
+interface PendingEnrichBinding {
+  requestKind: string
+  targetRef: Record<string, unknown>
+}
+
 function sendUnauthorized(ws: WebSocket, message: string): void {
   ws.send(
     JSON.stringify({
@@ -150,13 +155,152 @@ export function attachSessionWebSocketServer(
     let pendingInboundCount = 0
     let deferredSessionReady: Record<string, unknown> | null = null
     let inboundQueue: Promise<void> = Promise.resolve()
+    const enrichTimeoutByTurnId = new Map<string, ReturnType<typeof setTimeout>>()
+    const pendingEnrichBindingByTurnId = new Map<string, PendingEnrichBinding>()
 
-    const flushDeferredReady = (): void => {
-      if (pendingInboundCount !== 0 || !deferredSessionReady) {
+    const flushDeferredReady = (force = false): void => {
+      if ((!force && pendingInboundCount !== 0) || !deferredSessionReady) {
         return
       }
       ws.send(JSON.stringify(deferredSessionReady))
       deferredSessionReady = null
+    }
+
+    const clearEnrichTimeout = (turnId: string): void => {
+      const handle = enrichTimeoutByTurnId.get(turnId)
+      if (handle) {
+        clearTimeout(handle)
+      }
+      enrichTimeoutByTurnId.delete(turnId)
+      pendingEnrichBindingByTurnId.delete(turnId)
+    }
+
+    const clearAllEnrichTimeouts = (): void => {
+      for (const handle of enrichTimeoutByTurnId.values()) {
+        clearTimeout(handle)
+      }
+      enrichTimeoutByTurnId.clear()
+      pendingEnrichBindingByTurnId.clear()
+    }
+
+    const emitRuntimeBody = (body: Record<string, unknown>): void => {
+      const bodyType = isRecord(body) && typeof body.type === "string" ? body.type : ""
+      if (bodyType !== "session.ready" && deferredSessionReady) {
+        // canonical WS flow 가시성: deferred session.ready가 후속 이벤트 배치 뒤로 밀리지 않게 선전송한다.
+        flushDeferredReady(true)
+      }
+
+      if (bodyType === "session.ready") {
+        const sessionId = typeof body.sessionId === "string" ? body.sessionId : null
+        if (sessionId) {
+          context.sessionId = sessionId
+        }
+        // 이벤트 순서를 안정화하기 위해 session.ready는 연결 큐 소진 시점에 전송한다.
+        deferredSessionReady = body
+        return
+      }
+
+      if (bodyType === "event.batch" && Array.isArray((body as { events?: unknown }).events)) {
+        const events = (body as { events: unknown[] }).events
+        for (const event of events) {
+          ws.send(JSON.stringify(event))
+          if (!isRecord(event)) {
+            continue
+          }
+          const eventType = typeof event.type === "string" ? event.type : ""
+          const eventTurnId = typeof event.turnId === "string" ? event.turnId : ""
+          if (eventType === "turn.done" && eventTurnId) {
+            clearEnrichTimeout(eventTurnId)
+          }
+          if (eventType === "context.enrich.request" && eventTurnId) {
+            const payload = isRecord(event.payload) ? event.payload : null
+            const timeoutMs =
+              payload && typeof payload.timeoutMs === "number" && Number.isFinite(payload.timeoutMs)
+                ? payload.timeoutMs
+                : 3000
+            const requestKind = payload && typeof payload.requestKind === "string" ? payload.requestKind : null
+            const targetRef = payload && isRecord(payload.targetRef) ? payload.targetRef : null
+
+            clearEnrichTimeout(eventTurnId)
+            if (requestKind && targetRef) {
+              pendingEnrichBindingByTurnId.set(eventTurnId, {
+                requestKind,
+                targetRef
+              })
+            }
+            const handle = setTimeout(() => {
+              pendingInboundCount += 1
+              inboundQueue = inboundQueue
+                .then(async () => {
+                  if (!context.sessionId) {
+                    return
+                  }
+                  const pendingBinding = pendingEnrichBindingByTurnId.get(eventTurnId)
+                  // 상태 전이 보장: enrich 응답이 오지 않으면 timeout 이벤트를 주입해 fallback 경로를 강제한다.
+                  const timeoutEnvelope = {
+                    type: "context.enrich.result",
+                    requestId: `req-enrich-timeout-${eventTurnId}`,
+                    sessionId: context.sessionId,
+                    turnId: eventTurnId,
+                    timestamp: new Date().toISOString(),
+                    payload: {
+                      requestKind: pendingBinding?.requestKind ?? "visible-region",
+                      targetRef: pendingBinding?.targetRef ?? {
+                        kind: "region",
+                        pageUrl: "about:blank",
+                        region: "timeout-fallback"
+                      },
+                      status: "failed",
+                      failureReason: "timeout",
+                      capturedAt: new Date().toISOString()
+                    }
+                  }
+                  const timeoutResult = await runtime.handle(timeoutEnvelope, {
+                    principalUserId: context.principalUserId
+                  })
+
+                  if (timeoutResult.status !== 200) {
+                    const errorCode = isRecord(timeoutResult.body.payload)
+                      ? timeoutResult.body.payload.code
+                      : null
+                    if (errorCode === "INVALID_EVENT") {
+                      return
+                    }
+                    ws.send(JSON.stringify(timeoutResult.body))
+                    return
+                  }
+
+                  emitRuntimeBody(timeoutResult.body)
+                })
+                .catch(() => {
+                  ws.send(
+                    JSON.stringify({
+                      type: "error",
+                      payload: {
+                        code: "INVALID_EVENT",
+                        message: "enrich timeout fallback handling failed"
+                      }
+                    })
+                  )
+                })
+                .finally(() => {
+                  pendingInboundCount -= 1
+                  flushDeferredReady()
+                })
+            }, Math.max(0, timeoutMs))
+
+            enrichTimeoutByTurnId.set(eventTurnId, handle)
+          }
+        }
+        return
+      }
+
+      // context.update/snapshot.push의 ack는 WS canonical flow에서 생략한다.
+      if (bodyType === "ack") {
+        return
+      }
+
+      ws.send(JSON.stringify(body))
     }
 
     const processInbound = async (chunk: unknown): Promise<void> => {
@@ -174,6 +318,14 @@ export function attachSessionWebSocketServer(
         return
       }
 
+      if (envelope.type === "user.intent") {
+        clearAllEnrichTimeouts()
+      }
+      if (envelope.type === "interrupt") {
+        // 중단 이벤트는 pending enrich 대기 상태를 즉시 폐기해야 한다.
+        clearAllEnrichTimeouts()
+      }
+
       // canonical WS 경로에서는 연결 단위 sessionId를 유지해 매 메시지에 재주입한다.
       if (context.sessionId && !envelope.sessionId) {
         envelope.sessionId = context.sessionId
@@ -188,33 +340,11 @@ export function attachSessionWebSocketServer(
         return
       }
 
-      const body = result.body
-      const bodyType = isRecord(body) && typeof body.type === "string" ? body.type : ""
-
-      if (bodyType === "session.ready") {
-        const sessionId = typeof body.sessionId === "string" ? body.sessionId : null
-        if (sessionId) {
-          context.sessionId = sessionId
-        }
-        // 이벤트 순서를 안정화하기 위해 session.ready는 연결 큐 소진 시점에 전송한다.
-        deferredSessionReady = body
-        return
+      if (envelope.type === "context.enrich.result" && typeof envelope.turnId === "string") {
+        // 런타임 유효성 검증을 통과한 경우에만 timeout 타이머를 해제한다.
+        clearEnrichTimeout(envelope.turnId)
       }
-
-      if (bodyType === "event.batch" && Array.isArray((body as { events?: unknown }).events)) {
-        const events = (body as { events: unknown[] }).events
-        for (const event of events) {
-          ws.send(JSON.stringify(event))
-        }
-        return
-      }
-
-      // context.update/snapshot.push의 ack는 WS canonical flow에서 생략한다.
-      if (bodyType === "ack") {
-        return
-      }
-
-      ws.send(JSON.stringify(body))
+      emitRuntimeBody(result.body)
     }
 
     ws.on("message", (chunk) => {
@@ -238,6 +368,10 @@ export function attachSessionWebSocketServer(
           pendingInboundCount -= 1
           flushDeferredReady()
         })
+    })
+
+    ws.on("close", () => {
+      clearAllEnrichTimeouts()
     })
   })
 

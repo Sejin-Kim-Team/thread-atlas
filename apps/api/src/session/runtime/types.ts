@@ -16,6 +16,7 @@ export interface RuntimeSession {
   primaryTabId: number | null
   latestSnapshotByTab: Map<number, SnapshotLike>
   activeTurnId: string | null
+  activeTurn?: RuntimeActiveTurn
 }
 
 export interface SnapshotLike {
@@ -32,6 +33,10 @@ export interface SnapshotLike {
   }
   meta?: {
     capturedAt?: string
+  }
+  visualSignals?: {
+    uiSuspicious?: boolean
+    anomalyScore?: number
   }
 }
 
@@ -53,7 +58,6 @@ export interface UserIntentPayload {
   text: string
   primaryTabId: number
   boundSnapshotCapturedAt: string
-  mode?: string
 }
 
 export interface RuntimeErrorPayload {
@@ -64,4 +68,20 @@ export interface RuntimeErrorPayload {
     | "MODEL_CONFIG_MISSING"
     | "GENERATION_FAILED"
   message: string
+}
+
+export interface RuntimeActiveTurn {
+  turnId: string
+  intentText: string
+  primaryTabId: number
+  boundSnapshotCapturedAt: string
+  status: "running" | "waiting-enrich" | "resumed"
+  enrichApplied: boolean
+  enrichRequestedAtMs: number
+  enrichTimeoutAtMs: number
+  latestSnapshot: SnapshotLike
+  pendingEnrichRequest?: {
+    requestKind: "node-screenshot" | "visible-region" | "node-detail"
+    targetRef: Record<string, unknown>
+  }
 }

@@ -67,19 +67,23 @@ Companion:
 해커톤 구현 중 코드 구조와 주석 작성은
 [BE-SPEC-IMPLEMENTATION-RULES.md](./BE-SPEC-IMPLEMENTATION-RULES.md)를 필수 계약으로 따른다.
 
-### 2.1 현재 구현 브랜치(`feature/be-recall-runtime`) 범위 고정
+### 2.1 현재 구현 브랜치(`feature/be-enrich-subloop`) 범위 고정
 
 본 문서의 해커톤 전체 목표와 별개로, 현재 구현 브랜치의 고정 범위는 아래로 제한한다.
 
-- `recall-card` runtime/projection 연결 규칙
-- owner-scoped memory retrieval + recall runtime bridge
-- current-page answer generation SDK/Vertex canonical 계약 정렬
+- evidence gap detection
+- `context.enrich.request` 생성
+- turn 상태 전이(`running -> waiting-enrich -> resumed`)와 완료 표현(`turn.done + activeTurn clear`)
+- `context.enrich.result` 병합
+- timeout/failed/unsupported fallback
+- `/ws/session` canonical flow 내 enrich 연계
 
 현재 브랜치 비범위:
 
-- enrich sub-loop 완성
 - multi-tab retrieval orchestration
 - full production prompt tuning
+- Google OAuth verify
+- Live API integration
 
 따라서 4장 이후의 WS/event/turn 내용은 `해커톤 최종 목표 계약`이며, 본 브랜치의 완료 판정 기준은 [BE-SPEC-RAG-HACKATHON.md](./BE-SPEC-RAG-HACKATHON.md)의 브랜치 완료 조건을 따른다.
 
@@ -206,8 +210,12 @@ grounding input 최소 규칙:
 - `running`
 - `waiting-enrich`
 - `resumed`
-- `completed`
 - `failed`
+
+완료 표현:
+
+- 해커톤 런타임에서 turn 완료는 `status=completed`를 별도 저장하지 않는다.
+- 완료는 `turn.done` 이벤트 발행 후 `activeTurn` 제거(`clearActiveTurn`)로 표현한다.
 
 ### 3.4 Non-Required State
 
@@ -349,12 +357,31 @@ backend는 current-page reasoning 중 필요한 경우 FE에 추가 컨텍스트
 - semantic node screenshot
 - visible region recapture
 - semantic node detail
+- `context.enrich.request.payload.requestKind`는 `node-screenshot | visible-region | node-detail` 3종만 허용한다.
+- `page-entity`는 requestKind가 아니라 `targetRef.kind`로만 표현한다.
 
 결정 책임:
 
 - backend는 `SemanticSnapshot`, normalized context, 현재 turn intent를 바탕으로 어떤 enrich가 필요한지 결정한다
-- 요청 대상 선택은 deterministic rule 또는 LLM-assisted target selection을 사용할 수 있다
+- enrich trigger mode는 정확히 다음 3개만 허용한다: `rule`, `hybrid-simple`, `hybrid-complex`
+  - `rule`: 규칙 사전만 사용해 enrich/no-enrich와 요청 대상을 결정한다. LLM assist를 호출하지 않는다.
+  - `hybrid-simple`: 규칙 사전에 매칭되면 즉시 enrich를 요청하고, 매칭되지 않으면 즉시 LLM assist를 호출한다.
+  - `hybrid-complex`: 규칙 사전으로 `명확한 enrich` 또는 `명확한 no-enrich`를 먼저 판정한다. 판정이 애매하거나 `SemanticSnapshot`이 suspicious이면 LLM assist를 호출한다.
 - FE는 enrich request를 실행 가능한 캡처/상세조회 동작으로 해석하고 수행한다
+
+규칙 사전 계약:
+
+- 규칙 사전은 한국어+영어를 모두 포함해야 한다.
+- 같은 intent category(예: screenshot/detail/region recapture)에 대해 한국어 키워드 집합과 영어 키워드 집합이 모두 정의되어야 한다.
+- 한 언어만 정의된 규칙은 유효 규칙으로 간주하지 않는다.
+- `rule`/`hybrid-simple`/`hybrid-complex` 모두 동일 규칙 사전을 입력으로 사용한다.
+- `ENRICH_TRIGGER_MODE`가 미설정이거나 허용 집합 밖이면 부팅 단계에서 fail-fast 해야 하며, `rule` 기본값으로 묵살하면 안 된다.
+
+`SemanticSnapshot suspicious` 최소 판단 기준:
+
+- snapshot schema validation은 통과했지만 evidence 품질 경고가 있는 상태다.
+- 예: focus text 근거 부족/누락, node anchor 대응 불일치, visual 질문 대비 region/OCR 근거 부족.
+- `hybrid-complex`에서는 위와 같은 suspicious 상태를 감지하면 LLM assist 경로를 우선 적용한다.
 
 기본 UX 정책:
 
@@ -367,8 +394,12 @@ backend는 current-page reasoning 중 필요한 경우 FE에 추가 컨텍스트
 - enrich request는 current primary tab에만 한정한다
 - enrich request는 현재 turn 안에서만 유효하다
 - enrich result는 `snapshot.push`를 대체하지 않고 보강한다
+- `context.enrich.result`를 수용하려면 active turn의 pending enrich request와 `requestKind`/`targetRef` 바인딩이 모두 일치해야 한다
+- pending enrich request 부재 또는 바인딩 불일치 result는 invalid로 폐기하며 turn-local context에 병합하지 않는다
 - enrich request는 자연어 prompt가 아니라 구조화된 capture/detail 지시여야 한다
 - enrich request는 “무엇을 더 봐야 하는가”를 표현하고, “어떻게 캡처할 것인가”는 FE가 결정한다
+- enrich detail은 untrusted current-page evidence로 취급하며, prompt에는 정규화된 허용 필드만 사용한다
+- enrich detail의 자유형 원문 문자열을 prompt에 직접 삽입하면 안 된다
 - enrich가 실패해도 backend는 graceful fallback을 해야 한다
 
 ### 6.4 Response Families
@@ -434,7 +465,8 @@ turn 상태 머신:
 running
 -> waiting-enrich
 -> resumed
--> completed
+-> turn.done emit
+-> activeTurn clear
 ```
 
 fallback 경로:
@@ -446,6 +478,9 @@ fallback 경로:
 
 - 해커톤에서는 turn당 enrich 1회만 허용하는 것을 기본값으로 둔다
 - enrich 실패가 turn 전체 실패가 되어서는 안 된다
+- enrich timeout 해제는 runtime 유효성 검증 성공 이후에만 가능하다
+- runtime 유효성 검증은 active turn 존재, pending enrich request 존재, `requestKind`/`targetRef` 바인딩 일치 검증을 포함한다
+- invalid `context.enrich.result`는 timeout fallback 타이머를 해제하거나 무력화하면 안 된다
 
 ---
 

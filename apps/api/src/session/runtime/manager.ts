@@ -19,6 +19,184 @@ interface RuntimeHandleContext {
 
 const MAX_RUNTIME_SESSIONS = 256
 const RECALL_CARD_MIN_SIMILARITY = 0.8
+const ENRICH_DEFAULT_TIMEOUT_MS = 3000
+const ENRICH_TRIGGER_MODES = ["rule", "hybrid-simple", "hybrid-complex"] as const
+const ENRICH_REQUEST_KINDS = [
+  "node-screenshot",
+  "visible-region",
+  "node-detail"
+] as const
+
+type EnrichRequestKind = (typeof ENRICH_REQUEST_KINDS)[number]
+type EnrichTriggerMode = (typeof ENRICH_TRIGGER_MODES)[number]
+
+interface BilingualKeywordSet {
+  ko: readonly string[]
+  en: readonly string[]
+}
+
+interface EnrichRuleSignals {
+  hasVisual: boolean
+  hasEntity: boolean
+  hasDetail: boolean
+  hardPositive: boolean
+  hardNegative: boolean
+  ambiguous: boolean
+}
+
+interface EnrichRuleDecision {
+  shouldRequestEnrich: boolean
+  requestKind: EnrichRequestKind
+  reason: string
+}
+
+interface EnrichAssistDecision {
+  decision: "enrich" | "no-enrich"
+  requestKind: EnrichRequestKind
+  reason: string
+}
+
+const ENRICH_RULE_DICTIONARY: Record<
+  "visual" | "entity" | "detail" | "hardNegative" | "ambiguous",
+  BilingualKeywordSet
+> = {
+  visual: {
+    ko: [
+      "차트",
+      "그래프",
+      "이미지",
+      "스크린샷",
+      "영역",
+      "캡처",
+      "화면",
+      "시각",
+      "ui",
+      "인터페이스",
+      "레이아웃",
+      "버튼",
+      "아이콘",
+      "표",
+      "도표",
+      "다이어그램"
+    ],
+    en: [
+      "chart",
+      "graph",
+      "image",
+      "screenshot",
+      "region",
+      "visual",
+      "screen",
+      "ui",
+      "interface",
+      "layout",
+      "button",
+      "icon",
+      "table",
+      "diagram",
+      "canvas"
+    ]
+  },
+  entity: {
+    ko: [
+      "엔티티",
+      "개체",
+      "댓글",
+      "노드",
+      "항목",
+      "요소",
+      "문단",
+      "작성자",
+      "사용자",
+      "카드",
+      "링크",
+      "행",
+      "열",
+      "셀"
+    ],
+    en: [
+      "entity",
+      "item",
+      "comment",
+      "node",
+      "element",
+      "paragraph",
+      "author",
+      "user",
+      "card",
+      "link",
+      "row",
+      "column",
+      "cell"
+    ]
+  },
+  detail: {
+    ko: [
+      "자세",
+      "상세",
+      "확인",
+      "설명",
+      "분석",
+      "읽어",
+      "검토",
+      "근거",
+      "정밀",
+      "확대"
+    ],
+    en: [
+      "detail",
+      "detailed",
+      "inspect",
+      "explain",
+      "analyze",
+      "read",
+      "review",
+      "evidence",
+      "closer",
+      "zoom",
+      "more context"
+    ]
+  },
+  hardNegative: {
+    ko: [
+      "보지 말",
+      "확인하지 말",
+      "텍스트만",
+      "추가 확인 없이",
+      "캡처하지 말",
+      "상세 필요없",
+      "지금 내용만"
+    ],
+    en: [
+      "do not inspect",
+      "don't inspect",
+      "text only",
+      "without extra context",
+      "no screenshot",
+      "skip details",
+      "answer as is"
+    ]
+  },
+  ambiguous: {
+    ko: ["애매", "판단해줘", "도와줘", "확실하지", "모르겠"],
+    en: ["ambiguous", "not sure", "unclear", "help me decide", "cannot tell"]
+  }
+}
+
+ensureBilingualRuleDictionary(ENRICH_RULE_DICTIONARY)
+
+interface ContextEnrichResultPayload {
+  requestKind: EnrichRequestKind
+  targetRef: Record<string, unknown>
+  status: "ok" | "failed" | "unsupported"
+  capturedAt: string
+  detail?: Record<string, unknown>
+  failureReason?: string
+}
+
+interface RuntimeManagerOptions {
+  enrichTriggerMode?: string
+}
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null
@@ -192,23 +370,381 @@ function parseUserIntentPayload(payload: unknown): UserIntentPayload | null {
   const text = asString(payload.text)
   const primaryTabId = asNumber(payload.primaryTabId)
   const boundSnapshotCapturedAt = asString(payload.boundSnapshotCapturedAt)
-  const mode = asString(payload.mode)
 
   if (!text || primaryTabId === null || !boundSnapshotCapturedAt) {
     return null
   }
 
-  const parsed: UserIntentPayload = {
+  return {
     text,
     primaryTabId,
     boundSnapshotCapturedAt
   }
+}
 
-  if (mode) {
-    parsed.mode = mode
+function parseContextEnrichResultPayload(payload: unknown): ContextEnrichResultPayload | null {
+  if (!isObject(payload)) {
+    return null
+  }
+
+  const requestKind = asString(payload.requestKind)
+  const capturedAt = asString(payload.capturedAt)
+  const status = asString(payload.status)
+  const targetRef = payload.targetRef
+
+  if (
+    !requestKind ||
+    !capturedAt ||
+    !status ||
+    !isObject(targetRef) ||
+    !ENRICH_REQUEST_KINDS.includes(requestKind as EnrichRequestKind) ||
+    !["ok", "failed", "unsupported"].includes(status)
+  ) {
+    return null
+  }
+
+  const parsed: ContextEnrichResultPayload = {
+    requestKind: requestKind as ContextEnrichResultPayload["requestKind"],
+    targetRef,
+    status: status as ContextEnrichResultPayload["status"],
+    capturedAt
+  }
+
+  if (isObject(payload.detail)) {
+    parsed.detail = payload.detail
+  }
+
+  const failureReason = asString(payload.failureReason)
+  if (failureReason) {
+    parsed.failureReason = failureReason
   }
 
   return parsed
+}
+
+function normalizeUnknownForBinding(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map((item) => normalizeUnknownForBinding(item))
+  }
+  if (isObject(value)) {
+    const normalized: Record<string, unknown> = {}
+    const keys = Object.keys(value).sort((a, b) => a.localeCompare(b))
+    for (const key of keys) {
+      normalized[key] = normalizeUnknownForBinding(value[key])
+    }
+    return normalized
+  }
+  return value
+}
+
+function normalizeTargetRefForBinding(targetRef: Record<string, unknown>): Record<string, unknown> {
+  const normalized: Record<string, unknown> = {}
+  const keys = Object.keys(targetRef).sort((a, b) => a.localeCompare(b))
+
+  for (const key of keys) {
+    if (key === "type") {
+      continue
+    }
+    normalized[key] = normalizeUnknownForBinding(targetRef[key])
+  }
+
+  const normalizedKind = asString(targetRef.kind) ?? asString(targetRef.type)
+  if (normalizedKind) {
+    normalized.kind = normalizedKind
+  }
+
+  return normalized
+}
+
+function areBindingValuesEqual(left: unknown, right: unknown): boolean {
+  if (left === right) {
+    return true
+  }
+  if (typeof left !== typeof right) {
+    return false
+  }
+  if (Array.isArray(left) && Array.isArray(right)) {
+    if (left.length !== right.length) {
+      return false
+    }
+    for (let index = 0; index < left.length; index += 1) {
+      if (!areBindingValuesEqual(left[index], right[index])) {
+        return false
+      }
+    }
+    return true
+  }
+  if (isObject(left) && isObject(right)) {
+    const leftKeys = Object.keys(left).sort((a, b) => a.localeCompare(b))
+    const rightKeys = Object.keys(right).sort((a, b) => a.localeCompare(b))
+    if (leftKeys.length !== rightKeys.length) {
+      return false
+    }
+    for (let index = 0; index < leftKeys.length; index += 1) {
+      if (leftKeys[index] !== rightKeys[index]) {
+        return false
+      }
+      const key = leftKeys[index]
+      if (!key) {
+        return false
+      }
+      if (!areBindingValuesEqual(left[key], right[key])) {
+        return false
+      }
+    }
+    return true
+  }
+  return false
+}
+
+function isExactTargetRefMatch(
+  expected: Record<string, unknown>,
+  actual: Record<string, unknown>
+): boolean {
+  return areBindingValuesEqual(
+    normalizeTargetRefForBinding(expected),
+    normalizeTargetRefForBinding(actual)
+  )
+}
+
+function isCrossTabTargetRef(targetRef: Record<string, unknown>): boolean {
+  const normalizedKind = asString(targetRef.kind) ?? asString(targetRef.type)
+  return normalizedKind === "cross-tab"
+}
+
+interface NormalizedEnrichDetailForPrompt {
+  textPreview?: string
+  htmlPreview?: string
+  attributes?: Record<string, string>
+  bounds?: {
+    x: number
+    y: number
+    width: number
+    height: number
+  }
+}
+
+function sanitizePromptText(value: string, maxLength: number): string {
+  return value.replace(/\s+/g, " ").trim().slice(0, maxLength)
+}
+
+function normalizeEnrichDetailForPrompt(
+  enrichDetail?: Record<string, unknown>
+): NormalizedEnrichDetailForPrompt | null {
+  if (!enrichDetail) {
+    return null
+  }
+
+  const normalized: NormalizedEnrichDetailForPrompt = {}
+
+  const detailText = asString(enrichDetail.text)
+  if (detailText) {
+    normalized.textPreview = sanitizePromptText(detailText, 300)
+  }
+
+  const htmlSnippet = asString(enrichDetail.htmlSnippet)
+  if (htmlSnippet) {
+    const strippedScript = htmlSnippet.replace(/<script[\s\S]*?<\/script>/gi, " ")
+    normalized.htmlPreview = sanitizePromptText(strippedScript, 240)
+  }
+
+  if (isObject(enrichDetail.attributes)) {
+    const safeAttributes: Record<string, string> = {}
+    const keys = Object.keys(enrichDetail.attributes)
+      .sort((a, b) => a.localeCompare(b))
+      .slice(0, 12)
+    for (const key of keys) {
+      const lowered = key.toLowerCase()
+      if (lowered.startsWith("on")) {
+        continue
+      }
+      const isSafeKey =
+        lowered === "id" ||
+        lowered === "class" ||
+        lowered === "role" ||
+        lowered === "title" ||
+        lowered.startsWith("aria-") ||
+        lowered.startsWith("data-")
+      if (!isSafeKey) {
+        continue
+      }
+      const rawValue = asString(enrichDetail.attributes[key])
+      if (!rawValue) {
+        continue
+      }
+      safeAttributes[key] = sanitizePromptText(rawValue, 80)
+    }
+    if (Object.keys(safeAttributes).length > 0) {
+      normalized.attributes = safeAttributes
+    }
+  }
+
+  if (isObject(enrichDetail.bounds)) {
+    const x = asFiniteNumber(enrichDetail.bounds.x)
+    const y = asFiniteNumber(enrichDetail.bounds.y)
+    const width = asFiniteNumber(enrichDetail.bounds.width)
+    const height = asFiniteNumber(enrichDetail.bounds.height)
+    if (x !== null && y !== null && width !== null && height !== null) {
+      normalized.bounds = { x, y, width, height }
+    }
+  }
+
+  if (Object.keys(normalized).length === 0) {
+    return null
+  }
+  return normalized
+}
+
+function ensureBilingualRuleDictionary(dictionary: Record<string, BilingualKeywordSet>): void {
+  for (const [category, keywords] of Object.entries(dictionary)) {
+    const hasKorean = Array.isArray(keywords.ko) && keywords.ko.length > 0
+    const hasEnglish = Array.isArray(keywords.en) && keywords.en.length > 0
+    if (!hasKorean || !hasEnglish) {
+      throw new Error(
+        `invalid enrich rule dictionary: ${category} must include both korean and english keywords`
+      )
+    }
+  }
+}
+
+function resolveEnrichTriggerMode(rawMode: string | undefined): EnrichTriggerMode {
+  const normalized = rawMode?.trim()
+  if (!normalized) {
+    throw new Error(
+      `invalid ENRICH_TRIGGER_MODE: missing (allowed: ${ENRICH_TRIGGER_MODES.join(" | ")})`
+    )
+  }
+  if (ENRICH_TRIGGER_MODES.includes(normalized as EnrichTriggerMode)) {
+    return normalized as EnrichTriggerMode
+  }
+  throw new Error(
+    `invalid ENRICH_TRIGGER_MODE: ${normalized} (allowed: ${ENRICH_TRIGGER_MODES.join(" | ")})`
+  )
+}
+
+function containsAnyKeyword(normalizedIntent: string, keywords: BilingualKeywordSet): boolean {
+  const merged = [...keywords.ko, ...keywords.en]
+  return merged.some((keyword) => normalizedIntent.includes(keyword.toLowerCase()))
+}
+
+function analyzeEnrichRuleSignals(intentText: string): EnrichRuleSignals {
+  const normalizedIntent = intentText.toLowerCase()
+  const hasVisual = containsAnyKeyword(normalizedIntent, ENRICH_RULE_DICTIONARY.visual)
+  const hasEntity = containsAnyKeyword(normalizedIntent, ENRICH_RULE_DICTIONARY.entity)
+  const hasDetail = containsAnyKeyword(normalizedIntent, ENRICH_RULE_DICTIONARY.detail)
+  const hasHardNegative = containsAnyKeyword(normalizedIntent, ENRICH_RULE_DICTIONARY.hardNegative)
+  const hasAmbiguousKeyword = containsAnyKeyword(normalizedIntent, ENRICH_RULE_DICTIONARY.ambiguous)
+
+  const hardPositive =
+    !hasHardNegative &&
+    !hasAmbiguousKeyword &&
+    ((hasVisual && hasDetail) || (hasEntity && hasDetail))
+  const hardNegative = hasHardNegative
+  // 규칙 사전으로 명확히 긍/부정을 못 낸 경우는 ambiguous로 간주해 LLM assist 후보로 넘긴다.
+  const ambiguous = hasAmbiguousKeyword || (!hardPositive && !hardNegative)
+
+  return {
+    hasVisual,
+    hasEntity,
+    hasDetail,
+    hardPositive,
+    hardNegative,
+    ambiguous
+  }
+}
+
+function resolveRequestKindFromSignals(signals: EnrichRuleSignals): EnrichRequestKind {
+  if (signals.hasEntity && signals.hasDetail) {
+    return "node-detail"
+  }
+  if (signals.hasEntity) {
+    return "node-screenshot"
+  }
+  return "visible-region"
+}
+
+function decideByRule(signals: EnrichRuleSignals): EnrichRuleDecision {
+  const requestKind = resolveRequestKindFromSignals(signals)
+  if (signals.hardPositive) {
+    return {
+      shouldRequestEnrich: true,
+      requestKind,
+      reason: "규칙 사전 하드 긍정 매칭"
+    }
+  }
+  return {
+    shouldRequestEnrich: false,
+    requestKind,
+    reason: signals.hardNegative ? "규칙 사전 하드 부정 매칭" : "규칙 사전 미매칭"
+  }
+}
+
+function isSnapshotSuspicious(snapshot: SnapshotLike): boolean {
+  const focusText = resolveFocusText(snapshot).trim()
+  if (focusText.length < 8) {
+    return true
+  }
+  if (/(깨지|흐려|노이즈|누락|신뢰하기 어렵|garbled|blur|unreadable|corrupt|missing)/i.test(focusText)) {
+    return true
+  }
+
+  const rawSnapshot = snapshot as Record<string, unknown>
+  if (!isObject(rawSnapshot.visualSignals)) {
+    return false
+  }
+  const visualSignals = rawSnapshot.visualSignals
+  const isUiSuspicious = visualSignals.uiSuspicious === true
+  const anomalyScore = asFiniteNumber(visualSignals.anomalyScore)
+
+  if (isUiSuspicious) {
+    return true
+  }
+  return anomalyScore !== null && anomalyScore >= 0.8
+}
+
+function buildEnrichTargetRef(
+  snapshot: SnapshotLike,
+  requestKind: EnrichRequestKind
+): Record<string, unknown> {
+  const pageUrl = asStringOrNull(snapshot.page?.url) ?? "about:blank"
+  const nodeId = asStringOrNull(snapshot.focus?.nodeId)
+
+  if (requestKind === "node-screenshot" && nodeId) {
+    return {
+      kind: "page-entity",
+      pageUrl,
+      entityId: nodeId
+    }
+  }
+
+  if (requestKind === "node-detail" && nodeId) {
+    return {
+      kind: "semantic-node",
+      pageUrl,
+      nodeId
+    }
+  }
+
+  return {
+    kind: "region",
+    pageUrl,
+    region: "focus-node-region"
+  }
+}
+
+function buildEnrichRequestPayload(
+  snapshot: SnapshotLike,
+  requestKind: EnrichRequestKind,
+  reason: string,
+  targetRef?: Record<string, unknown>
+): Record<string, unknown> {
+  return {
+    requestKind,
+    targetRef: targetRef ?? buildEnrichTargetRef(snapshot, requestKind),
+    reason,
+    visibility: "status-only",
+    timeoutMs: ENRICH_DEFAULT_TIMEOUT_MS
+  }
 }
 
 function hasFocusIdMismatch(snapshot: SnapshotLike): boolean {
@@ -246,15 +782,96 @@ function buildRecallQueryText(intentText: string, snapshot: SnapshotLike, answer
   return [intentText, resolveFocusText(snapshot), answerText].filter(Boolean).join(" ")
 }
 
-function buildGenerationPrompt(intentText: string, snapshot: SnapshotLike): string {
+function buildGenerationPrompt(
+  intentText: string,
+  snapshot: SnapshotLike,
+  enrichDetail?: Record<string, unknown>
+): string {
   const focusText = resolveFocusText(snapshot)
+  const normalizedEnrichDetail = normalizeEnrichDetailForPrompt(enrichDetail)
+  const enrichText = normalizedEnrichDetail ? JSON.stringify(normalizedEnrichDetail) : null
   // 현재 페이지 근거를 유지하기 위해 intent와 focus 텍스트를 함께 프롬프트에 포함한다.
-  return [
+  const promptLines = [
     "You are a current-page semantic assistant.",
     `User intent: ${intentText}`,
     `Focus text: ${focusText}`,
     "Return a concise answer grounded in the current page context."
+  ]
+
+  if (enrichText) {
+    // 보안 경계: 자유형 원문 전체 대신 허용 필드 정규화 결과만 프롬프트에 포함한다.
+    promptLines.splice(promptLines.length - 1, 0, `Enriched detail: ${enrichText}`)
+  }
+
+  return promptLines.join("\n")
+}
+
+function buildEnrichAssistPrompt(
+  intentText: string,
+  snapshot: SnapshotLike,
+  signals: EnrichRuleSignals,
+  suspicious: boolean,
+  mode: EnrichTriggerMode
+): string {
+  const snapshotSummary = JSON.stringify({
+    pageUrl: snapshot.page?.url ?? null,
+    focusNodeId: snapshot.focus?.nodeId ?? null,
+    focusText: resolveFocusText(snapshot),
+    suspicious
+  })
+
+  // 모델 응답 파싱 안정성을 위해 assist 프롬프트는 JSON 단일 객체만 요구한다.
+  return [
+    "ENRICH_TRIGGER_ASSIST",
+    `Mode: ${mode}`,
+    `Intent: ${intentText}`,
+    `Rule signals: ${JSON.stringify(signals)}`,
+    `Snapshot summary: ${snapshotSummary}`,
+    'Decide if FE enrichment is needed for current-page reasoning. Respond ONLY valid JSON with schema: {"decision":"enrich|no-enrich","requestKind":"node-screenshot|visible-region|node-detail","reason":"string"}'
   ].join("\n")
+}
+
+function extractJsonObject(rawText: string): string | null {
+  const normalized = rawText.trim()
+  if (normalized.startsWith("{") && normalized.endsWith("}")) {
+    return normalized
+  }
+  const match = normalized.match(/\{[\s\S]*\}/)
+  return match ? match[0] : null
+}
+
+function parseEnrichAssistDecision(rawText: string): EnrichAssistDecision | null {
+  const jsonText = extractJsonObject(rawText)
+  if (!jsonText) {
+    return null
+  }
+
+  try {
+    const parsed = JSON.parse(jsonText) as unknown
+    if (!isObject(parsed)) {
+      return null
+    }
+
+    const decision = asString(parsed.decision)
+    const requestKind = asString(parsed.requestKind)
+    const reason = asString(parsed.reason) ?? "llm assist decision"
+    if (!decision || !requestKind) {
+      return null
+    }
+    if (!["enrich", "no-enrich"].includes(decision)) {
+      return null
+    }
+    if (!ENRICH_REQUEST_KINDS.includes(requestKind as EnrichRequestKind)) {
+      return null
+    }
+    return {
+      decision: decision as EnrichAssistDecision["decision"],
+      requestKind: requestKind as EnrichRequestKind,
+      reason
+    }
+  } catch {
+    return null
+  }
 }
 
 function selectRecallCandidate(
@@ -284,6 +901,14 @@ export class RuntimeManager {
   private sessions = new Map<string, RuntimeSession>()
   private sessionByPrincipalClientId = new Map<string, string>()
   private ownerByClientSessionId = new Map<string, string>()
+  private readonly enrichTriggerMode: EnrichTriggerMode
+
+  constructor(options?: RuntimeManagerOptions) {
+    // 부팅 시점에 trigger mode를 고정해 런타임 중 모호한 기본값 전환을 막는다.
+    this.enrichTriggerMode = resolveEnrichTriggerMode(
+      options?.enrichTriggerMode ?? process.env.ENRICH_TRIGGER_MODE
+    )
+  }
 
   async handle(raw: unknown, context: RuntimeHandleContext): Promise<RuntimeResult> {
     const envelope = validateEnvelope(raw)
@@ -317,8 +942,12 @@ export class RuntimeManager {
     if (envelope.type === "user.intent") {
       return this.handleUserIntent(envelope, session)
     }
+    if (envelope.type === "context.enrich.result") {
+      return this.handleContextEnrichResult(envelope, session)
+    }
     if (envelope.type === "interrupt") {
       session.activeTurnId = null
+      delete session.activeTurn
       return {
         status: 200,
         body: {
@@ -470,57 +1099,398 @@ export class RuntimeManager {
     // 선점 중단 정책: 새 요청이 오면 기존 턴을 중단하고 교체한다.
     if (session.activeTurnId) {
       session.activeTurnId = null
+      delete session.activeTurn
     }
 
     const turnId = this.newTurnId()
+    const nowMs = Date.now()
     session.activeTurnId = turnId
-    if (!process.env.GOOGLE_CLOUD_PROJECT || !process.env.GOOGLE_CLOUD_LOCATION) {
-      return modelConfigMissing("GOOGLE_CLOUD_PROJECT and GOOGLE_CLOUD_LOCATION are required")
+    session.activeTurn = {
+      turnId,
+      intentText: parsed.text,
+      primaryTabId: parsed.primaryTabId,
+      boundSnapshotCapturedAt: parsed.boundSnapshotCapturedAt,
+      status: "running",
+      enrichApplied: false,
+      enrichRequestedAtMs: 0,
+      enrichTimeoutAtMs: 0,
+      latestSnapshot: latest
     }
+
+    const enrichDecision = await this.decideEnrichTrigger(parsed.text, latest)
+    if (!enrichDecision.ok) {
+      this.clearActiveTurn(session)
+      return enrichDecision.error
+    }
+
+    if (enrichDecision.decision.shouldRequestEnrich) {
+      const activeTurn = session.activeTurn
+      if (!activeTurn) {
+        return invalidEvent("active turn is missing")
+      }
+      activeTurn.pendingEnrichRequest = {
+        requestKind: enrichDecision.decision.requestKind,
+        targetRef: buildEnrichTargetRef(latest, enrichDecision.decision.requestKind)
+      }
+
+      activeTurn.status = "waiting-enrich"
+      activeTurn.enrichRequestedAtMs = nowMs
+      activeTurn.enrichTimeoutAtMs = nowMs + ENRICH_DEFAULT_TIMEOUT_MS
+
+      const events: Array<Record<string, unknown>> = [
+        this.makeProgressEvent(session.sessionId, turnId, "intent-routed"),
+        this.makeProgressEvent(session.sessionId, turnId, "enrich-requested"),
+        {
+          type: "context.enrich.request",
+          turnId,
+          sessionId: session.sessionId,
+          timestamp: makeTimestamp(),
+          payload: buildEnrichRequestPayload(
+            latest,
+            enrichDecision.decision.requestKind,
+            enrichDecision.decision.reason,
+            activeTurn.pendingEnrichRequest.targetRef
+          )
+        }
+      ]
+
+      return this.toEventBatch(envelope.requestId, session.sessionId, turnId, events)
+    }
+
+    return this.finalizeTurn(
+      session,
+      turnId,
+      envelope.requestId,
+      parsed.text,
+      parsed.primaryTabId,
+      latest,
+      undefined,
+      ["intent-routed"],
+      ["current-page"]
+    )
+  }
+
+  private async handleContextEnrichResult(
+    envelope: RuntimeEnvelope,
+    session: RuntimeSession
+  ): Promise<RuntimeResult> {
+    const parsed = parseContextEnrichResultPayload(envelope.payload)
+    if (!parsed) {
+      return invalidEvent("invalid context.enrich.result payload")
+    }
+    if (isCrossTabTargetRef(parsed.targetRef)) {
+      return invalidEvent("cross-tab enrich result is not allowed in current-page scope")
+    }
+
+    const turnId = asString(envelope.turnId)
+    if (!turnId) {
+      return invalidEvent("turnId is required for context.enrich.result")
+    }
+
+    const activeTurn = session.activeTurn
+    if (!activeTurn || session.activeTurnId !== turnId || activeTurn.turnId !== turnId) {
+      return invalidEvent("active turn mismatch for context.enrich.result")
+    }
+
+    if (activeTurn.enrichApplied) {
+      return invalidEvent("enrich already applied for this turn")
+    }
+
+    if (activeTurn.status !== "waiting-enrich") {
+      return invalidEvent("turn is not waiting-enrich")
+    }
+
+    const pendingRequest = activeTurn.pendingEnrichRequest
+    if (!pendingRequest) {
+      return invalidEvent("pending enrich request is missing")
+    }
+    if (pendingRequest.requestKind !== parsed.requestKind) {
+      return invalidEvent("requestKind mismatch for context.enrich.result")
+    }
+    // current-page 격리 경계: pending targetRef와 완전 일치하는 결과만 수용한다.
+    if (!isExactTargetRefMatch(pendingRequest.targetRef, parsed.targetRef)) {
+      return invalidEvent("targetRef mismatch for context.enrich.result")
+    }
+
+    const nowMs = Date.now()
+    const isTimeout = nowMs >= activeTurn.enrichTimeoutAtMs
+
+    // 상태 전이 경계: enrich 결과를 한 번 수용한 뒤에는 반드시 resumed로 전환하고 종료 경로로 보낸다.
+    activeTurn.status = "resumed"
+    activeTurn.enrichApplied = true
+    delete activeTurn.pendingEnrichRequest
+
+    if (isTimeout) {
+      return this.finalizeTurn(
+        session,
+        turnId,
+        envelope.requestId,
+        activeTurn.intentText,
+        activeTurn.primaryTabId,
+        activeTurn.latestSnapshot,
+        undefined,
+        ["enrich-received"],
+        ["current-page"]
+      )
+    }
+
+    if (parsed.status === "ok") {
+      return this.finalizeTurn(
+        session,
+        turnId,
+        envelope.requestId,
+        activeTurn.intentText,
+        activeTurn.primaryTabId,
+        activeTurn.latestSnapshot,
+        parsed.detail,
+        ["enrich-received"],
+        ["current-page", "enrich"]
+      )
+    }
+
+    // fallback 경계: failed/unsupported는 enrich 병합 없이 current-page answer로 안전하게 후퇴한다.
+    return this.finalizeTurn(
+      session,
+      turnId,
+      envelope.requestId,
+      activeTurn.intentText,
+      activeTurn.primaryTabId,
+      activeTurn.latestSnapshot,
+      undefined,
+      ["enrich-received"],
+      ["current-page"]
+    )
+  }
+
+  private async decideEnrichTrigger(
+    intentText: string,
+    snapshot: SnapshotLike
+  ): Promise<{ ok: true; decision: EnrichRuleDecision } | { ok: false; error: RuntimeResult }> {
+    const ruleSignals = analyzeEnrichRuleSignals(intentText)
+    const ruleDecision = decideByRule(ruleSignals)
+    const suspicious = isSnapshotSuspicious(snapshot)
+
+    if (this.enrichTriggerMode === "rule") {
+      return {
+        ok: true,
+        decision: ruleDecision
+      }
+    }
+
+    if (this.enrichTriggerMode === "hybrid-simple") {
+      if (ruleSignals.hardPositive || ruleSignals.hardNegative) {
+        return {
+          ok: true,
+          decision: ruleDecision
+        }
+      }
+      // hybrid-simple은 rule miss 시점에 즉시 LLM assist를 호출한다.
+      return this.decideEnrichWithLlmAssist(intentText, snapshot, ruleSignals, suspicious)
+    }
+
+    if (ruleSignals.hardPositive) {
+      return {
+        ok: true,
+        decision: ruleDecision
+      }
+    }
+    if (ruleSignals.hardNegative && !suspicious) {
+      return {
+        ok: true,
+        decision: ruleDecision
+      }
+    }
+    if (ruleSignals.ambiguous || suspicious) {
+      return this.decideEnrichWithLlmAssist(intentText, snapshot, ruleSignals, suspicious)
+    }
+    return {
+      ok: true,
+      decision: ruleDecision
+    }
+  }
+
+  private async decideEnrichWithLlmAssist(
+    intentText: string,
+    snapshot: SnapshotLike,
+    ruleSignals: EnrichRuleSignals,
+    suspicious: boolean
+  ): Promise<{ ok: true; decision: EnrichRuleDecision } | { ok: false; error: RuntimeResult }> {
+    const assistPrompt = buildEnrichAssistPrompt(
+      intentText,
+      snapshot,
+      ruleSignals,
+      suspicious,
+      this.enrichTriggerMode
+    )
+    const assistResult = await this.generateTextWithGemini(assistPrompt, "llm assist failed")
+    if (!assistResult.ok) {
+      return assistResult
+    }
+
+    const parsedAssist = parseEnrichAssistDecision(assistResult.text)
+    if (!parsedAssist) {
+      return {
+        ok: true,
+        decision: {
+          // 보수적 처리: 비정형 응답은 강제 enrich로 승격하지 않고 no-enrich로 후퇴한다.
+          shouldRequestEnrich: false,
+          requestKind: resolveRequestKindFromSignals(ruleSignals),
+          reason: "LLM assist 비정형 응답 보수 처리"
+        }
+      }
+    }
+
+    return {
+      ok: true,
+      decision: {
+        shouldRequestEnrich: parsedAssist.decision === "enrich",
+        requestKind: parsedAssist.requestKind,
+        reason: `LLM assist: ${parsedAssist.reason}`
+      }
+    }
+  }
+
+  private async generateTextWithGemini(
+    prompt: string,
+    fallbackErrorMessage: string
+  ): Promise<{ ok: true; text: string } | { ok: false; error: RuntimeResult }> {
+    if (!process.env.GOOGLE_CLOUD_PROJECT || !process.env.GOOGLE_CLOUD_LOCATION) {
+      return {
+        ok: false,
+        error: modelConfigMissing("GOOGLE_CLOUD_PROJECT and GOOGLE_CLOUD_LOCATION are required")
+      }
+    }
+
     const geminiModule = await import("../../services/gemini")
-    let answerText: string
+
     try {
       const geminiClient = geminiModule.createGeminiClient()
-      answerText = await geminiClient.generateText(buildGenerationPrompt(parsed.text, latest))
+      const text = await geminiClient.generateText(prompt)
+      return {
+        ok: true,
+        text
+      }
     } catch (error) {
       if (geminiModule.isModelConfigError(error)) {
         const message =
           error instanceof Error ? error.message : "model configuration is missing"
-        return modelConfigMissing(message)
+        return {
+          ok: false,
+          error: modelConfigMissing(message)
+        }
       }
-      // 모델 호출 실패는 설정 오류와 분리해 전용 코드로 반환한다.
-      return generationFailed("generation failed")
+
+      return {
+        ok: false,
+        error: generationFailed(fallbackErrorMessage)
+      }
+    }
+  }
+
+  private makeProgressEvent(
+    sessionId: string,
+    turnId: string,
+    stage:
+      | "intent-routed"
+      | "retrieval-started"
+      | "retrieval-completed"
+      | "enrich-requested"
+      | "enrich-received"
+      | "response-planning"
+  ): Record<string, unknown> {
+    return {
+      type: "progress",
+      turnId,
+      sessionId,
+      timestamp: makeTimestamp(),
+      payload: {
+        stage
+      }
+    }
+  }
+
+  private toEventBatch(
+    requestId: string | undefined,
+    sessionId: string,
+    turnId: string,
+    events: Array<Record<string, unknown>>
+  ): RuntimeResult {
+    return {
+      status: 200,
+      body: {
+        type: "event.batch",
+        requestId,
+        sessionId,
+        turnId,
+        timestamp: makeTimestamp(),
+        events
+      }
+    }
+  }
+
+  private clearActiveTurn(session: RuntimeSession): void {
+    session.activeTurnId = null
+    delete session.activeTurn
+  }
+
+  private async generateCurrentPageAnswer(
+    intentText: string,
+    snapshot: SnapshotLike,
+    enrichDetail?: Record<string, unknown>
+  ): Promise<{ ok: true; answerText: string } | { ok: false; error: RuntimeResult }> {
+    const generation = await this.generateTextWithGemini(
+      buildGenerationPrompt(intentText, snapshot, enrichDetail),
+      "generation failed"
+    )
+    if (!generation.ok) {
+      return generation
+    }
+    return {
+      ok: true,
+      answerText: generation.text
+    }
+  }
+
+  private async finalizeTurn(
+    session: RuntimeSession,
+    turnId: string,
+    requestId: string | undefined,
+    intentText: string,
+    primaryTabId: number,
+    snapshot: SnapshotLike,
+    enrichDetail: Record<string, unknown> | undefined,
+    progressStages: Array<"intent-routed" | "enrich-received">,
+    provenanceSummary: string[]
+  ): Promise<RuntimeResult> {
+    const generation = await this.generateCurrentPageAnswer(intentText, snapshot, enrichDetail)
+    if (!generation.ok) {
+      this.clearActiveTurn(session)
+      return generation.error
     }
 
-    const events: Array<Record<string, unknown>> = [
-      {
-        type: "progress",
-        turnId,
-        sessionId: session.sessionId,
-        timestamp: makeTimestamp(),
-        payload: {
-          stage: "intent-routed"
-        }
-      },
-      {
-        type: "projection",
-        turnId,
-        sessionId: session.sessionId,
-        timestamp: makeTimestamp(),
-        payload: {
-          kind: "present",
-          body: {
-            type: "answer",
-            text: answerText,
-            responseMode: "answer",
-            provenanceSummary: ["current-page"]
-          }
+    const events: Array<Record<string, unknown>> = []
+    for (const stage of progressStages) {
+      events.push(this.makeProgressEvent(session.sessionId, turnId, stage))
+    }
+    events.push(this.makeProgressEvent(session.sessionId, turnId, "response-planning"))
+
+    events.push({
+      type: "projection",
+      turnId,
+      sessionId: session.sessionId,
+      timestamp: makeTimestamp(),
+      payload: {
+        kind: "present",
+        body: {
+          type: "answer",
+          text: generation.answerText,
+          responseMode: "answer",
+          provenanceSummary
         }
       }
-    ]
+    })
 
     const usedMemoryRecordIds: string[] = []
-
     try {
       const { retrieveMemoryCandidates } = await import("../../rag/retrieval-service")
       const retrievalInput: {
@@ -531,13 +1501,13 @@ export class RuntimeManager {
         sourceDomain?: string
       } = {
         ownerUserId: session.ownerUserId,
-        queryText: buildRecallQueryText(parsed.text, latest, answerText),
+        queryText: buildRecallQueryText(intentText, snapshot, generation.answerText),
         limit: 2
       }
-      if (latest.page?.kind) {
-        retrievalInput.pageKind = latest.page.kind
+      if (snapshot.page?.kind) {
+        retrievalInput.pageKind = snapshot.page.kind
       }
-      const sourceDomain = extractSourceDomain(latest.page?.url)
+      const sourceDomain = extractSourceDomain(snapshot.page?.url)
       if (sourceDomain) {
         retrievalInput.sourceDomain = sourceDomain
       }
@@ -578,7 +1548,7 @@ export class RuntimeManager {
     }
 
     const turnDonePayload: Record<string, unknown> = {
-      referencedTabIds: [parsed.primaryTabId]
+      referencedTabIds: [primaryTabId]
     }
     if (usedMemoryRecordIds.length > 0) {
       turnDonePayload.usedMemoryRecordIds = usedMemoryRecordIds
@@ -592,17 +1562,8 @@ export class RuntimeManager {
       payload: turnDonePayload
     })
 
-    return {
-      status: 200,
-      body: {
-        type: "event.batch",
-        requestId: envelope.requestId,
-        sessionId: session.sessionId,
-        turnId,
-        timestamp: makeTimestamp(),
-        events
-      }
-    }
+    this.clearActiveTurn(session)
+    return this.toEventBatch(requestId, session.sessionId, turnId, events)
   }
 
   private newSessionId(): string {

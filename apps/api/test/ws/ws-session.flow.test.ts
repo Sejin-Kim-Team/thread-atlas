@@ -1,8 +1,10 @@
+import express from "express"
 import request from "supertest"
-import { afterEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { WebSocket as NodeWebSocket } from "ws"
-import { createServer } from "../../src/server"
-import { requireEnv } from "../helpers/env"
+import { createWsSessionEventsRouter } from "../../src/routes/ws-session-events"
+import { RuntimeManager } from "../../src/session/runtime/manager"
+import { attachSessionWebSocketServer } from "../../src/ws/session-ws-server"
 import {
   createContextUpdatePayload,
   createEnvelope,
@@ -10,6 +12,43 @@ import {
   createUserIntentPayload,
   createValidSnapshot
 } from "./helpers/ws-contract"
+
+const { issuedTokens } = vi.hoisted(() => ({
+  issuedTokens: new Map<string, string>()
+}))
+
+vi.mock("../../src/auth/principal", () => ({
+  resolvePrincipalFromAuthorizationHeader: vi.fn(async (authorization: unknown) => {
+    if (typeof authorization !== "string" || !authorization.startsWith("Bearer ")) {
+      return {
+        ok: false as const,
+        message: "unauthorized"
+      }
+    }
+    const token = authorization.slice("Bearer ".length)
+    const userId = issuedTokens.get(token)
+    if (!userId) {
+      return {
+        ok: false as const,
+        message: "unauthorized"
+      }
+    }
+    return {
+      ok: true as const,
+      userId
+    }
+  })
+}))
+
+vi.mock("../../src/auth/auth-sessions-repository", () => ({
+  resolveAuthSession: vi.fn(async (token: string) => {
+    const userId = issuedTokens.get(token)
+    if (!userId) {
+      return { ok: false as const }
+    }
+    return { ok: true as const, userId }
+  })
+}))
 
 vi.mock("../../src/services/gemini", () => ({
   createGeminiClient: () => ({
@@ -45,7 +84,7 @@ function connectWebSocket(url: string): Promise<WebSocket> {
     const timer = setTimeout(() => {
       ws.close()
       reject(new Error("ws open timeout"))
-    }, 2000)
+    }, 5000)
 
     ws.addEventListener("open", () => {
       clearTimeout(timer)
@@ -64,7 +103,7 @@ function waitForMessages(ws: WebSocket, count: number): Promise<Array<Record<str
     const collected: Array<Record<string, unknown>> = []
     const timer = setTimeout(() => {
       reject(new Error("ws messages timeout"))
-    }, 3000)
+    }, 10000)
 
     ws.addEventListener("message", (event) => {
       try {
@@ -76,6 +115,41 @@ function waitForMessages(ws: WebSocket, count: number): Promise<Array<Record<str
       }
 
       if (collected.length >= count) {
+        clearTimeout(timer)
+        resolve(collected)
+      }
+    })
+
+    ws.addEventListener("error", () => {
+      clearTimeout(timer)
+      reject(new Error("ws receive failed"))
+    }, { once: true })
+  })
+}
+
+function waitForRequiredTypes(
+  ws: WebSocket,
+  requiredTypes: string[],
+  timeoutMs = 10000
+): Promise<Array<Record<string, unknown>>> {
+  return new Promise((resolve, reject) => {
+    const collected: Array<Record<string, unknown>> = []
+    const timer = setTimeout(() => {
+      reject(new Error("ws required types timeout"))
+    }, timeoutMs)
+
+    ws.addEventListener("message", (event) => {
+      try {
+        collected.push(JSON.parse(String(event.data)) as Record<string, unknown>)
+      } catch {
+        clearTimeout(timer)
+        reject(new Error("invalid ws message json"))
+        return
+      }
+
+      const currentTypes = new Set(collected.map((message) => String(message.type)))
+      const satisfied = requiredTypes.every((type) => currentTypes.has(type))
+      if (satisfied) {
         clearTimeout(timer)
         resolve(collected)
       }
@@ -114,21 +188,30 @@ function expectHandshakeRejected(url: string): Promise<void> {
   })
 }
 
-async function issueToken(client: request.SuperTest<request.Test>, bootstrapSubject: string): Promise<string> {
-  const response = await client
-    .post("/api/token")
-    .set("X-Bootstrap-Key", requireEnv("AUTH_BOOTSTRAP_KEY"))
-    .send({
-      grantType: "dev-bootstrap",
-      bootstrapSubject
-    })
+function createCanonicalHarness(): { app: express.Express; server: import("http").Server } {
+  const app = express()
+  const manager = new RuntimeManager()
+  app.use(express.json({ limit: "2mb" }))
+  app.use("/ws/session/events", createWsSessionEventsRouter(manager))
+  const server = app.listen(0)
+  attachSessionWebSocketServer(server, manager)
+  return { app, server }
+}
 
-  expect(response.status).toBe(200)
-  return response.body.token as string
+function issueToken(bootstrapSubject: string): string {
+  const token = `test-token-${Math.random().toString(16).slice(2)}`
+  issuedTokens.set(token, `user-${bootstrapSubject}`)
+  return token
 }
 
 describe("ws /ws/session flow contract (red)", () => {
   const servers: import("http").Server[] = []
+
+  beforeEach(() => {
+    process.env.GOOGLE_CLOUD_PROJECT = process.env.GOOGLE_CLOUD_PROJECT ?? "threadatlas"
+    process.env.GOOGLE_CLOUD_LOCATION = process.env.GOOGLE_CLOUD_LOCATION ?? "us-central1"
+    issuedTokens.clear()
+  })
 
   afterEach(async () => {
     while (servers.length > 0) {
@@ -137,16 +220,15 @@ describe("ws /ws/session flow contract (red)", () => {
         await closeServer(server)
       }
     }
-  })
+  }, 30000)
 
   it("emits session.ready/progress/projection/turn.done over canonical ws flow", async () => {
-    const app = createServer()
-    const httpServer = app.listen(0)
+    const harness = createCanonicalHarness()
+    const httpServer = harness.server
     servers.push(httpServer)
     const port = getPort(httpServer)
 
-    const client = request(app)
-    const token = await issueToken(client, "google-sub-ws-flow-alpha")
+    const token = issueToken("google-sub-ws-flow-alpha")
 
     const ws = await connectWebSocket(`ws://127.0.0.1:${port}/ws/session?token=${token}`)
 
@@ -193,21 +275,22 @@ describe("ws /ws/session flow contract (red)", () => {
     const types = messages.map((message) => message.type)
 
     expect(types).toContain("session.ready")
+    expect(types.filter((type) => type === "session.ready")).toHaveLength(1)
     expect(types).toContain("progress")
     expect(types).toContain("projection")
     expect(types).toContain("turn.done")
+    expect(types).not.toContain("ack")
 
     ws.close()
-  })
+  }, 20000)
 
   it("keeps INVALID_SNAPSHOT semantics for snapshot binding mismatch on ws canonical path", async () => {
-    const app = createServer()
-    const httpServer = app.listen(0)
+    const harness = createCanonicalHarness()
+    const httpServer = harness.server
     servers.push(httpServer)
     const port = getPort(httpServer)
 
-    const client = request(app)
-    const token = await issueToken(client, "google-sub-ws-flow-beta")
+    const token = issueToken("google-sub-ws-flow-beta")
 
     const ws = await connectWebSocket(`ws://127.0.0.1:${port}/ws/session?token=${token}`)
 
@@ -250,8 +333,9 @@ describe("ws /ws/session flow contract (red)", () => {
       })
     )
 
-    const messages = await waitForMessages(ws, 1)
-    expect(messages[0]).toMatchObject({
+    const messages = await waitForRequiredTypes(ws, ["session.ready", "error"])
+    const invalidSnapshotError = messages.find((message) => message.type === "error")
+    expect(invalidSnapshotError).toMatchObject({
       type: "error",
       payload: {
         code: "INVALID_SNAPSHOT"
@@ -261,9 +345,256 @@ describe("ws /ws/session flow contract (red)", () => {
     ws.close()
   })
 
+  it("links enrich sub-loop on canonical ws path and resumes turn with context.enrich.result", async () => {
+    const harness = createCanonicalHarness()
+    const httpServer = harness.server
+    servers.push(httpServer)
+    const port = getPort(httpServer)
+
+    const token = issueToken("google-sub-ws-flow-enrich")
+
+    const ws = await connectWebSocket(`ws://127.0.0.1:${port}/ws/session?token=${token}`)
+
+    ws.send(
+      JSON.stringify({
+        type: "session.open",
+        requestId: "req-enrich-open",
+        timestamp: "2026-03-08T00:10:00.000Z",
+        payload: createSessionOpenPayload()
+      })
+    )
+
+    ws.send(
+      JSON.stringify({
+        type: "context.update",
+        requestId: "req-enrich-context",
+        timestamp: "2026-03-08T00:10:01.000Z",
+        payload: createContextUpdatePayload(128)
+      })
+    )
+
+    ws.send(
+      JSON.stringify({
+        type: "snapshot.push",
+        requestId: "req-enrich-snapshot",
+        timestamp: "2026-03-08T00:10:02.000Z",
+        payload: {
+          tabId: 128,
+          snapshot: createValidSnapshot("2026-03-08T00:10:02.000Z")
+        }
+      })
+    )
+
+    ws.send(
+      JSON.stringify({
+        type: "user.intent",
+        requestId: "req-enrich-intent",
+        timestamp: "2026-03-08T00:10:03.000Z",
+        payload: {
+          ...createUserIntentPayload(128, "2026-03-08T00:10:02.000Z"),
+          text: "이 차트 영역을 더 자세히 확인해서 설명해줘."
+        }
+      })
+    )
+
+    const waitingMessages = await waitForRequiredTypes(ws, [
+      "session.ready",
+      "progress",
+      "context.enrich.request"
+    ])
+
+    const enrichRequest = waitingMessages.find(
+      (message) => message.type === "context.enrich.request"
+    ) as { turnId?: string } | undefined
+    const turnId = enrichRequest?.turnId
+    expect(turnId).toBeDefined()
+
+    ws.send(
+      JSON.stringify({
+        type: "context.enrich.result",
+        requestId: "req-enrich-result",
+        timestamp: "2026-03-08T00:10:04.000Z",
+        turnId,
+        payload: {
+          requestKind: "visible-region",
+          targetRef: {
+            kind: "region",
+            pageUrl: "https://news.ycombinator.com/item?id=43210000",
+            region: "focus-node-region"
+          },
+          status: "ok",
+          capturedAt: "2026-03-08T00:10:04.000Z",
+          detail: {
+            text: "chart detail"
+          }
+        }
+      })
+    )
+
+    const resumedMessages = await waitForRequiredTypes(ws, ["progress", "projection", "turn.done"])
+    const resumedTypes = resumedMessages.map((message) => message.type)
+    expect(resumedTypes).toContain("turn.done")
+
+    ws.close()
+  }, 20000)
+
+  it("falls back on canonical ws path when enrich result does not arrive before timeout", async () => {
+    const harness = createCanonicalHarness()
+    const httpServer = harness.server
+    servers.push(httpServer)
+    const port = getPort(httpServer)
+
+    const token = issueToken("google-sub-ws-flow-enrich-timeout")
+
+    const ws = await connectWebSocket(`ws://127.0.0.1:${port}/ws/session?token=${token}`)
+
+    ws.send(
+      JSON.stringify({
+        type: "session.open",
+        requestId: "req-enrich-timeout-open",
+        timestamp: "2026-03-08T00:20:00.000Z",
+        payload: createSessionOpenPayload()
+      })
+    )
+
+    ws.send(
+      JSON.stringify({
+        type: "context.update",
+        requestId: "req-enrich-timeout-context",
+        timestamp: "2026-03-08T00:20:01.000Z",
+        payload: createContextUpdatePayload(128)
+      })
+    )
+
+    ws.send(
+      JSON.stringify({
+        type: "snapshot.push",
+        requestId: "req-enrich-timeout-snapshot",
+        timestamp: "2026-03-08T00:20:02.000Z",
+        payload: {
+          tabId: 128,
+          snapshot: createValidSnapshot("2026-03-08T00:20:02.000Z")
+        }
+      })
+    )
+
+    ws.send(
+      JSON.stringify({
+        type: "user.intent",
+        requestId: "req-enrich-timeout-intent",
+        timestamp: "2026-03-08T00:20:03.000Z",
+        payload: {
+          ...createUserIntentPayload(128, "2026-03-08T00:20:02.000Z"),
+          text: "이 차트 영역을 더 자세히 확인해서 설명해줘."
+        }
+      })
+    )
+
+    await waitForRequiredTypes(ws, ["context.enrich.request"])
+    const fallbackMessages = await waitForRequiredTypes(ws, ["projection", "turn.done"], 12000)
+    const fallbackTypes = fallbackMessages.map((message) => message.type)
+
+    expect(fallbackTypes).toContain("turn.done")
+    ws.close()
+  }, 20000)
+
+  it("keeps timeout fallback alive after rejecting invalid context.enrich.result", async () => {
+    const harness = createCanonicalHarness()
+    const httpServer = harness.server
+    servers.push(httpServer)
+    const port = getPort(httpServer)
+
+    const token = issueToken("google-sub-ws-flow-enrich-invalid-result")
+
+    const ws = await connectWebSocket(`ws://127.0.0.1:${port}/ws/session?token=${token}`)
+
+    ws.send(
+      JSON.stringify({
+        type: "session.open",
+        requestId: "req-enrich-invalid-open",
+        timestamp: "2026-03-08T00:30:00.000Z",
+        payload: createSessionOpenPayload()
+      })
+    )
+
+    ws.send(
+      JSON.stringify({
+        type: "context.update",
+        requestId: "req-enrich-invalid-context",
+        timestamp: "2026-03-08T00:30:01.000Z",
+        payload: createContextUpdatePayload(128)
+      })
+    )
+
+    ws.send(
+      JSON.stringify({
+        type: "snapshot.push",
+        requestId: "req-enrich-invalid-snapshot",
+        timestamp: "2026-03-08T00:30:02.000Z",
+        payload: {
+          tabId: 128,
+          snapshot: createValidSnapshot("2026-03-08T00:30:02.000Z")
+        }
+      })
+    )
+
+    ws.send(
+      JSON.stringify({
+        type: "user.intent",
+        requestId: "req-enrich-invalid-intent",
+        timestamp: "2026-03-08T00:30:03.000Z",
+        payload: {
+          ...createUserIntentPayload(128, "2026-03-08T00:30:02.000Z"),
+          text: "이 차트 영역을 더 자세히 확인해서 설명해줘."
+        }
+      })
+    )
+
+    const waitingMessages = await waitForRequiredTypes(ws, ["context.enrich.request"])
+    const enrichRequest = waitingMessages.find(
+      (message) => message.type === "context.enrich.request"
+    ) as { turnId?: string } | undefined
+    const turnId = enrichRequest?.turnId
+    expect(turnId).toBeDefined()
+
+    ws.send(
+      JSON.stringify({
+        type: "context.enrich.result",
+        requestId: "req-enrich-invalid-result",
+        timestamp: "2026-03-08T00:30:04.000Z",
+        turnId,
+        payload: {
+          requestKind: "visible-region",
+          targetRef: {
+            kind: "region",
+            pageUrl: "https://news.ycombinator.com/item?id=43210000",
+            region: "focus-node-region"
+          },
+          status: "ok"
+        }
+      })
+    )
+
+    const recoveryMessages = await waitForRequiredTypes(ws, ["error", "projection", "turn.done"], 12000)
+    const hasInvalidEventError = recoveryMessages.some(
+      (message) =>
+        message.type === "error" &&
+        typeof message.payload === "object" &&
+        message.payload !== null &&
+        (message.payload as { code?: string }).code === "INVALID_EVENT"
+    )
+    const recoveryTypes = recoveryMessages.map((message) => message.type)
+
+    expect(hasInvalidEventError).toBe(true)
+    expect(recoveryTypes).toContain("projection")
+    expect(recoveryTypes).toContain("turn.done")
+    ws.close()
+  }, 25000)
+
   it("preserves error semantics parity between /ws/session and /ws/session/events", async () => {
-    const app = createServer()
-    const httpServer = app.listen(0)
+    const harness = createCanonicalHarness()
+    const app = harness.app
+    const httpServer = harness.server
     servers.push(httpServer)
     const port = getPort(httpServer)
 
