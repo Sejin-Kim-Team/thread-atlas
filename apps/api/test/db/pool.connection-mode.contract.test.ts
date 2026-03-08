@@ -112,6 +112,42 @@ describe("db pool connection mode contract", () => {
     await expect(poolModule.closePool()).resolves.toBeUndefined()
     expect(mocks.poolEnd).toHaveBeenCalledTimes(1)
     expect(mocks.connectorGetOptions).toHaveBeenCalledTimes(1)
+    expect(mocks.connectorGetOptions).toHaveBeenCalledWith(
+      expect.objectContaining({
+        instanceConnectionName: "threadatlas:us-central1:thread-atlas",
+        authType: "PASSWORD"
+      })
+    )
     expect(mocks.connectorClose).toHaveBeenCalledTimes(1)
+  })
+
+  it("propagates DB_IAM_AUTHN=true to connector IAM auth mode without DB_PASSWORD", async () => {
+    process.env.DB_CONNECTION_MODE = "cloudsql-connector"
+    process.env.CLOUD_SQL_INSTANCE_CONNECTION_NAME = "threadatlas:us-central1:thread-atlas"
+    process.env.DB_NAME = "thread-atlas"
+    process.env.DB_USER = "spark"
+    process.env.DB_IAM_AUTHN = "true"
+
+    const poolModule = await import("../../src/db/pool")
+    await poolModule.getPool()
+
+    expect(mocks.poolCtor).toHaveBeenCalledTimes(1)
+    expect(mocks.poolCtor).toHaveBeenCalledWith(
+      expect.objectContaining({
+        user: "spark",
+        database: "thread-atlas"
+      })
+    )
+    expect(mocks.poolCtor).toHaveBeenCalledWith(
+      expect.not.objectContaining({
+        password: expect.anything()
+      })
+    )
+    expect(mocks.connectorGetOptions).toHaveBeenCalledWith(
+      expect.objectContaining({
+        instanceConnectionName: "threadatlas:us-central1:thread-atlas",
+        authType: "IAM"
+      })
+    )
   })
 })

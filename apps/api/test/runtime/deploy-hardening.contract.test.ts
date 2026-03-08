@@ -49,8 +49,29 @@ function runApiIndex(env: Record<string, string>, timeoutMs: number): Promise<Ch
 describe("deploy hardening runtime contract", () => {
   it("returns readiness payload from readiness status helper", async () => {
     vi.resetModules()
+    vi.doMock("../../src/routes/analyze", () => ({
+      default: {}
+    }))
+    vi.doMock("../../src/routes/evaluate", () => ({
+      default: {}
+    }))
+    vi.doMock("../../src/routes/ingest-memory", () => ({
+      default: {}
+    }))
+    vi.doMock("../../src/routes/token", () => ({
+      default: {}
+    }))
+    vi.doMock("../../src/routes/ws-session-events", () => ({
+      createWsSessionEventsRouter: vi.fn(() => ({}))
+    }))
+    vi.doMock("../../src/session/runtime/manager", () => ({
+      RuntimeManager: class FakeRuntimeManager {}
+    }))
+    vi.doMock("../../src/ws/session-ws-server", () => ({
+      attachSessionWebSocketServer: vi.fn()
+    }))
     vi.doMock("../../src/db/pool", () => ({
-      queryDbRaw: vi.fn(async () => ({
+      queryDb: vi.fn(async () => ({
         rowCount: 1,
         rows: [{ ok: true }]
       }))
@@ -104,14 +125,17 @@ describe("deploy hardening runtime contract", () => {
   })
 
   it("shuts down gracefully on SIGTERM with exit code 0", async () => {
-    const close = vi.fn<(callback: (error?: Error | null) => void) => void>((callback) => callback(null))
+    let resolveClose: (() => void) | null = null
+    const close = vi.fn<(callback: (error?: Error | null) => void) => void>((callback) => {
+      resolveClose = () => callback(null)
+    })
     const closePool = vi.fn(async () => undefined)
     const info = vi.fn()
     const error = vi.fn()
     const exit = vi.fn()
 
     const { shutdown } = await import("../../src/runtime/boot")
-    await shutdown(
+    const shutdownPromise = shutdown(
       {
         close
       } as unknown as import("http").Server,
@@ -123,6 +147,11 @@ describe("deploy hardening runtime contract", () => {
         logger: { info, error }
       }
     )
+
+    expect(close).toHaveBeenCalledTimes(1)
+    expect(closePool).not.toHaveBeenCalled()
+    resolveClose?.()
+    await shutdownPromise
 
     expect(close).toHaveBeenCalledTimes(1)
     expect(closePool).toHaveBeenCalledTimes(1)

@@ -46,7 +46,13 @@ export async function shutdown(
   })
 
   try {
-    await Promise.race([Promise.all([closeServer, closePoolFn()]).then(() => undefined), withTimeout])
+    await Promise.race([
+      (async () => {
+        await closeServer
+        await closePoolFn()
+      })(),
+      withTimeout
+    ])
     logger.info("graceful-shutdown-complete", {
       signal
     })
