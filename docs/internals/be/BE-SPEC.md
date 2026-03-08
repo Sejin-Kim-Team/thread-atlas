@@ -8,7 +8,8 @@ Status: Draft
 > Note: 이 문서는 해커톤 이후 업그레이드 타깃까지 포함한 full spec overview에 가깝다.
 > 2026-03-16 제출 기준의 구현 우선순위는 [BE-SPEC-HACKATHON.md](./BE-SPEC-HACKATHON.md)를 먼저 따른다.
 > `feature/be-rag-persistence` 브랜치 구현 범위는 [BE-SPEC-RAG-HACKATHON.md](./BE-SPEC-RAG-HACKATHON.md)의 브랜치 범위/완료 조건을 우선 적용한다.
-> `feature/be-recall-runtime` 브랜치에서는 recall-card projection runtime 연결 규칙을 우선 적용하며, FE 렌더링 합의는 비범위다.
+> `feature/be-enrich-subloop` 브랜치에서는 enrich sub-loop(runtime state transition, request/result, fallback) 연결 규칙과 trigger mode(`rule | hybrid-simple | hybrid-complex`) 정책을 우선 적용한다.
+> `feature/be-enrich-subloop`에서 `requestKind`는 `node-screenshot | visible-region | node-detail`만 허용하며, `page-entity`는 `targetRef`로만 표현한다. `ENRICH_TRIGGER_MODE` 미설정/오설정은 fail-fast 대상이다.
 > 해커톤 RAG embedding canonical path는 `Vertex AI(gemini-embedding-001, output_dimensionality=768)`이며, pseudo embedding 대체는 허용하지 않는다.
 > 해커톤 current-page answer canonical path는 `@google/genai` + Vertex `models.generateContent`이며, stub/placeholder answer 대체는 허용하지 않는다.
 

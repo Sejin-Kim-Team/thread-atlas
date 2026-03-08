@@ -198,6 +198,8 @@ export interface WsEnvelope<TType extends string, TPayload> {
   - current primary tab의 semantic node
   - current page의 `url:entity-id`
   - current primary tab의 region
+- `requestKind`는 `node-screenshot | visible-region | node-detail` 3종만 허용한다.
+- `page-entity`는 `requestKind`가 아니라 `targetRef.kind`로만 표현한다.
 - `visibility` 기본값은 `status-only`
 - `approval-required`는 예약 값으로 남기되, 해커톤 구현의 기본 경로는 아니다
 - request는 FE가 deterministic하게 처리 가능한 구조화 필드만 사용한다
@@ -207,6 +209,13 @@ export interface WsEnvelope<TType extends string, TPayload> {
 
 - `context.enrich.result`는 active turn에만 귀속된다
 - enrich result는 primary snapshot을 대체하지 않고 turn-local context를 보강한다
+- 수용 전 runtime 유효성 검증을 수행해야 한다
+  - active turn 상태가 `waiting-enrich`여야 한다
+  - active turn에 pending enrich request가 존재해야 한다
+  - `context.enrich.result.payload.requestKind`/`targetRef`는 pending request와 정확히 일치해야 한다
+- pending request 부재 또는 `requestKind`/`targetRef` 불일치 result는 invalid로 폐기하고 병합하지 않는다
+- enrich detail payload는 untrusted current-page evidence로 취급한다
+- prompt 구성에는 정규화된 허용 필드만 사용하고, 자유형 detail 원문 문자열 직접 삽입을 금지한다
 - 실패 시 turn 전체를 실패시키지 않고 fallback 경로로 진행한다
 
 ### 6.3 Turn Policy
@@ -215,6 +224,37 @@ export interface WsEnvelope<TType extends string, TPayload> {
 - enrich timeout 시 current-page evidence만으로 제한 답변 또는 clarify로 후퇴한다
 - semantic node id와 FE entity id가 항상 동일하다고 가정하지 않는다
 - 따라서 BE는 필요 시 semantic node 대신 `page-entity` target을 요청할 수 있다
+- `timeoutMs`가 request payload에 없으면 기본값 `3000ms`를 사용한다
+- timeout 타이머는 enrich request emit 시 arm 해야 한다
+- timeout 타이머 해제는 runtime 유효성 검증 성공 이후에만 허용한다
+- invalid `context.enrich.result`는 타이머를 해제하거나 fallback 경로를 건너뛰게 만들면 안 된다
+- `context.enrich.result.status = "ok"`일 때만 turn-local context에 적용한다
+- `context.enrich.result.status = "failed" | "unsupported"`이면 enrich 결과 적용 없이 fallback 경로로 진행한다
+- fallback은 `progress(stage="response-planning") -> projection(answer|status-note) -> turn.done` 순서를 유지해야 한다
+
+### 6.4 Enrich Trigger Decision Policy
+
+- enrich trigger mode는 정확히 `rule | hybrid-simple | hybrid-complex` 3개만 허용한다.
+- trigger mode는 backend runtime policy이며 client event payload로 입력받지 않는다.
+- 즉 `context.enrich.request`/`context.enrich.result` wire schema는 본 변경으로 확장하지 않는다.
+- trigger mode가 미설정이거나 허용 집합 밖이면 배포/부팅 단계에서 fail-fast 해야 하며 runtime 기본값으로 묵살하면 안 된다.
+
+mode semantics:
+
+- `rule`
+  - 규칙 사전만 사용해 enrich/no-enrich와 target class를 결정한다.
+  - LLM assist를 호출하지 않는다.
+- `hybrid-simple`
+  - 규칙 매칭 성공 시 즉시 enrich를 요청한다.
+  - 규칙 매칭 실패 시 즉시 LLM assist를 호출한다.
+- `hybrid-complex`
+  - 규칙 사전으로 `명확한 enrich`/`명확한 no-enrich`를 먼저 판정한다.
+  - 판정이 애매하거나 `SemanticSnapshot`이 suspicious이면 LLM assist를 호출한다.
+
+규칙 사전 요구사항:
+
+- 규칙 사전은 한국어+영어 키워드를 모두 포함해야 한다.
+- intent category 단위로 한국어/영어 매칭 규칙이 모두 있어야 유효하다.
 
 ---
 
@@ -292,6 +332,9 @@ export type HackathonProjectionBody =
 
 - `MODEL_CONFIG_MISSING`은 generation 설정(`GOOGLE_CLOUD_PROJECT`, `GOOGLE_CLOUD_LOCATION`) 누락일 때만 사용한다
 - `GENERATION_FAILED`는 설정은 유효하지만 모델 호출/응답 처리 자체가 실패한 경우에 사용한다
+- invalid enrich result(`waiting-enrich` 아님, pending request 없음, `requestKind`/`targetRef` 바인딩 불일치)는 `INVALID_EVENT`로 처리해야 한다
+- WebSocket 경로에서는 `error(code="INVALID_EVENT")`를 emit하고 turn을 `waiting-enrich` 상태로 유지한다
+- `/ws/session/events` adapter에서도 동일 케이스를 `400 BAD_REQUEST` + `INVALID_EVENT`로 정렬한다
 
 ---
 

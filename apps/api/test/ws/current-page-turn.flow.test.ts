@@ -200,94 +200,106 @@ describe("ws current-page turn flow", () => {
   })
 
   it("does not emit stale events when an earlier intent is interrupted", async () => {
-    const client = request(app)
-    const token = await issueAuthToken(client)
+    const previousTriggerMode = process.env.ENRICH_TRIGGER_MODE
+    process.env.ENRICH_TRIGGER_MODE = "rule"
 
-    let releaseFirstGeneration: (() => void) | null = null
-    generateTextMock.mockReset()
-    generateTextMock
-      .mockImplementationOnce(
-        () =>
-          new Promise<string>((resolve) => {
-            releaseFirstGeneration = () => resolve("FIRST_ANSWER")
-          })
+    try {
+      const isolatedApp = createServer()
+      const client = request(isolatedApp)
+      const token = await issueAuthToken(client)
+
+      let releaseFirstGeneration: (() => void) | null = null
+      generateTextMock.mockReset()
+      generateTextMock
+        .mockImplementationOnce(
+          () =>
+            new Promise<string>((resolve) => {
+              releaseFirstGeneration = () => resolve("FIRST_ANSWER")
+            })
+        )
+        .mockResolvedValueOnce("SECOND_ANSWER")
+
+      const open = await postWsEventWithAuth(
+        client,
+        createEnvelope("session.open", createSessionOpenPayload(), { requestId: "req-open-1" }),
+        token
       )
-      .mockResolvedValueOnce("SECOND_ANSWER")
+      const sessionId = open.body?.payload?.sessionId
 
-    const open = await postWsEventWithAuth(
-      client,
-      createEnvelope("session.open", createSessionOpenPayload(), { requestId: "req-open-1" }),
-      token
-    )
-    const sessionId = open.body?.payload?.sessionId
-
-    await postWsEventWithAuth(
-      client,
-      createEnvelope("context.update", createContextUpdatePayload(128), {
-        requestId: "req-ctx-1",
-        sessionId
-      }),
-      token
-    )
-
-    await postWsEventWithAuth(
-      client,
-      createEnvelope(
-        "snapshot.push",
-        {
-          tabId: 128,
-          snapshot: createValidSnapshot()
-        },
-        {
-          requestId: "req-snapshot-1",
+      await postWsEventWithAuth(
+        client,
+        createEnvelope("context.update", createContextUpdatePayload(128), {
+          requestId: "req-ctx-1",
           sessionId
-        }
-      ),
-      token
-    )
+        }),
+        token
+      )
 
-    const firstIntentPromise = postWsEventWithAuth(
-      client,
-      createEnvelope("user.intent", createUserIntentPayload(128), {
-        requestId: "req-intent-1",
-        sessionId
-      }),
-      token
-    )
+      await postWsEventWithAuth(
+        client,
+        createEnvelope(
+          "snapshot.push",
+          {
+            tabId: 128,
+            snapshot: createValidSnapshot()
+          },
+          {
+            requestId: "req-snapshot-1",
+            sessionId
+          }
+        ),
+        token
+      )
 
-    await vi.waitFor(() => {
-      expect(generateTextMock).toHaveBeenCalledTimes(1)
-    })
+      const firstIntentPromise = postWsEventWithAuth(
+        client,
+        createEnvelope("user.intent", createUserIntentPayload(128), {
+          requestId: "req-intent-1",
+          sessionId
+        }),
+        token
+      )
 
-    const secondIntentPromise = postWsEventWithAuth(
-      client,
-      createEnvelope("user.intent", createUserIntentPayload(128), {
-        requestId: "req-intent-2",
-        sessionId
-      }),
-      token
-    )
+      await vi.waitFor(() => {
+        expect(generateTextMock).toHaveBeenCalledTimes(1)
+      })
 
-    await vi.waitFor(() => {
-      expect(generateTextMock).toHaveBeenCalledTimes(2)
-    })
+      const secondIntentPromise = postWsEventWithAuth(
+        client,
+        createEnvelope("user.intent", createUserIntentPayload(128), {
+          requestId: "req-intent-2",
+          sessionId
+        }),
+        token
+      )
 
-    releaseFirstGeneration?.()
+      await vi.waitFor(() => {
+        expect(generateTextMock).toHaveBeenCalledTimes(2)
+      })
 
-    const [firstIntent, secondIntent] = await Promise.all([firstIntentPromise, secondIntentPromise])
+      releaseFirstGeneration?.()
 
-    expect(firstIntent.status).toBe(200)
-    expect(firstIntent.body.type).toBe("event.batch")
-    expect(firstIntent.body.events).toEqual([])
+      const [firstIntent, secondIntent] = await Promise.all([firstIntentPromise, secondIntentPromise])
 
-    expect(secondIntent.status).toBe(200)
-    expect(Array.isArray(secondIntent.body.events)).toBe(true)
-    expect(
-      assertOrderedEventTypes(secondIntent.body.events as Array<{ type?: string }>, [
-        "progress",
-        "projection",
-        "turn.done"
-      ])
-    ).toBe(true)
+      expect(firstIntent.status).toBe(200)
+      expect(firstIntent.body.type).toBe("event.batch")
+      expect(firstIntent.body.events).toEqual([])
+
+      expect(secondIntent.status).toBe(200)
+      expect(Array.isArray(secondIntent.body.events)).toBe(true)
+      expect(
+        assertOrderedEventTypes(secondIntent.body.events as Array<{ type?: string }>, [
+          "progress",
+          "projection",
+          "turn.done"
+        ])
+      ).toBe(true)
+    } finally {
+      if (previousTriggerMode) {
+        process.env.ENRICH_TRIGGER_MODE = previousTriggerMode
+      } else {
+        delete process.env.ENRICH_TRIGGER_MODE
+      }
+    }
   })
 })
