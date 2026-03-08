@@ -60,6 +60,43 @@ Companion:
 해커톤 구현 중 코드 구조와 주석 작성은
 [BE-SPEC-IMPLEMENTATION-RULES.md](./BE-SPEC-IMPLEMENTATION-RULES.md)를 필수 계약으로 따른다.
 
+### 2.1 현재 구현 브랜치(`feature/be-rag-persistence`) 범위 고정
+
+본 문서의 해커톤 전체 목표와 별개로, 현재 구현 브랜치의 고정 범위는 아래로 제한한다.
+
+- `memory_records`, `memory_record_embeddings`, `analysis_runs` 스키마 및 인덱스
+- `/api/ingest/memory` 실제 DB write
+- owner-scoped retrieval service 초안
+
+현재 브랜치 비범위:
+
+- `recall-card`의 turn runtime/projection 연결
+- real WebSocket transport
+- enrich sub-loop
+- analyze real LLM generation
+
+따라서 4장 이후의 WS/event/turn 내용은 `해커톤 최종 목표 계약`이며, 본 브랜치의 완료 판정 기준은 [BE-SPEC-RAG-HACKATHON.md](./BE-SPEC-RAG-HACKATHON.md)의 브랜치 완료 조건을 따른다.
+
+### 2.2 RAG Embedding Canonical Path
+
+해커톤 RAG의 embedding path는 아래로 고정한다.
+
+- provider: `Vertex AI`
+- model: `gemini-embedding-001`
+- output dimensionality: `768`
+- required env: `GOOGLE_CLOUD_PROJECT`, `GOOGLE_CLOUD_LOCATION`
+- auth path: 로컬 `ADC`, 배포 `Cloud Run service account`
+
+금지 규칙:
+
+- deterministic pseudo embedding을 최종 구현으로 사용하지 않는다
+- provider failure 시 placeholder/pseudo vector로 대체하지 않는다
+
+ingest/retrieval 공통 규칙:
+
+- ingest는 실제 provider embedding을 저장해야 한다
+- retrieval은 실제 provider query embedding을 사용해야 한다
+
 ---
 
 ## 3. Runtime Model
@@ -459,6 +496,10 @@ memory는 해커톤에서 보조 기능이지만, 데모 가능한 범위로 포
 - `Cloud SQL + pgvector`
 - `Vertex AI`
 - `Secret Manager`
+
+추가 고정:
+
+- embedding canonical path는 [BE-SPEC-RAG-HACKATHON.md](./BE-SPEC-RAG-HACKATHON.md)의 `3.3 Embedding Provider Rule`을 따른다
 
 ---
 

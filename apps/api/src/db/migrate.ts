@@ -1,6 +1,6 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs"
 import path from "node:path"
-import { queryDb } from "./pool"
+import { getPool } from "./pool"
 
 const MIGRATION_DIR_CANDIDATES = [
   path.resolve(process.cwd(), "apps/api/src/db/migrations"),
@@ -25,8 +25,12 @@ async function runMigrations(): Promise<void> {
     return
   }
 
-  await queryDb("select pg_advisory_lock($1)", [706034321907])
+  const client = await getPool().connect()
+  let lockAcquired = false
   try {
+    await client.query("select pg_advisory_lock($1)", [706034321907])
+    lockAcquired = true
+
     const files = readdirSync(migrationsDir)
       .filter((name) => name.endsWith(".sql"))
       .sort((a, b) => a.localeCompare(b))
@@ -37,16 +41,25 @@ async function runMigrations(): Promise<void> {
       if (!sql.trim()) {
         continue
       }
-      await queryDb(sql)
+      await client.query(sql)
     }
   } finally {
-    await queryDb("select pg_advisory_unlock($1)", [706034321907])
+    try {
+      if (lockAcquired) {
+        await client.query("select pg_advisory_unlock($1)", [706034321907])
+      }
+    } finally {
+      client.release()
+    }
   }
 }
 
 export async function ensureDatabaseMigrations(): Promise<void> {
   if (!migratePromise) {
-    migratePromise = runMigrations()
+    migratePromise = runMigrations().catch((error) => {
+      migratePromise = null
+      throw error
+    })
   }
   return migratePromise
 }

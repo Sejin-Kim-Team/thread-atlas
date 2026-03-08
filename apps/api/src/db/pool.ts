@@ -8,6 +8,7 @@ if (!configuredDatabaseUrl) {
 const DATABASE_URL: string = configuredDatabaseUrl
 
 let pool: Pool | null = null
+let ensureMigrationsPromise: Promise<void> | null = null
 
 function getDatabaseUrl(): string {
   return DATABASE_URL
@@ -25,6 +26,23 @@ export function getPool(): Pool {
 }
 
 export async function queryDb<T extends QueryResultRow = QueryResultRow>(
+  text: string,
+  values?: unknown[]
+): Promise<QueryResult<T>> {
+  if (!ensureMigrationsPromise) {
+    // queryDb 호출 지점에서는 스키마 선행 적용을 1회 보장한다.
+    ensureMigrationsPromise = import("./migrate")
+      .then(({ ensureDatabaseMigrations }) => ensureDatabaseMigrations())
+      .catch((error) => {
+        ensureMigrationsPromise = null
+        throw error
+      })
+  }
+  await ensureMigrationsPromise
+  return queryDbRaw<T>(text, values)
+}
+
+export async function queryDbRaw<T extends QueryResultRow = QueryResultRow>(
   text: string,
   values?: unknown[]
 ): Promise<QueryResult<T>> {

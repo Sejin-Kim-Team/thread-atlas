@@ -45,14 +45,17 @@ describe("HTTP auth principal contract (red)", () => {
   it("accepts /api/ingest/memory when ownerUserId matches local users.id principal", async () => {
     const app = createServer()
     const issued = await issueTransitionToken(app, "google-sub-auth-alpha")
+    const payload = buildIngestMemoryRequest(issued.userId)
+    const firstRecord = payload.records[0]
 
     const response = await request(app)
       .post("/api/ingest/memory")
       .set("Authorization", `Bearer ${issued.token}`)
-      .send(buildIngestMemoryRequest(issued.userId))
+      .send(payload)
 
     expect(response.status).toBe(200)
-    expect(response.body.acceptedIds).toContain("mem-branch-101")
+    expect(firstRecord).toBeDefined()
+    expect(response.body.acceptedIds).toContain(firstRecord!.id)
   })
 
   it("rejects /api/ingest/memory when local principal and ownerUserId mismatch", async () => {

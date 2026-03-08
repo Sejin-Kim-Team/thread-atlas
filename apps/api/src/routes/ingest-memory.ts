@@ -1,5 +1,6 @@
 import { Router, type RequestHandler } from "express"
 import { resolvePrincipalFromAuthorizationHeader } from "../auth/principal"
+import { isEmbeddingProviderError } from "../rag/vertex-embedding-adapter"
 import {
   ingestMemoryRecords,
   validateIngestRequest
@@ -39,8 +40,23 @@ const handleIngestMemory: RequestHandler = async (req, res) => {
     return
   }
 
-  const response = ingestMemoryRecords(req.body, principal.userId)
-  res.status(200).json(response)
+  try {
+    const response = await ingestMemoryRecords(req.body, principal.userId)
+    res.status(200).json(response)
+  } catch (error) {
+    if (isEmbeddingProviderError(error)) {
+      res.status(500).json({
+        code: error.code,
+        message: error.message
+      })
+      return
+    }
+
+    res.status(500).json({
+      code: "INGEST_MEMORY_FAILED",
+      message: "ingest memory failed"
+    })
+  }
 }
 
 router.post("/", handleIngestMemory)
