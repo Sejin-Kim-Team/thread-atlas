@@ -125,14 +125,17 @@ describe("deploy hardening runtime contract", () => {
   })
 
   it("shuts down gracefully on SIGTERM with exit code 0", async () => {
-    const close = vi.fn<(callback: (error?: Error | null) => void) => void>((callback) => callback(null))
+    let resolveClose: (() => void) | null = null
+    const close = vi.fn<(callback: (error?: Error | null) => void) => void>((callback) => {
+      resolveClose = () => callback(null)
+    })
     const closePool = vi.fn(async () => undefined)
     const log = vi.fn()
     const error = vi.fn()
     const exit = vi.fn()
 
     const { shutdown } = await import("../../src/runtime/boot")
-    await shutdown(
+    const shutdownPromise = shutdown(
       {
         close
       } as unknown as import("http").Server,
@@ -144,6 +147,11 @@ describe("deploy hardening runtime contract", () => {
         logger: { log, error }
       }
     )
+
+    expect(close).toHaveBeenCalledTimes(1)
+    expect(closePool).not.toHaveBeenCalled()
+    resolveClose?.()
+    await shutdownPromise
 
     expect(close).toHaveBeenCalledTimes(1)
     expect(closePool).toHaveBeenCalledTimes(1)
