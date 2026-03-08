@@ -1,4 +1,5 @@
 import type { PoolClient } from "pg"
+import { ensureDatabaseMigrations } from "../../db/migrate"
 import { getPool } from "../../db/pool"
 import { buildEmbeddingHash } from "../../rag/embedding"
 import { upsertMemoryRecordEmbedding } from "../../rag/memory-record-embeddings-repository"
@@ -92,6 +93,23 @@ function hasValidCreatedAt(record: MemoryRecord): boolean {
   return record.createdAt == null || isValidTimestamp(record.createdAt)
 }
 
+function isDuplicateRecordIdError(error: unknown): boolean {
+  if (!error || typeof error !== "object") {
+    return false
+  }
+
+  const candidate = error as {
+    code?: string
+    constraint?: string
+    table?: string
+  }
+
+  return (
+    candidate.code === "23505" &&
+    (candidate.constraint === "memory_records_pkey" || candidate.table === "memory_records")
+  )
+}
+
 function normalizeTextItems(values: unknown): string[] {
   if (!Array.isArray(values)) {
     return []
@@ -153,6 +171,10 @@ async function persistMemoryRecord(input: {
   principalUserId: string
   source: IngestMemoryRequestBody["source"]
 }): Promise<string> {
+  // 트랜잭션용 connection을 선점하기 전에 migration을 보장해
+  // cold start 동시 요청에서 pool 고갈 데드락을 피한다.
+  await ensureDatabaseMigrations()
+
   const retrievalText = buildCanonicalRetrievalText(input.record)
   if (!retrievalText) {
     throw new Error("retrievalText is empty")
@@ -308,6 +330,14 @@ export async function ingestMemoryRecords(
       })
       acceptedIds.push(persistedId)
     } catch (error) {
+      if (isDuplicateRecordIdError(error)) {
+        rejected.push({
+          id: record.id || "unknown",
+          reason: "not-storable"
+        })
+        continue
+      }
+
       if (!isEmbeddingProviderError(error)) {
         throw error
       }
