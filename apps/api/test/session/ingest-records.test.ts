@@ -6,13 +6,18 @@ const mocks = vi.hoisted(() => ({
   release: vi.fn(),
   insertMemoryRecord: vi.fn(),
   upsertMemoryRecordEmbedding: vi.fn(),
-  embedTextWithVertex: vi.fn()
+  embedTextWithVertex: vi.fn(),
+  ensureDatabaseMigrations: vi.fn()
 }))
 
 vi.mock("../../src/db/pool", () => ({
   getPool: () => ({
     connect: mocks.connect
   })
+}))
+
+vi.mock("../../src/db/migrate", () => ({
+  ensureDatabaseMigrations: mocks.ensureDatabaseMigrations
 }))
 
 vi.mock("../../src/rag/memory-records-repository", () => ({
@@ -74,6 +79,7 @@ describe("ingestMemoryRecords", () => {
     mocks.insertMemoryRecord.mockReset()
     mocks.upsertMemoryRecordEmbedding.mockReset()
     mocks.embedTextWithVertex.mockReset()
+    mocks.ensureDatabaseMigrations.mockReset()
 
     mocks.connect.mockResolvedValue({
       query: mocks.clientQuery,
@@ -87,6 +93,7 @@ describe("ingestMemoryRecords", () => {
       id: "mem-record-1"
     })
     mocks.upsertMemoryRecordEmbedding.mockResolvedValue(undefined)
+    mocks.ensureDatabaseMigrations.mockResolvedValue(undefined)
     mocks.embedTextWithVertex.mockResolvedValue({
       embeddingModel: "gemini-embedding-001",
       embeddingDims: 768,
@@ -249,6 +256,33 @@ describe("ingestMemoryRecords", () => {
       reason: "not-storable"
     })
     expect(mocks.insertMemoryRecord).not.toHaveBeenCalled()
+  })
+
+
+  it("ensures migrations before acquiring transaction connection", async () => {
+    const calls: string[] = []
+    mocks.ensureDatabaseMigrations.mockImplementationOnce(async () => {
+      calls.push("migrate")
+    })
+    mocks.connect.mockImplementationOnce(async () => {
+      calls.push("connect")
+      return {
+        query: mocks.clientQuery,
+        release: mocks.release
+      }
+    })
+
+    const { ingestMemoryRecords } = await import("../../src/session/memory/ingest-records")
+    const response = await ingestMemoryRecords(
+      {
+        source: "analyze",
+        records: [buildRecord("00000000-0000-4000-8000-000000000119")]
+      },
+      "00000000-0000-4000-8000-000000000119"
+    )
+
+    expect(response.acceptedIds).toEqual(["mem-record-1"])
+    expect(calls).toEqual(["migrate", "connect"])
   })
 
   it("calls embedding provider before opening DB transaction", async () => {

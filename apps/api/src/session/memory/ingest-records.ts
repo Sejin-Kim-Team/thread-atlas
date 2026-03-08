@@ -1,4 +1,5 @@
 import type { PoolClient } from "pg"
+import { ensureDatabaseMigrations } from "../../db/migrate"
 import { getPool } from "../../db/pool"
 import { buildEmbeddingHash } from "../../rag/embedding"
 import { upsertMemoryRecordEmbedding } from "../../rag/memory-record-embeddings-repository"
@@ -153,6 +154,10 @@ async function persistMemoryRecord(input: {
   principalUserId: string
   source: IngestMemoryRequestBody["source"]
 }): Promise<string> {
+  // 트랜잭션용 connection을 선점하기 전에 migration을 보장해
+  // cold start 동시 요청에서 pool 고갈 데드락을 피한다.
+  await ensureDatabaseMigrations()
+
   const retrievalText = buildCanonicalRetrievalText(input.record)
   if (!retrievalText) {
     throw new Error("retrievalText is empty")
