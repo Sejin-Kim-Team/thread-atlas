@@ -93,6 +93,23 @@ function hasValidCreatedAt(record: MemoryRecord): boolean {
   return record.createdAt == null || isValidTimestamp(record.createdAt)
 }
 
+function isDuplicateRecordIdError(error: unknown): boolean {
+  if (!error || typeof error !== "object") {
+    return false
+  }
+
+  const candidate = error as {
+    code?: string
+    constraint?: string
+    table?: string
+  }
+
+  return (
+    candidate.code === "23505" &&
+    (candidate.constraint === "memory_records_pkey" || candidate.table === "memory_records")
+  )
+}
+
 function normalizeTextItems(values: unknown): string[] {
   if (!Array.isArray(values)) {
     return []
@@ -313,6 +330,14 @@ export async function ingestMemoryRecords(
       })
       acceptedIds.push(persistedId)
     } catch (error) {
+      if (isDuplicateRecordIdError(error)) {
+        rejected.push({
+          id: record.id || "unknown",
+          reason: "not-storable"
+        })
+        continue
+      }
+
       if (!isEmbeddingProviderError(error)) {
         throw error
       }
