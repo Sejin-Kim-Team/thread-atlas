@@ -1,0 +1,25 @@
+info:
+  name: create-token-oauth
+  type: http
+  seq: 2
+
+http:
+  method: POST
+  url: "{{serverUrl}}/api/token"
+  headers:
+    - name: X-Bootstrap-Key
+      value: threadatlas-dev-bootstrap-2026-7Xq9Lr2Vm!K8pS4
+  body:
+    type: json
+    data: |-
+      {
+        "grantType": "google-id-token",
+        "idToken": "{{googleOauthToken}}"
+      }
+  auth: inherit
+
+settings:
+  encodeUrl: true
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5

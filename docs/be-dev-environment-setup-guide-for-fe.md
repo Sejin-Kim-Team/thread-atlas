@@ -107,7 +107,30 @@ curl -X POST http://localhost:8080/api/token \
 
 보다 자세한 E2E 시나리오는 로컬 전용 문서인 `local-only-docs/active/e2e`를 참고한다.
 
-## 6. 종료
+## 6. Bruno API Collection 사용
+
+FE 개발자는 Bruno를 이용해 로컬 BE API를 바로 호출할 수 있다.
+
+사전 준비:
+
+- Bruno 설치
+- 참고 가이드: <https://docs.usebruno.com/get-started/installation>
+
+사용 순서:
+
+1. Bruno를 실행한다.
+2. `Open Collection` 또는 폴더 열기 기능으로 리포지토리의 [docs/internals/api_collections](./internals/api_collections) 폴더를 연다.
+3. 환경으로 [docs/internals/api_collections/environments/ThreadAtlasLocal.yml](./internals/api_collections/environments/ThreadAtlasLocal.yml)을 선택한다.
+4. 필요하면 `serverUrl`, `authBootstrapKey` 값을 현재 로컬 환경에 맞게 수정한다.
+5. `create-token-dev`, `health`, `ready`, `service/*` 요청을 순서대로 실행해 로컬 BE를 검증한다.
+
+참고:
+
+- Bruno 설치/컬렉션 사용법: <https://docs.usebruno.com/testing/script/getting-started>
+- `docs/internals/api_collections/opencollection.yml`은 Bruno에서 컬렉션 루트로 사용된다.
+- `service/folder.yml`에는 `dev-bootstrap` 토큰 발급용 pre-request 스크립트가 연결돼 있다.
+
+## 7. 종료
 
 ```bash
 docker compose down
@@ -119,7 +142,7 @@ DB 볼륨까지 지우려면:
 docker compose down -v
 ```
 
-## 7. 주의사항
+## 8. 주의사항
 
 - 이 compose는 **로컬 개발 편의용**이다.
 - Cloud Run 배포 시에는 Cloud SQL Connector 기반 경로를 사용한다.

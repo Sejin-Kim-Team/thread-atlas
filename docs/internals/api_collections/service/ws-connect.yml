@@ -1,0 +1,137 @@
+info:
+  name: ws-connect
+  type: websocket
+  seq: 3
+
+websocket:
+  url: "{{wsServerUrl}}/ws/session?token={{authToken}}"
+  message:
+    type: json
+    data: |-
+      {
+        "type": "user.intent",
+        "timestamp": "2026-03-08T10:00:10.000Z",
+        "requestId": "req-e2e-intent-1",
+        "payload": {
+          "text": "이 댓글의 핵심을 설명해줘",
+          "primaryTabId": 128,
+          "boundSnapshotCapturedAt": "2026-03-08T10:00:00.000Z"
+        }
+      }
+
+settings:
+  timeout: 0
+  keepAliveInterval: 0
+
+docs: |-
+  # Session Open
+  ```json
+  {
+    "type": "session.open",
+    "requestId": "req-manual-open-1",
+    "timestamp": "2026-03-08T10:00:00.000Z",
+    "payload": {
+      "clientSessionId": "manual-e2e-session-1",
+      "openedAt": "2026-03-08T10:00:00.000Z",
+      "capabilities": {
+        "liveAudio": false,
+        "liveVision": true,
+        "visualSummary": true
+      }
+    }
+  }
+  ```
+  expect result:
+  - server -> session.ready
+
+  # Context Update
+  ```json
+  {
+    "type": "context.update",
+    "timestamp": "2026-03-08T10:00:00.000Z",
+    "requestId": "req-e2e-context-update",
+    "payload": {
+      "tabId": 128,
+      "url": "https://news.ycombinator.com/item?id=43210000",
+      "pageKind": "thread",
+      "isPrimary": true,
+      "title": "Ask HN: WebSocket vs SSE"
+    }
+  }
+  ```
+
+  # Snapshot Push
+  ```json
+  {
+    "type": "snapshot.push",
+    "timestamp": "2026-03-08T10:00:00.000Z",
+    "requestId": "req-e2e-snapshot-push",
+    "payload": {
+      "tabId": 128,
+      "snapshot": {
+        "page": {
+          "id": "hn-43210000",
+          "url": "https://news.ycombinator.com/item?id=43210000",
+          "title": "Ask HN: WebSocket vs SSE",
+          "kind": "thread",
+          "metadata": {
+            "site": "hacker-news",
+            "locale": "en-US"
+          }
+        },
+        "focus": {
+          "nodeId": "comment-43210091",
+          "node": {
+            "id": "comment-43210091",
+            "kind": "comment",
+            "author": "alice",
+            "text": "WebSocket is better for interruption and bidirectional updates.",
+            "parentId": "comment-43210010",
+            "depth": 1
+          },
+          "region": "comment-tree"
+        },
+        "context": [
+          {
+            "relation": "parent",
+            "distance": 1,
+            "node": {
+              "id": "comment-43210010",
+              "kind": "comment",
+              "author": "bob",
+              "text": "Is SSE enough?",
+              "depth": 0
+            }
+          }
+        ],
+        "meta": {
+          "capturedAt": "2026-03-08T10:00:00.000Z",
+          "skeletonVersion": 12,
+          "extractorId": "generic+hacker-news-enhancer",
+          "coverage": {
+            "kind": "focus-branch",
+            "rootNodeId": "comment-43210010",
+            "capturedNodeCount": 10,
+            "omittedNodeCount": 2,
+            "omittedRootCount": 1
+          }
+        }
+      }
+    }
+  }
+  ```
+
+
+  # User Intent
+  ```
+  {
+    "type": "user.intent",
+    "timestamp": "2026-03-08T10:00:10.000Z",
+    "requestId": "req-e2e-intent-1",
+    "payload": {
+      "text": "이 댓글의 핵심을 설명해줘",
+      "primaryTabId": 128,
+      "boundSnapshotCapturedAt": "2026-03-08T10:00:00.000Z"
+    }
+  }
+  ```
