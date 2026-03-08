@@ -1,0 +1,12 @@
+node_modules
+.pnpm-store
+.git
+.turbo
+local-only-docs
+tmp
+.idea
+.claude
+.codex
+.env
+.env.example
+apps/api/.env
