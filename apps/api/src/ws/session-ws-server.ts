@@ -318,9 +318,6 @@ export function attachSessionWebSocketServer(
         return
       }
 
-      if (envelope.type === "user.intent") {
-        clearAllEnrichTimeouts()
-      }
       if (envelope.type === "interrupt") {
         // 중단 이벤트는 pending enrich 대기 상태를 즉시 폐기해야 한다.
         clearAllEnrichTimeouts()
@@ -338,6 +335,11 @@ export function attachSessionWebSocketServer(
       if (result.status !== 200) {
         ws.send(JSON.stringify(result.body))
         return
+      }
+
+      if (envelope.type === "user.intent") {
+        // user.intent가 런타임 유효성 검증을 통과한 경우에만 기존 enrich timeout을 정리한다.
+        clearAllEnrichTimeouts()
       }
 
       if (envelope.type === "context.enrich.result" && typeof envelope.turnId === "string") {

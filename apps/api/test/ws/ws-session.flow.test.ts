@@ -592,6 +592,87 @@ describe("ws /ws/session flow contract (red)", () => {
     ws.close()
   }, 25000)
 
+  it("keeps timeout fallback armed when malformed user.intent is rejected", async () => {
+    const harness = createCanonicalHarness()
+    const httpServer = harness.server
+    servers.push(httpServer)
+    const port = getPort(httpServer)
+
+    const token = issueToken("google-sub-ws-flow-enrich-invalid-intent")
+
+    const ws = await connectWebSocket(`ws://127.0.0.1:${port}/ws/session?token=${token}`)
+
+    ws.send(
+      JSON.stringify({
+        type: "session.open",
+        requestId: "req-enrich-invalid-intent-open",
+        timestamp: "2026-03-08T00:40:00.000Z",
+        payload: createSessionOpenPayload()
+      })
+    )
+
+    ws.send(
+      JSON.stringify({
+        type: "context.update",
+        requestId: "req-enrich-invalid-intent-context",
+        timestamp: "2026-03-08T00:40:01.000Z",
+        payload: createContextUpdatePayload(128)
+      })
+    )
+
+    ws.send(
+      JSON.stringify({
+        type: "snapshot.push",
+        requestId: "req-enrich-invalid-intent-snapshot",
+        timestamp: "2026-03-08T00:40:02.000Z",
+        payload: {
+          tabId: 128,
+          snapshot: createValidSnapshot("2026-03-08T00:40:02.000Z")
+        }
+      })
+    )
+
+    ws.send(
+      JSON.stringify({
+        type: "user.intent",
+        requestId: "req-enrich-invalid-intent-initial",
+        timestamp: "2026-03-08T00:40:03.000Z",
+        payload: {
+          ...createUserIntentPayload(128, "2026-03-08T00:40:02.000Z"),
+          text: "이 차트 영역을 더 자세히 확인해서 설명해줘."
+        }
+      })
+    )
+
+    await waitForRequiredTypes(ws, ["context.enrich.request"])
+
+    ws.send(
+      JSON.stringify({
+        type: "user.intent",
+        requestId: "req-enrich-invalid-intent-malformed",
+        timestamp: "2026-03-08T00:40:04.000Z",
+        payload: {
+          text: "malformed user intent"
+        }
+      })
+    )
+
+    const recoveryMessages = await waitForRequiredTypes(ws, ["error", "projection", "turn.done"], 12000)
+    const hasInvalidEventError = recoveryMessages.some(
+      (message) =>
+        message.type === "error" &&
+        typeof message.payload === "object" &&
+        message.payload !== null &&
+        (message.payload as { code?: string }).code === "INVALID_EVENT"
+    )
+    const recoveryTypes = recoveryMessages.map((message) => message.type)
+
+    expect(hasInvalidEventError).toBe(true)
+    expect(recoveryTypes).toContain("projection")
+    expect(recoveryTypes).toContain("turn.done")
+    ws.close()
+  }, 25000)
+
   it("preserves error semantics parity between /ws/session and /ws/session/events", async () => {
     const harness = createCanonicalHarness()
     const app = harness.app
