@@ -398,7 +398,8 @@ backend는 current-page reasoning 중 필요한 경우 FE에 추가 컨텍스트
 - 같은 intent category(예: screenshot/detail/region recapture)에 대해 한국어 키워드 집합과 영어 키워드 집합이 모두 정의되어야 한다.
 - 한 언어만 정의된 규칙은 유효 규칙으로 간주하지 않는다.
 - `rule`/`hybrid-simple`/`hybrid-complex` 모두 동일 규칙 사전을 입력으로 사용한다.
-- `ENRICH_TRIGGER_MODE`가 미설정이거나 허용 집합 밖이면 부팅 단계에서 fail-fast 해야 하며, `rule` 기본값으로 묵살하면 안 된다.
+- `ENRICH_TRIGGER_MODE`가 미설정이면 `hybrid-complex`를 기본값으로 사용한다.
+- `ENRICH_TRIGGER_MODE`가 허용 집합 밖이면 부팅 단계에서 fail-fast 해야 한다.
 
 `SemanticSnapshot suspicious` 최소 판단 기준:
 

@@ -654,9 +654,8 @@ function ensureBilingualRuleDictionary(dictionary: Record<string, BilingualKeywo
 function resolveEnrichTriggerMode(rawMode: string | undefined): EnrichTriggerMode {
   const normalized = rawMode?.trim()
   if (!normalized) {
-    throw new Error(
-      `invalid ENRICH_TRIGGER_MODE: missing (allowed: ${ENRICH_TRIGGER_MODES.join(" | ")})`
-    )
+    // 운영 기본값은 hybrid-complex로 두고, 명시 설정이 있을 때만 override한다.
+    return "hybrid-complex"
   }
   if (ENRICH_TRIGGER_MODES.includes(normalized as EnrichTriggerMode)) {
     return normalized as EnrichTriggerMode

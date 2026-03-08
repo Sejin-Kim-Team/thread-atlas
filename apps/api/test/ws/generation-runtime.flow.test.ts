@@ -1,5 +1,5 @@
 import request from "supertest"
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type { Express } from "express"
 import {
   createContextUpdatePayload,
@@ -53,9 +53,20 @@ async function openSession(client: TestClient, token: string) {
 }
 
 describe("ws generation runtime flow", () => {
+  const previousTriggerMode = process.env.ENRICH_TRIGGER_MODE
+
   beforeEach(() => {
     vi.resetModules()
     vi.restoreAllMocks()
+    process.env.ENRICH_TRIGGER_MODE = "rule"
+  })
+
+  afterEach(() => {
+    if (previousTriggerMode === undefined) {
+      delete process.env.ENRICH_TRIGGER_MODE
+    } else {
+      process.env.ENRICH_TRIGGER_MODE = previousTriggerMode
+    }
   })
 
   it("uses generation result instead of placeholder answer", async () => {

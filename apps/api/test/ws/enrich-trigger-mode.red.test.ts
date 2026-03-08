@@ -338,12 +338,13 @@ describe("ws enrich trigger mode redesign contract (red)", () => {
     expect(countAssistCalls()).toBe(0)
   })
 
-  it("fails fast when trigger mode is omitted", () => {
+  it("defaults to hybrid-complex when trigger mode is omitted", () => {
     const original = process.env.ENRICH_TRIGGER_MODE
     delete process.env.ENRICH_TRIGGER_MODE
 
     try {
-      expect(() => new RuntimeManager()).toThrow(/ENRICH_TRIGGER_MODE/)
+      const runtime = new RuntimeManager()
+      expect(runtime).toBeInstanceOf(RuntimeManager)
     } finally {
       if (original === undefined) {
         delete process.env.ENRICH_TRIGGER_MODE

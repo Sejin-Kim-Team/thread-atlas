@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto"
 import { requireEnv } from "../../helpers/env"
 
 export const WS_EVENTS_ENDPOINT = "/ws/session/events"
@@ -15,9 +16,9 @@ export function createEnvelope<TPayload>(
   }
 }
 
-export function createSessionOpenPayload() {
+export function createSessionOpenPayload(clientSessionId = `sidepanel-${randomUUID()}`) {
   return {
-    clientSessionId: "sidepanel-7f3f2c",
+    clientSessionId,
     openedAt: "2026-03-07T14:00:00.000Z",
     capabilities: {
       liveAudio: true,
