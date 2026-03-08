@@ -25,7 +25,7 @@ async function runMigrations(): Promise<void> {
     return
   }
 
-  const client = await getPool().connect()
+  const client = await (await getPool()).connect()
   let lockAcquired = false
   try {
     await client.query("select pg_advisory_lock($1)", [706034321907])

@@ -1,29 +1,60 @@
+import { Connector } from "@google-cloud/cloud-sql-connector"
 import { Pool, type QueryResult, type QueryResultRow } from "pg"
+import { resolveDatabaseConfig } from "./config"
 
-const configuredDatabaseUrl = process.env.DATABASE_URL?.trim()
-if (!configuredDatabaseUrl) {
-  // 보안 경계: 기본 자격정보 대체값 없이 환경변수로만 DB 접속을 허용한다.
-  throw new Error("DATABASE_URL is required")
-}
-const DATABASE_URL: string = configuredDatabaseUrl
+const databaseConfig = resolveDatabaseConfig()
 
 let pool: Pool | null = null
+let poolPromise: Promise<Pool> | null = null
 let ensureMigrationsPromise: Promise<void> | null = null
 let closePoolPromise: Promise<void> | null = null
+let connector: Connector | null = null
 
-function getDatabaseUrl(): string {
-  return DATABASE_URL
+async function createPool(): Promise<Pool> {
+  const config = databaseConfig
+
+  if (config.mode === "database-url") {
+    return new Pool({
+      connectionString: config.databaseUrl
+    })
+  }
+
+  const nextConnector = new Connector()
+  const connectorOptions = await nextConnector.getOptions({
+    instanceConnectionName: config.instanceConnectionName
+  })
+
+  connector = nextConnector
+  return new Pool({
+    ...connectorOptions,
+    user: config.user,
+    password: config.password,
+    database: config.database
+  })
 }
 
-export function getPool(): Pool {
+export async function getPool(): Promise<Pool> {
   if (pool) {
     return pool
   }
 
-  pool = new Pool({
-    connectionString: getDatabaseUrl()
-  })
-  return pool
+  if (!poolPromise) {
+    poolPromise = createPool()
+      .then((createdPool) => {
+        pool = createdPool
+        return createdPool
+      })
+      .catch(async (error) => {
+        poolPromise = null
+        if (connector) {
+          await Promise.resolve(connector.close())
+          connector = null
+        }
+        throw error
+      })
+  }
+
+  return poolPromise
 }
 
 export async function queryDb<T extends QueryResultRow = QueryResultRow>(
@@ -47,11 +78,11 @@ export async function queryDbRaw<T extends QueryResultRow = QueryResultRow>(
   text: string,
   values?: unknown[]
 ): Promise<QueryResult<T>> {
-  return getPool().query<T>(text, values)
+  return (await getPool()).query<T>(text, values)
 }
 
 export async function closePool(): Promise<void> {
-  if (!pool) {
+  if (!pool && !poolPromise && !connector) {
     return
   }
 
@@ -61,9 +92,19 @@ export async function closePool(): Promise<void> {
   }
 
   // 종료 경로에서는 pool.end를 한 번만 호출해 중복 신호에서도 안전하게 정리한다.
-  const target = pool
-  closePoolPromise = target.end().finally(() => {
+  closePoolPromise = (async () => {
+    const target = pool ?? (await poolPromise)
+    if (!target) {
+      return
+    }
+    await target.end()
+    if (connector) {
+      await Promise.resolve(connector.close())
+    }
+  })().finally(() => {
     pool = null
+    poolPromise = null
+    connector = null
     ensureMigrationsPromise = null
     closePoolPromise = null
   })

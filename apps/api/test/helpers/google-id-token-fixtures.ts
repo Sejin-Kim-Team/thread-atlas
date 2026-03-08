@@ -17,9 +17,12 @@ function buildJwtLikeToken(payload: JwtLikePayload): string {
 }
 
 const nowEpochSeconds = Math.floor(Date.now() / 1000)
+export const GOOGLE_ID_TOKEN_FIXTURE_AUDIENCE =
+  "threadatlas-google-client-id.apps.googleusercontent.com"
+
 const baseClaims = {
   iss: "https://accounts.google.com",
-  aud: "threadatlas-google-client-id.apps.googleusercontent.com",
+  aud: GOOGLE_ID_TOKEN_FIXTURE_AUDIENCE,
   email: "spark@example.com",
   email_verified: true,
   name: "Spark",

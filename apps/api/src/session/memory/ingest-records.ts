@@ -151,7 +151,7 @@ function buildCanonicalRetrievalText(record: MemoryRecord): string {
 }
 
 async function withRecordTransaction<T>(fn: (client: PoolClient) => Promise<T>): Promise<T> {
-  const client = await getPool().connect()
+  const client = await (await getPool()).connect()
   try {
     // 메모리 레코드와 임베딩은 단일 원자 단위로 저장한다.
     await client.query("begin")

@@ -256,7 +256,8 @@ export interface GoogleAuthExchangeResponse {
 
 요구사항:
 
-- `DATABASE_URL` 환경변수는 필수다. (auth session store가 PostgreSQL 기반)
+- 로컬 개발 canonical 모드에서는 `DATABASE_URL` 환경변수가 필수다.
+- Cloud Run connector 모드에서는 `CLOUD_SQL_INSTANCE_CONNECTION_NAME`, `DB_NAME`, `DB_USER`가 필수다.
 - `AUTH_BOOTSTRAP_KEY` 환경변수는 필수다.
 - `AUTH_BOOTSTRAP_KEY` 미설정 상태에서는 `dev-bootstrap` grant를 처리하지 않고 `503 SERVICE_UNAVAILABLE`를 반환한다.
 - fallback key 또는 hardcoded dev key는 허용하지 않는다.

@@ -85,8 +85,8 @@ function toAnalysisRunRow(row: AnalysisRunDbRow): AnalysisRunRow {
   }
 }
 
-function resolveQueryable(db?: Queryable): Queryable {
-  return db ?? getPool()
+async function resolveQueryable(db?: Queryable): Promise<Queryable> {
+  return db ?? (await getPool())
 }
 
 export async function insertAnalysisRun(
@@ -94,7 +94,7 @@ export async function insertAnalysisRun(
   db?: Queryable
 ): Promise<Pick<AnalysisRunRow, "id" | "createdAt">> {
   await ensureDatabaseMigrations()
-  const queryable = resolveQueryable(db)
+  const queryable = await resolveQueryable(db)
   const ownerUserId = assertRequiredText(input.ownerUserId, "ownerUserId")
 
   await ensureOwnerUserRow(queryable, ownerUserId)
@@ -131,7 +131,7 @@ export async function listAnalysisRunsByOwner(input: {
   const ownerUserId = assertRequiredText(input.ownerUserId, "ownerUserId")
   const limit = normalizeLimit(input.limit, 8)
   const mode = input.mode ? assertMode(input.mode) : null
-  const listed = await getPool().query<AnalysisRunDbRow>(SELECT_ANALYSIS_RUNS_BY_OWNER_SQL, [
+  const listed = await (await getPool()).query<AnalysisRunDbRow>(SELECT_ANALYSIS_RUNS_BY_OWNER_SQL, [
     ownerUserId,
     mode,
     limit

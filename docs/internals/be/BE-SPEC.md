@@ -168,6 +168,12 @@ v0.1에서 HTTP는 다음 범위로 제한한다.
 - `/health`: process liveness
 - `/ready`: DB readiness(`select 1`) 기반 준비 상태
 
+DB 연결 규칙:
+
+- 로컬 개발의 canonical path는 `DATABASE_URL` direct connection이다
+- Cloud Run 배포의 canonical path는 `@google-cloud/cloud-sql-connector` 기반 connector profile이다
+- 두 프로파일은 동일한 `pg` pool 인터페이스를 공유해야 하며 repository/query 계층 계약을 변경하지 않아야 한다
+
 ### 5.3 Client -> Server Events
 
 client는 최소한 다음 이벤트를 전송해야 한다.

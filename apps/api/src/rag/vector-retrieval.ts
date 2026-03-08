@@ -57,7 +57,7 @@ export async function searchByVector(input: SearchByVectorInput): Promise<Vector
   const pageKind = normalizeText(input.pageKind) as "article" | "thread" | "post" | "generic" | null
   const sourceDomain = normalizeText(input.sourceDomain)
 
-  const result = await getPool().query<VectorSearchDbRow>(SEARCH_BY_VECTOR_SQL, [
+  const result = await (await getPool()).query<VectorSearchDbRow>(SEARCH_BY_VECTOR_SQL, [
     ownerUserId,
     toVectorLiteral(input.queryEmbedding),
     pageKind,

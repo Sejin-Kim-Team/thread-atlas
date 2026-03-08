@@ -48,8 +48,13 @@ function runApiIndex(env: Record<string, string>, timeoutMs: number): Promise<Ch
 
 describe("deploy hardening runtime contract", () => {
   it("returns readiness payload from readiness status helper", async () => {
-    const dbUrl = requireEnv("DATABASE_URL")
-    process.env.DATABASE_URL = dbUrl
+    vi.resetModules()
+    vi.doMock("../../src/db/pool", () => ({
+      queryDbRaw: vi.fn(async () => ({
+        rowCount: 1,
+        rows: [{ ok: true }]
+      }))
+    }))
 
     const { getReadinessStatus } = await import("../../src/server")
     const readiness = await getReadinessStatus()
@@ -81,6 +86,23 @@ describe("deploy hardening runtime contract", () => {
     expect(result.output).toContain("DATABASE_URL")
   })
 
+  it("fails fast with BOOT_CONFIG_ERROR when cloudsql-connector mode misses required env", async () => {
+    const result = await runApiIndex(
+      {
+        PORT: "0",
+        DB_CONNECTION_MODE: "cloudsql-connector",
+        DATABASE_URL: "postgresql://ignored:ignored@localhost:5432/ignored",
+        AUTH_BOOTSTRAP_KEY: "bootstrap-test-key",
+        ENRICH_TRIGGER_MODE: "rule"
+      },
+      4000
+    )
+
+    expect(result.code).toBe(1)
+    expect(result.output).toContain("BOOT_CONFIG_ERROR")
+    expect(result.output).toContain("CLOUD_SQL_INSTANCE_CONNECTION_NAME")
+  })
+
   it("shuts down gracefully on SIGTERM with exit code 0", async () => {
     const close = vi.fn<(callback: (error?: Error | null) => void) => void>((callback) => callback(null))
     const closePool = vi.fn(async () => undefined)
@@ -110,6 +132,11 @@ describe("deploy hardening runtime contract", () => {
   })
 
   it("exposes idempotent closePool cleanup", async () => {
+    vi.doUnmock("../../src/db/pool")
+    vi.resetModules()
+    process.env.DB_CONNECTION_MODE = "database-url"
+    process.env.DATABASE_URL = requireEnv("DATABASE_URL")
+
     const poolModule = (await import("../../src/db/pool")) as {
       closePool?: () => Promise<void>
     }

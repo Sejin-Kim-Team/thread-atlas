@@ -51,6 +51,7 @@ Companion:
 - `@google/genai` + Vertex 기반 current-page answer generation
 - `/api/evaluate` legacy compatibility route 유지 (FE migration 완료 전까지)
 - 운영 엔드포인트 `/health`(liveness), `/ready`(DB readiness) 유지
+- 로컬 direct DB 연결과 Cloud Run용 Cloud SQL Connector 프로파일을 함께 유지
 
 제외:
 
@@ -155,6 +156,22 @@ grounding input 최소 규칙:
 
 - placeholder/stub answer text를 사용자 응답으로 반환하지 않는다
 - 모델 호출 실패 시 fabricated answer를 반환하지 않는다
+
+### 2.5 Database Connection Canonical Rule
+
+해커톤 DB 연결 규칙은 아래로 고정한다.
+
+- 로컬 개발/테스트 canonical path:
+  - `DB_CONNECTION_MODE=database-url`
+  - `DATABASE_URL`
+- Cloud Run 배포 canonical path:
+  - `DB_CONNECTION_MODE=cloudsql-connector`
+  - `@google-cloud/cloud-sql-connector`
+
+부트 규칙:
+
+- `database-url` 모드에서 `DATABASE_URL`이 없으면 `BOOT_CONFIG_ERROR`
+- `cloudsql-connector` 모드에서 필수 env(`CLOUD_SQL_INSTANCE_CONNECTION_NAME`, `DB_NAME`, `DB_USER`)가 없으면 `BOOT_CONFIG_ERROR`
 
 ---
 

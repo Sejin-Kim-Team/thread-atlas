@@ -1,10 +1,11 @@
 import request from "supertest"
-import { describe, expect, it } from "vitest"
+import { afterAll, beforeEach, describe, expect, it } from "vitest"
 import { listAnalysisRunsByOwner } from "../../src/rag/analysis-runs-repository"
 import { createServer } from "../../src/server"
 import { buildAnalyzeRequest } from "../http/helpers/payloads"
 import {
   buildGoogleIdTokenGrantRequest,
+  GOOGLE_ID_TOKEN_FIXTURE_AUDIENCE,
   googleIdTokenFixtures
 } from "../helpers/google-id-token-fixtures"
 import {
@@ -34,6 +35,20 @@ async function issueGoogleAppToken(
 }
 
 describe("google grant token principal parity across HTTP/WS (red)", () => {
+  const previousClientId = process.env.GOOGLE_OAUTH_CLIENT_ID
+
+  beforeEach(() => {
+    process.env.GOOGLE_OAUTH_CLIENT_ID = GOOGLE_ID_TOKEN_FIXTURE_AUDIENCE
+  })
+
+  afterAll(() => {
+    if (previousClientId === undefined) {
+      delete process.env.GOOGLE_OAUTH_CLIENT_ID
+      return
+    }
+    process.env.GOOGLE_OAUTH_CLIENT_ID = previousClientId
+  })
+
   it("treats same google-granted app token as same principal in HTTP and WS paths", async () => {
     const app = createServer()
     const client = request(app)

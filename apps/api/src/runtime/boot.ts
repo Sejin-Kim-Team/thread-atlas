@@ -1,3 +1,5 @@
+import { resolveDatabaseConfig } from "../db/config"
+
 type ShutdownOptions = {
   timeoutMs?: number
   exit?: (code: number) => void
@@ -9,10 +11,7 @@ export class BootConfigError extends Error {
 }
 
 export function validateBootConfig(): void {
-  const databaseUrl = process.env.DATABASE_URL?.trim()
-  if (!databaseUrl) {
-    throw new BootConfigError("DATABASE_URL is required")
-  }
+  resolveDatabaseConfig()
 }
 
 export async function shutdown(

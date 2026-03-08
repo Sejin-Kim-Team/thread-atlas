@@ -1,8 +1,9 @@
 import request from "supertest"
-import { describe, expect, it } from "vitest"
+import { afterAll, beforeEach, describe, expect, it } from "vitest"
 import { createServer } from "../../src/server"
 import {
   buildGoogleIdTokenGrantRequest,
+  GOOGLE_ID_TOKEN_FIXTURE_AUDIENCE,
   googleIdTokenFixtures
 } from "../helpers/google-id-token-fixtures"
 
@@ -10,6 +11,20 @@ const UUID_V4_REGEX =
   /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 
 describe("POST /api/token google-id-token contract (red)", () => {
+  const previousClientId = process.env.GOOGLE_OAUTH_CLIENT_ID
+
+  beforeEach(() => {
+    process.env.GOOGLE_OAUTH_CLIENT_ID = GOOGLE_ID_TOKEN_FIXTURE_AUDIENCE
+  })
+
+  afterAll(() => {
+    if (previousClientId === undefined) {
+      delete process.env.GOOGLE_OAUTH_CLIENT_ID
+      return
+    }
+    process.env.GOOGLE_OAUTH_CLIENT_ID = previousClientId
+  })
+
   it("returns 200 with token/expiresAt/user.id when Google id token verification succeeds", async () => {
     const app = createServer()
     const response = await request(app)

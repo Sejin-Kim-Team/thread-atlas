@@ -48,7 +48,7 @@ function assertProviderSubject(value: unknown): string {
 }
 
 async function withTransaction<T>(fn: (client: PoolClient) => Promise<T>): Promise<T> {
-  const pool = getPool()
+  const pool = await getPool()
   const client = await pool.connect()
   try {
     // 사용자와 아이덴티티 업데이트를 동일 트랜잭션으로 보장한다.
