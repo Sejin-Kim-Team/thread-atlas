@@ -91,7 +91,7 @@ describe("shared SemanticSnapshot acceptance", () => {
 
   it("builds canonical ContextPack with shared scope/groups/omitted fields", () => {
     const snapshot = buildSharedRichSnapshot()
-    const pack = buildCanonicalContextPack(snapshot) as Record<string, unknown>
+    const pack = buildCanonicalContextPack(snapshot) as unknown as Record<string, unknown>
 
     expect(pack.version).toBe(1)
     expect(pack.scope).toBeDefined()
@@ -99,4 +99,3 @@ describe("shared SemanticSnapshot acceptance", () => {
     expect(pack.omitted).toBeDefined()
   })
 })
-

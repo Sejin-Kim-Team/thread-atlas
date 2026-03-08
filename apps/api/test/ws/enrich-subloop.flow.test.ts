@@ -36,13 +36,15 @@ vi.mock("../../src/services/gemini", () => ({
   isModelConfigError: () => false
 }))
 
+type TestClient = ReturnType<typeof request>
+
 interface SessionSetup {
-  client: request.SuperTest<request.Test>
+  client: TestClient
   token: string
   sessionId: string
 }
 
-function createTestClient(): request.SuperTest<request.Test> {
+function createTestClient(): TestClient {
   const runtime = new RuntimeManager()
   const app = express()
   app.use(express.json({ limit: "2mb" }))

@@ -289,7 +289,10 @@ describe("ws current-page turn flow", () => {
         expect(generateTextMock).toHaveBeenCalledTimes(2)
       })
 
-      releaseFirstGeneration?.()
+      const firstGenerationRelease = releaseFirstGeneration as (() => void) | null
+      if (typeof firstGenerationRelease === "function") {
+        firstGenerationRelease()
+      }
 
       const [firstIntent, secondIntent] = await Promise.all([firstIntentPromise, secondIntentPromise])
 

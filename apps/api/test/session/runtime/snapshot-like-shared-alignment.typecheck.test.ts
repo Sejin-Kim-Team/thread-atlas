@@ -5,12 +5,10 @@ type ExpectTrue<T extends true> = T
 
 type HasPageMetadata = "metadata" extends keyof NonNullable<SnapshotLike["page"]> ? true : false
 type HasMetaCoverage = "coverage" extends keyof NonNullable<SnapshotLike["meta"]> ? true : false
-type HasUnionNodeKind =
-  "kind" extends keyof NonNullable<NonNullable<SnapshotLike["focus"]>["node"]> ? true : false
-type HasUnionNodeControlType =
-  "controlType" extends keyof NonNullable<NonNullable<SnapshotLike["focus"]>["node"]>
-    ? true
-    : false
+type FocusNode = NonNullable<NonNullable<SnapshotLike["focus"]>["node"]>
+type InteractiveFocusNode = Extract<FocusNode, { kind?: "interactive" }>
+type HasUnionNodeKind = "kind" extends keyof FocusNode ? true : false
+type HasUnionNodeControlType = "controlType" extends keyof InteractiveFocusNode ? true : false
 type HasVisualSignals = "visualSignals" extends keyof SnapshotLike ? true : false
 type HasVisualSignalsUiSuspicious =
   "uiSuspicious" extends keyof NonNullable<SnapshotLike["visualSignals"]> ? true : false

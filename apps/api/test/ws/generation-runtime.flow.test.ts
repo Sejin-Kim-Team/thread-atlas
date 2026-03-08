@@ -16,7 +16,7 @@ async function createApp(): Promise<Express> {
   return mod.createServer()
 }
 
-async function openSession(client: request.SuperTest<request.Test>, token: string) {
+async function openSession(client: TestClient, token: string) {
   const open = await postWsEventWithAuth(
     client,
     createEnvelope("session.open", createSessionOpenPayload(), { requestId: "req-open-gen-1" }),
@@ -96,7 +96,7 @@ describe("ws generation runtime flow", () => {
 
   it("passes intent text and focus text into generation grounding input", async () => {
     // grounding 최소 입력(의도 + focus text)이 generation 호출 인자로 포함되는지 확인한다.
-    const generateText = vi.fn(async () => "GENAI_ANSWER_WITH_GROUNDING")
+    const generateText = vi.fn(async (_prompt: string) => "GENAI_ANSWER_WITH_GROUNDING")
     vi.doMock("../../src/services/gemini", () => ({
       createGeminiClient: () => ({
         generateText
@@ -126,7 +126,8 @@ describe("ws generation runtime flow", () => {
     )
 
     expect(generateText).toHaveBeenCalledTimes(1)
-    const prompt = String(generateText.mock.calls[0]?.[0] ?? "")
+    const firstCall = generateText.mock.calls.at(0)
+    const prompt = String(firstCall?.[0] ?? "")
     expect(prompt).toContain(intentText)
     expect(prompt).toContain("WebSocket is better for interruption and bidirectional updates.")
   })
@@ -228,3 +229,4 @@ describe("ws generation runtime flow", () => {
     }
   })
 })
+type TestClient = ReturnType<typeof request>

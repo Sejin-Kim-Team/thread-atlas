@@ -49,14 +49,16 @@ vi.mock("../../src/services/gemini", () => ({
 
 type TriggerMode = "rule" | "hybrid-simple" | "hybrid-complex"
 
+type TestClient = ReturnType<typeof request>
+
 interface SessionSetup {
-  client: request.SuperTest<request.Test>
+  client: TestClient
   token: string
   sessionId: string
   capturedAt: string
 }
 
-function createTestClient(mode?: TriggerMode): request.SuperTest<request.Test> {
+function createTestClient(mode?: TriggerMode): TestClient {
   const runtime = new RuntimeManager(mode ? { enrichTriggerMode: mode } : undefined)
   const app = express()
   app.use(express.json({ limit: "2mb" }))

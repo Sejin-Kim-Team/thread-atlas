@@ -56,11 +56,10 @@ function buildSnapshotForContextPack(): SemanticSnapshot {
 describe("shared ContextPack acceptance", () => {
   it("preserves shared scope/groups/omitted shape when building canonical pack", () => {
     const snapshot = buildSnapshotForContextPack()
-    const actual = buildCanonicalContextPack(snapshot) as Record<string, unknown>
+    const actual = buildCanonicalContextPack(snapshot) as unknown as Record<string, unknown>
 
     expect(actual.scope).toBeDefined()
     expect(actual.groups).toBeDefined()
     expect(actual.omitted).toBeDefined()
   })
 })
-
