@@ -8,7 +8,9 @@ Status: Draft
 > Note: 이 문서는 해커톤 이후 업그레이드 타깃까지 포함한 full spec overview에 가깝다.
 > 2026-03-16 제출 기준의 구현 우선순위는 [BE-SPEC-HACKATHON.md](./BE-SPEC-HACKATHON.md)를 먼저 따른다.
 > `feature/be-rag-persistence` 브랜치 구현 범위는 [BE-SPEC-RAG-HACKATHON.md](./BE-SPEC-RAG-HACKATHON.md)의 브랜치 범위/완료 조건을 우선 적용한다.
+> `feature/be-recall-runtime` 브랜치에서는 recall-card projection runtime 연결 규칙을 우선 적용하며, FE 렌더링 합의는 비범위다.
 > 해커톤 RAG embedding canonical path는 `Vertex AI(gemini-embedding-001, output_dimensionality=768)`이며, pseudo embedding 대체는 허용하지 않는다.
+> 해커톤 current-page answer canonical path는 `@google/genai` + Vertex `models.generateContent`이며, stub/placeholder answer 대체는 허용하지 않는다.
 
 Companion:
 - [BE-SPEC-HACKATHON.md](./BE-SPEC-HACKATHON.md)
@@ -142,7 +144,11 @@ backend session의 주인은 `sidepanel`이다.
 
 backend의 canonical evaluation path는 `WebSocket session`이다.
 
+canonical endpoint는 `/ws/session`이다.
+
 `POST /api/evaluate + SSE`는 v0.1 canonical path가 아니다.
+
+`/ws/session/events`는 테스트/디버그용 HTTP ingress adapter로 유지할 수 있지만 canonical path가 아니다.
 
 ### 5.2 Remaining HTTP Surface
 
@@ -186,6 +192,7 @@ server는 최소한 다음 이벤트를 전송해야 한다.
 - `turn.done`은 사용된 provenance와 referenced tabs를 명시해야 한다
 - `interrupt`는 현재 active turn을 중단 가능한 상태로 전이시켜야 한다
 - navigation/projection 관련 실제 UX 실행은 client가 결정하고, backend는 target과 hint를 제안한다
+- WebSocket handshake 인증과 HTTP ingress 인증은 동일 principal 해석 규약을 따라야 한다
 
 ---
 
@@ -237,6 +244,18 @@ primary tab, referenced tabs, shared working set, long-term memory에서 semanti
 
 answer, suggest, clarify와 focus, navigate, present, notify 조합을 결정한다.
 
+### 6.8 Current-Page Answer Generation
+
+current-page answer generation canonical 규칙:
+
+- SDK: `@google/genai`
+- API: `models.generateContent`
+- Vertex 초기화: `GOOGLE_CLOUD_PROJECT` + `GOOGLE_CLOUD_LOCATION`
+- grounding input 최소 구성: `snapshot focus text + user intent text`
+- config 누락 시: 명시적 오류(`MODEL_CONFIG_MISSING`) 또는 conservative fallback
+- 모델 호출 자체 실패 시: 명시적 오류(`GENERATION_FAILED`) 또는 conservative fallback
+- 금지: stub/placeholder answer output
+
 ---
 
 ## 7. Module Responsibilities
@@ -273,6 +292,7 @@ answer, suggest, clarify와 focus, navigate, present, notify 조합을 결정한
 
 - supports / contradicts / elaborates / references / similar 판별
 - LLM reasoner 호출
+- current-page answer generation은 `@google/genai` `models.generateContent` 경로를 사용
 
 ### 7.7 Response / Projection Planner
 
@@ -293,6 +313,7 @@ v0.1의 canonical flow는 `text-first semantic navigation`이다.
 - 최소 long-term memory retrieval
 - relation analysis
 - answer / suggest / clarify + navigation planning
+- current-page answer의 Google GenAI SDK canonical 호출 경로
 
 제외:
 - 완전한 visual retrieval pipeline

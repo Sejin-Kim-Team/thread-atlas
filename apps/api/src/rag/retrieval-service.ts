@@ -23,6 +23,7 @@ export interface RetrievedMemoryCandidate {
   canonicalUrl: string
   pageTitle?: string
   nodeAnchor?: Record<string, unknown>
+  openMode?: "same-tab" | "new-tab" | "sidepanel-preview"
   similarityScore: number
 }
 
@@ -35,6 +36,7 @@ interface RetrievalCandidateDbRow {
   canonical_url: string
   page_title: string | null
   node_anchor: Record<string, unknown> | null
+  open_mode: "same-tab" | "new-tab" | "sidepanel-preview" | null
   source_domain: string
   page_kind: "article" | "thread" | "post" | "generic"
   created_at: Date | string
@@ -93,13 +95,25 @@ export async function retrieveMemoryCandidates(
     queryText,
     "RETRIEVAL_QUERY"
   )
-  const vectorHits = await searchByVector({
+  const vectorSearchInput: {
+    ownerUserId: string
+    queryEmbedding: number[]
+    topK: number
+    pageKind?: "article" | "thread" | "post" | "generic"
+    sourceDomain?: string
+  } = {
     ownerUserId,
     queryEmbedding: queryEmbeddingResult.embedding,
-    topK: vectorTopK,
-    pageKind: pageKind ?? undefined,
-    sourceDomain: sourceDomain ?? undefined
-  })
+    topK: vectorTopK
+  }
+  if (pageKind) {
+    vectorSearchInput.pageKind = pageKind
+  }
+  if (sourceDomain) {
+    vectorSearchInput.sourceDomain = sourceDomain
+  }
+
+  const vectorHits = await searchByVector(vectorSearchInput)
   if (vectorHits.length === 0) {
     return []
   }
@@ -131,6 +145,9 @@ export async function retrieveMemoryCandidates(
     }
     if (row.node_anchor) {
       candidate.nodeAnchor = row.node_anchor
+    }
+    if (row.open_mode) {
+      candidate.openMode = row.open_mode
     }
     return candidate
   })

@@ -18,6 +18,7 @@ interface RuntimeHandleContext {
 }
 
 const MAX_RUNTIME_SESSIONS = 256
+const RECALL_CARD_MIN_SIMILARITY = 0.8
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null
@@ -29,6 +30,14 @@ function asNumber(value: unknown): number | null {
 
 function asString(value: unknown): string | null {
   return typeof value === "string" && value.length > 0 ? value : null
+}
+
+function asStringOrNull(value: unknown): string | null {
+  return typeof value === "string" && value.length > 0 ? value : null
+}
+
+function asFiniteNumber(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null
 }
 
 function invalidEvent(message: string): RuntimeResult {
@@ -66,6 +75,50 @@ function unauthorized(message: string): RuntimeResult {
         code: "UNAUTHORIZED",
         message
       }
+    }
+  }
+}
+
+function modelConfigMissing(message: string): RuntimeResult {
+  return {
+    status: 400,
+    body: {
+      type: "error",
+      payload: {
+        code: "MODEL_CONFIG_MISSING",
+        message
+      }
+    }
+  }
+}
+
+function generationFailed(message: string): RuntimeResult {
+  return {
+    status: 400,
+    body: {
+      type: "error",
+      payload: {
+        code: "GENERATION_FAILED",
+        message
+      }
+    }
+  }
+}
+
+function interruptedTurnBatch(
+  envelope: RuntimeEnvelope,
+  session: RuntimeSession,
+  turnId: string
+): RuntimeResult {
+  return {
+    status: 200,
+    body: {
+      type: "event.batch",
+      requestId: envelope.requestId,
+      sessionId: session.sessionId,
+      turnId,
+      timestamp: makeTimestamp(),
+      events: []
     }
   }
 }
@@ -189,6 +242,60 @@ function makeTimestamp(): string {
   return new Date().toISOString()
 }
 
+function extractSourceDomain(url: string | undefined): string | undefined {
+  const normalized = asStringOrNull(url)
+  if (!normalized) {
+    return undefined
+  }
+  try {
+    return new URL(normalized).hostname
+  } catch {
+    return undefined
+  }
+}
+
+function resolveFocusText(snapshot: SnapshotLike): string {
+  const focusText = asStringOrNull(snapshot.focus?.node?.text)
+  return focusText ?? ""
+}
+
+function buildRecallQueryText(intentText: string, snapshot: SnapshotLike, answerText: string): string {
+  // recall 질의는 intent + focus text + answer 요약을 합쳐 현재 맥락을 최대한 보존한다.
+  return [intentText, resolveFocusText(snapshot), answerText].filter(Boolean).join(" ")
+}
+
+function buildGenerationPrompt(intentText: string, snapshot: SnapshotLike): string {
+  const focusText = resolveFocusText(snapshot)
+  // 현재 페이지 근거를 유지하기 위해 intent와 focus 텍스트를 함께 프롬프트에 포함한다.
+  return [
+    "You are a current-page semantic assistant.",
+    `User intent: ${intentText}`,
+    `Focus text: ${focusText}`,
+    "Return a concise answer grounded in the current page context."
+  ].join("\n")
+}
+
+function selectRecallCandidate(
+  candidates: RuntimeRecallCandidate[],
+  ownerUserId: string
+): RuntimeRecallCandidate | null {
+  for (const candidate of candidates) {
+    const similarityScore = asFiniteNumber(candidate.similarityScore)
+    const isSameOwner = candidate.ownerUserId === ownerUserId
+    if (!isSameOwner) {
+      continue
+    }
+    if (similarityScore === null || similarityScore < RECALL_CARD_MIN_SIMILARITY) {
+      continue
+    }
+    if (!asStringOrNull(candidate.canonicalUrl)) {
+      continue
+    }
+    return candidate
+  }
+  return null
+}
+
 export class RuntimeManager {
   private sessionCounter = 0
   private turnCounter = 0
@@ -196,7 +303,7 @@ export class RuntimeManager {
   private sessionByPrincipalClientId = new Map<string, string>()
   private ownerByClientSessionId = new Map<string, string>()
 
-  handle(raw: unknown, context: RuntimeHandleContext): RuntimeResult {
+  async handle(raw: unknown, context: RuntimeHandleContext): Promise<RuntimeResult> {
     const envelope = validateEnvelope(raw)
     if (!envelope) {
       return invalidEvent("invalid envelope")
@@ -355,7 +462,10 @@ export class RuntimeManager {
     }
   }
 
-  private handleUserIntent(envelope: RuntimeEnvelope, session: RuntimeSession): RuntimeResult {
+  private async handleUserIntent(
+    envelope: RuntimeEnvelope,
+    session: RuntimeSession
+  ): Promise<RuntimeResult> {
     const parsed = parseUserIntentPayload(envelope.payload)
     if (!parsed) {
       return invalidEvent("invalid user.intent payload")
@@ -382,8 +492,29 @@ export class RuntimeManager {
 
     const turnId = this.newTurnId()
     session.activeTurnId = turnId
+    if (!process.env.GOOGLE_CLOUD_PROJECT || !process.env.GOOGLE_CLOUD_LOCATION) {
+      return modelConfigMissing("GOOGLE_CLOUD_PROJECT and GOOGLE_CLOUD_LOCATION are required")
+    }
+    const geminiModule = await import("../../services/gemini")
+    let answerText: string
+    try {
+      const geminiClient = geminiModule.createGeminiClient()
+      answerText = await geminiClient.generateText(buildGenerationPrompt(parsed.text, latest))
+    } catch (error) {
+      if (geminiModule.isModelConfigError(error)) {
+        const message =
+          error instanceof Error ? error.message : "model configuration is missing"
+        return modelConfigMissing(message)
+      }
+      // 모델 호출 실패는 설정 오류와 분리해 전용 코드로 반환한다.
+      return generationFailed("generation failed")
+    }
 
-    const events = [
+    if (session.activeTurnId !== turnId) {
+      return interruptedTurnBatch(envelope, session, turnId)
+    }
+
+    const events: Array<Record<string, unknown>> = [
       {
         type: "progress",
         turnId,
@@ -402,22 +533,95 @@ export class RuntimeManager {
           kind: "present",
           body: {
             type: "answer",
-            text: "current-page answer placeholder",
+            text: answerText,
             responseMode: "answer",
             provenanceSummary: ["current-page"]
           }
         }
-      },
-      {
-        type: "turn.done",
-        turnId,
-        sessionId: session.sessionId,
-        timestamp: makeTimestamp(),
-        payload: {
-          referencedTabIds: [parsed.primaryTabId]
-        }
       }
     ]
+
+    const usedMemoryRecordIds: string[] = []
+
+    try {
+      const { retrieveMemoryCandidates } = await import("../../rag/retrieval-service")
+      const retrievalInput: {
+        ownerUserId: string
+        queryText: string
+        limit: number
+        pageKind?: "article" | "thread" | "post" | "generic"
+        sourceDomain?: string
+      } = {
+        ownerUserId: session.ownerUserId,
+        queryText: buildRecallQueryText(parsed.text, latest, answerText),
+        limit: 2
+      }
+      if (latest.page?.kind) {
+        retrievalInput.pageKind = latest.page.kind
+      }
+      const sourceDomain = extractSourceDomain(latest.page?.url)
+      if (sourceDomain) {
+        retrievalInput.sourceDomain = sourceDomain
+      }
+
+      const recallCandidates = await retrieveMemoryCandidates(retrievalInput)
+      if (session.activeTurnId !== turnId) {
+        return interruptedTurnBatch(envelope, session, turnId)
+      }
+      const selectedRecall = selectRecallCandidate(recallCandidates, session.ownerUserId)
+      if (selectedRecall) {
+        const navigation: Record<string, unknown> = {
+          canonicalUrl: selectedRecall.canonicalUrl
+        }
+        if (selectedRecall.nodeAnchor) {
+          navigation.nodeAnchor = selectedRecall.nodeAnchor
+        }
+        if (selectedRecall.openMode) {
+          navigation.openMode = selectedRecall.openMode
+        }
+
+        events.push({
+          type: "projection",
+          turnId,
+          sessionId: session.sessionId,
+          timestamp: makeTimestamp(),
+          payload: {
+            kind: "present",
+            body: {
+              type: "recall-card",
+              summary: selectedRecall.summary,
+              kind: selectedRecall.kind,
+              similarityScore: selectedRecall.similarityScore,
+              navigation
+            }
+          }
+        })
+        usedMemoryRecordIds.push(selectedRecall.recordId)
+      }
+    } catch {
+      // retrieval 오류는 전체 턴 실패로 전파하지 않고 answer 우선 정책을 유지한다.
+    }
+
+    const turnDonePayload: Record<string, unknown> = {
+      referencedTabIds: [parsed.primaryTabId]
+    }
+    if (usedMemoryRecordIds.length > 0) {
+      turnDonePayload.usedMemoryRecordIds = usedMemoryRecordIds
+    }
+
+    events.push({
+      type: "turn.done",
+      turnId,
+      sessionId: session.sessionId,
+      timestamp: makeTimestamp(),
+      payload: turnDonePayload
+    })
+
+    if (session.activeTurnId !== turnId) {
+      return interruptedTurnBatch(envelope, session, turnId)
+    }
+
+    session.activeTurnId = null
 
     return {
       status: 200,
@@ -456,4 +660,14 @@ export class RuntimeManager {
     this.sessionByPrincipalClientId.delete(`${oldest.ownerUserId}:${oldest.clientSessionId}`)
     this.ownerByClientSessionId.delete(oldest.clientSessionId)
   }
+}
+interface RuntimeRecallCandidate {
+  recordId: string
+  ownerUserId: string
+  summary: string
+  kind: "branch-summary" | "section-summary" | "claim-evidence-summary"
+  canonicalUrl: string
+  nodeAnchor?: Record<string, unknown>
+  openMode?: "same-tab" | "new-tab" | "sidepanel-preview"
+  similarityScore: number
 }

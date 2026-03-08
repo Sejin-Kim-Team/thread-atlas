@@ -258,6 +258,35 @@ describe("ingestMemoryRecords", () => {
     expect(mocks.insertMemoryRecord).not.toHaveBeenCalled()
   })
 
+  it("downgrades duplicate record id conflicts to per-record rejection", async () => {
+    const duplicateError = new Error("duplicate key value violates unique constraint")
+    Object.assign(duplicateError, {
+      code: "23505",
+      constraint: "memory_records_pkey",
+      table: "memory_records"
+    })
+    mocks.insertMemoryRecord
+      .mockResolvedValueOnce({ id: "mem-record-1" })
+      .mockRejectedValueOnce(duplicateError)
+
+    const { ingestMemoryRecords } = await import("../../src/session/memory/ingest-records")
+    const response = await ingestMemoryRecords(
+      {
+        source: "analyze",
+        records: [
+          buildRecord("00000000-0000-4000-8000-000000000120", "mem-record-1"),
+          buildRecord("00000000-0000-4000-8000-000000000120", "mem-record-1")
+        ]
+      },
+      "00000000-0000-4000-8000-000000000120"
+    )
+
+    expect(response.acceptedIds).toEqual(["mem-record-1"])
+    expect(response.rejected).toContainEqual({
+      id: "mem-record-1",
+      reason: "not-storable"
+    })
+  })
 
   it("ensures migrations before acquiring transaction connection", async () => {
     const calls: string[] = []

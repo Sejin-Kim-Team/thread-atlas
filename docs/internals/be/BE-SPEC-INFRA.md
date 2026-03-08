@@ -102,6 +102,8 @@ flowchart TB
 역할:
 
 - WebSocket session gateway
+- canonical WebSocket endpoint `/ws/session`
+- 테스트/디버그용 HTTP ingress adapter `/ws/session/events`
 - `/api/token`
 - `/api/analyze`
 - `/api/ingest/memory`
@@ -119,6 +121,7 @@ v0.1 운영 원칙:
 - session state는 프로세스 메모리에 둔다
 - 인스턴스 재시작 또는 재배치 시 active session 유실 가능성을 감수한다
 - reconnect는 지원하되, 완전한 session recovery는 v0.1 필수가 아니다
+- `/ws/session/events`는 canonical transport가 아니며 FE 실서비스 경로로 사용하지 않는다
 
 ### 5.2 Cloud SQL for PostgreSQL + pgvector
 
@@ -183,7 +186,19 @@ v0.1 운영 원칙:
 - 로컬 개발에서는 `Application Default Credentials (ADC)`를 사용한다
 - GCP 배포에서는 `Cloud Run` 서비스 계정으로 인증한다
 - API key 전용 분기 구현보다 `project + location + ADC/service account` 경로를 canonical로 둔다
+- 제출 기준으로는 Gemini 모델 연동 계층을 `Google GenAI SDK` 또는 `ADK` 기반으로 정렬한다
 - embedding 연동 필수 env는 `GOOGLE_CLOUD_PROJECT`, `GOOGLE_CLOUD_LOCATION`으로 고정한다
+
+해커톤 current-page answer generation canonical 규칙:
+
+- 런타임 SDK는 `@google/genai`를 사용한다
+- 모델 호출은 `models.generateContent`로 고정한다
+- Vertex 초기화는 `project + location` 기반으로만 수행한다
+- current-page grounding input은 최소 `snapshot focus text + intent text`를 포함해야 한다
+- `GOOGLE_CLOUD_PROJECT` 또는 `GOOGLE_CLOUD_LOCATION` 누락 시 명시적 오류(`MODEL_CONFIG_MISSING`)를 반환한다
+- generation 설정은 유효하지만 모델 호출이 실패하면 명시적 오류(`GENERATION_FAILED`)를 반환한다
+- optional conservative fallback 모드가 아니면 모델 비정상 상태에서 답변 생성을 시도하지 않는다
+- placeholder/stub answer output은 금지한다
 
 해커톤 canonical embedding 설정:
 
@@ -297,6 +312,7 @@ v0.1 배포 원칙:
 - backend runtime은 Cloud Run 하나를 중심으로 시작한다
 - DB는 Cloud SQL 단일 primary로 시작한다
 - 모델 호출은 Vertex AI에 위임한다
+- current-page answer path는 `@google/genai` + `models.generateContent`를 사용한다
 - secret은 Secret Manager에서 주입한다
 
 즉, 초기 배포는 다음처럼 이해하면 된다.

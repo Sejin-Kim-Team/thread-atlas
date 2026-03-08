@@ -19,10 +19,15 @@ export interface RuntimeSession {
 }
 
 export interface SnapshotLike {
+  page?: {
+    url?: string
+    kind?: "article" | "thread" | "post" | "generic"
+  }
   focus?: {
     nodeId?: string
     node?: {
       id?: string
+      text?: string
     }
   }
   meta?: {
@@ -52,6 +57,11 @@ export interface UserIntentPayload {
 }
 
 export interface RuntimeErrorPayload {
-  code: "INVALID_EVENT" | "INVALID_SNAPSHOT" | "UNAUTHORIZED"
+  code:
+    | "INVALID_EVENT"
+    | "INVALID_SNAPSHOT"
+    | "UNAUTHORIZED"
+    | "MODEL_CONFIG_MISSING"
+    | "GENERATION_FAILED"
   message: string
 }

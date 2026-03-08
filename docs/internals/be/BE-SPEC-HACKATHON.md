@@ -30,6 +30,11 @@ Companion:
 - 제한적 과거 회상 범위
 - 해커톤 RAG 저장/검색 최소 스키마
 
+추가 제출 조건:
+
+- Gemini 계열 모델 연동은 최종적으로 `Google GenAI SDK` 또는 `ADK`를 사용해야 한다.
+- current-page answer generation canonical path는 `@google/genai` 기반 `models.generateContent`로 고정한다.
+
 ---
 
 ## 2. Canonical Scope
@@ -43,6 +48,7 @@ Companion:
 - current-page scoped enrich request 지원
 - selected-scenario visual explanation 지원
 - 제한적 long-term memory recall
+- `@google/genai` + Vertex 기반 current-page answer generation
 - `/api/evaluate` legacy compatibility route 유지 (FE migration 완료 전까지)
 
 제외:
@@ -54,28 +60,44 @@ Companion:
 주의:
 
 - canonical path는 WebSocket session이다.
+- canonical endpoint는 `/ws/session`이다.
 - 다만 FE migration이 완료되기 전까지 `/api/evaluate`는 legacy compatibility route로 유지한다.
 - `/api/evaluate`는 신규 기능 추가 대상이 아니라, 기존 extension 호출 호환 목적의 유지 경로다.
 
 해커톤 구현 중 코드 구조와 주석 작성은
 [BE-SPEC-IMPLEMENTATION-RULES.md](./BE-SPEC-IMPLEMENTATION-RULES.md)를 필수 계약으로 따른다.
 
-### 2.1 현재 구현 브랜치(`feature/be-rag-persistence`) 범위 고정
+### 2.1 현재 구현 브랜치(`feature/be-recall-runtime`) 범위 고정
 
 본 문서의 해커톤 전체 목표와 별개로, 현재 구현 브랜치의 고정 범위는 아래로 제한한다.
 
-- `memory_records`, `memory_record_embeddings`, `analysis_runs` 스키마 및 인덱스
-- `/api/ingest/memory` 실제 DB write
-- owner-scoped retrieval service 초안
+- `recall-card` runtime/projection 연결 규칙
+- owner-scoped memory retrieval + recall runtime bridge
+- current-page answer generation SDK/Vertex canonical 계약 정렬
 
 현재 브랜치 비범위:
 
-- `recall-card`의 turn runtime/projection 연결
-- real WebSocket transport
-- enrich sub-loop
-- analyze real LLM generation
+- enrich sub-loop 완성
+- multi-tab retrieval orchestration
+- full production prompt tuning
 
 따라서 4장 이후의 WS/event/turn 내용은 `해커톤 최종 목표 계약`이며, 본 브랜치의 완료 판정 기준은 [BE-SPEC-RAG-HACKATHON.md](./BE-SPEC-RAG-HACKATHON.md)의 브랜치 완료 조건을 따른다.
+
+### 2.4 Real WebSocket Transport Scope Clarification
+
+해커톤 다음 구현 범위에서 transport는 아래로 고정한다.
+
+- canonical runtime transport: `/ws/session` (WebSocket)
+- test/debug adapter: `/ws/session/events` (HTTP)
+- 해커톤 절충안으로 인증 전달은 `?token=<opaque-app-session-token>` query를 사용하되, 검증은 반드시 `upgrade` 단계에서 완료해야 한다.
+- `/ws/session` 이외의 upgrade path는 연결 전에 종료해야 한다.
+- `Origin` 검증은 header가 안정적으로 제공되는 환경에서는 적용하되, Chrome extension runtime처럼 강제하기 어려운 환경에서는 release-blocking 필수 조건으로 두지 않는다.
+
+역할 차이:
+
+- `/ws/session`은 FE runtime이 실제로 사용하는 경로다.
+- `/ws/session/events`는 테스트/디버그 ingress이며 canonical이 아니다.
+- 두 경로는 동일 runtime manager/event semantics를 재사용해야 한다.
 
 ### 2.2 RAG Embedding Canonical Path
 
@@ -96,6 +118,38 @@ ingest/retrieval 공통 규칙:
 
 - ingest는 실제 provider embedding을 저장해야 한다
 - retrieval은 실제 provider query embedding을 사용해야 한다
+
+### 2.3 Current-Page Answer Generation Canonical Path
+
+해커톤 current-page answer generation path는 아래로 고정한다.
+
+- SDK: `@google/genai`
+- 호출 API: `models.generateContent`
+- 실행 백엔드: `Vertex AI`
+- 필수 env: `GOOGLE_CLOUD_PROJECT`, `GOOGLE_CLOUD_LOCATION`
+
+초기화 규칙:
+
+- Vertex 초기화는 `project + location` 기반으로만 수행한다
+- 로컬은 ADC, 배포는 Cloud Run service account를 사용한다
+
+grounding input 최소 규칙:
+
+- `SemanticSnapshot`의 `focus text`
+- 현재 turn의 `user intent text`
+- optional: current-page retrieval evidence summary
+
+오류/폴백 규칙:
+
+- `GOOGLE_CLOUD_PROJECT` 또는 `GOOGLE_CLOUD_LOCATION` 누락 시 `MODEL_CONFIG_MISSING` 오류를 명시적으로 반환해야 한다
+- 모델 호출 자체 실패(네트워크/응답 파싱/empty response 포함)는 `GENERATION_FAILED` 오류를 명시적으로 반환해야 한다
+- optional fallback 모드에서는 `clarify` 또는 근거 제한 `answer`를 반환할 수 있다
+- fallback 응답은 retrieval evidence에만 기반해야 하며, 모델 생성 문장처럼 가장하면 안 된다
+
+금지 규칙:
+
+- placeholder/stub answer text를 사용자 응답으로 반환하지 않는다
+- 모델 호출 실패 시 fabricated answer를 반환하지 않는다
 
 ---
 
@@ -173,7 +227,8 @@ ingest/retrieval 공통 규칙:
 - long-term memory record는 모두 해당 principal에 귀속된다
 - `/api/token` 응답은 최소 `token`, `expiresAt(epoch seconds number)`, `user.id`를 반환한다
 - FE legacy 호출 호환을 위해 해커톤 기간에는 `{ userId }` 입력을 임시 허용한다
-- HTTP/WS principal 해석은 `Authorization: Bearer <opaque-app-token>`를 `auth_sessions.session_token_hash`로 조회하는 방식으로 동작해야 한다
+- HTTP principal 해석은 `Authorization: Bearer <opaque-app-token>`를 `auth_sessions.session_token_hash`로 조회하는 방식으로 동작해야 한다
+- WebSocket principal 해석은 `/ws/session?token=<opaque-app-token>`를 `auth_sessions.session_token_hash`로 조회하는 방식으로 동작해야 한다
 - token 검증 실패, revoked/expired session, 또는 session owner principal 불일치 시 `401 UNAUTHORIZED`를 반환한다
 
 ---
@@ -210,6 +265,24 @@ ingest/retrieval 공통 규칙:
 - `state.patch`
 - `context.enrich.request`
 
+### 4.5 WebSocket Connection/Auth Contract
+
+- FE는 `/ws/session` 연결 시 `token` query parameter로 opaque app session token을 전달한다.
+- 서버는 handshake 단계에서 token을 `auth_sessions.session_token_hash` 조회로 검증한다.
+- 검증 실패/만료/revoked session은 `UNAUTHORIZED`로 거부하고 session을 생성하지 않는다.
+- principal이 다른 `clientSessionId` 재사용은 허용하지 않는다.
+- 이벤트 처리 중 principal/session 불일치도 `UNAUTHORIZED`로 처리한다.
+
+### 4.6 Real WebSocket Transport Done Criteria
+
+해커톤 범위에서 real WebSocket transport 완료 조건:
+
+- `/ws/session` handshake 인증이 실제로 동작한다.
+- `session.open -> context.update -> snapshot.push -> user.intent` 흐름이 WebSocket 경로에서 동작한다.
+- `session.ready/progress/projection/turn.done/error`를 push 전달한다.
+- session reuse guard를 WebSocket 경로에도 동일하게 강제한다.
+- `/ws/session/events`는 canonical path가 아닌 테스트/디버그 adapter로 문서/구현이 일치한다.
+
 ---
 
 ## 5. Input Policy
@@ -243,7 +316,7 @@ session.open
 -> current-page retrieval
 -> initial reasoning
 -> optional enrich request / result
--> final reasoning
+-> current-page answer generation (`@google/genai` `models.generateContent`)
 -> optional recall metadata attach
 -> turn.done
 ```
@@ -350,6 +423,8 @@ export type HackathonProjectionBody =
 - `recall-card`는 current-page answer 이후에만 붙을 수 있는 제한적 과거 회상 카드 전달용이다
 - `status-note`는 FE가 보조 상태/메시지를 렌더링할 수 있게 하는 최소 payload다
 - 해커톤 current-page 구현에서는 이 union 외 body type을 사용하지 않는다
+- `answer.text`는 `models.generateContent` 결과 또는 conservative fallback 규칙 결과여야 한다
+- placeholder/stub 문자열은 유효한 `answer.text`로 간주하지 않는다
 
 ### 6.6 Turn State Machine
 
@@ -444,6 +519,22 @@ memory는 해커톤에서 보조 기능이지만, 데모 가능한 범위로 포
 - recall/comparison 중심 multi-step orchestration
 - memory-only answer planning
 
+### 8.6 Recall Runtime Bridge Rules (`feature/be-recall-runtime`)
+
+이번 브랜치에서 고정하는 runtime 규칙:
+
+- `recall-card`는 current-page answer 생성 이후에만 추가 projection으로 붙일 수 있다.
+- recall은 primary answer를 대체할 수 없고, answer precedence를 항상 유지해야 한다.
+- retrieval hit가 없거나 low-confidence면 `recall-card`를 생성하지 않는다.
+- `turn.done`에는 실제로 recall에 사용된 `usedMemoryRecordIds`를 기록해야 한다.
+- `recall-card.navigation`에는 `canonicalUrl`, `nodeAnchor`, `openMode`를 그대로 passthrough 해야 한다.
+- recall 후보는 항상 owner-scoped memory로만 조회한다.
+
+비범위:
+
+- FE 렌더링/레이아웃/클릭 UX 확정
+- `openMode` 실제 실행 정책 결정
+
 ---
 
 ## 9. Planner Simplification
@@ -478,7 +569,7 @@ memory는 해커톤에서 보조 기능이지만, 데모 가능한 범위로 포
 - `enriched-context-merger`
   - enrich result 병합
 - `reasoner`
-  - explanation / summary / visual interpretation
+  - `@google/genai` `models.generateContent` 기반 explanation / summary / visual interpretation
 - `memory-recall`
   - optional past similar case 조회
 - `response-planner`

@@ -332,6 +332,36 @@ describe("POST /api/ingest/memory (persistence red)", () => {
     expect(failedRow.rowCount).toBe(0)
   })
 
+  it("rejects duplicate record ids per record instead of failing the full batch", async () => {
+    const app = createServer()
+    const issued = await issueToken(app, "google-sub-ingest-persistence-kappa")
+    const duplicateId = randomUUID()
+    const firstRecord = buildStorableRecord(issued.userId, duplicateId)
+    const duplicateRecord = buildStorableRecord(issued.userId, duplicateId)
+
+    const response = await request(app)
+      .post("/api/ingest/memory")
+      .set("Authorization", `Bearer ${issued.token}`)
+      .send({
+        source: "analyze",
+        records: [firstRecord, duplicateRecord]
+      })
+
+    expect(response.status).toBe(200)
+    expect(response.body.acceptedIds).toEqual([duplicateId])
+    expect(response.body.rejected).toContainEqual(
+      expect.objectContaining({
+        id: duplicateId,
+        reason: "not-storable"
+      })
+    )
+
+    const writtenRows = await queryDb<{ id: string }>("select id from memory_records where id = $1", [
+      duplicateId
+    ])
+    expect(writtenRows.rowCount).toBe(1)
+  })
+
   it("returns the persisted generated id when request id is blank", async () => {
     const app = createServer()
     const issued = await issueToken(app, "google-sub-ingest-persistence-iota")
