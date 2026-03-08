@@ -192,7 +192,7 @@ describe("ws /ws/session flow contract (red)", () => {
     const messages = await waitForMessages(ws, 4)
     const types = messages.map((message) => message.type)
 
-    expect(types).toContain("session.ready")
+    expect(types[0]).toBe("session.ready")
     expect(types).toContain("progress")
     expect(types).toContain("projection")
     expect(types).toContain("turn.done")

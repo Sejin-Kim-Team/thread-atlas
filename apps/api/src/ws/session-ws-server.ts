@@ -149,16 +149,7 @@ export function attachSessionWebSocketServer(
       sessionId: null
     }
     let pendingInboundCount = 0
-    let deferredSessionReady: Record<string, unknown> | null = null
     let inboundQueue: Promise<void> = Promise.resolve()
-
-    const flushDeferredReady = (): void => {
-      if (pendingInboundCount !== 0 || !deferredSessionReady) {
-        return
-      }
-      ws.send(JSON.stringify(deferredSessionReady))
-      deferredSessionReady = null
-    }
 
     const processInbound = async (chunk: unknown): Promise<void> => {
       const envelope = parseEnvelope(String(chunk))
@@ -197,8 +188,8 @@ export function attachSessionWebSocketServer(
         if (sessionId) {
           context.sessionId = sessionId
         }
-        // 이벤트 순서를 안정화하기 위해 session.ready는 연결 큐 소진 시점에 전송한다.
-        deferredSessionReady = body
+        // lifecycle 보장을 위해 session.ready는 즉시 전송한다.
+        ws.send(JSON.stringify(body))
         return
       }
 
@@ -237,7 +228,6 @@ export function attachSessionWebSocketServer(
         })
         .finally(() => {
           pendingInboundCount -= 1
-          flushDeferredReady()
         })
     })
   })
