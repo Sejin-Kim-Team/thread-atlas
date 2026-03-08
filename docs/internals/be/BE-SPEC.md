@@ -160,7 +160,13 @@ v0.1에서 HTTP는 다음 범위로 제한한다.
 - `/api/token`
 - `/api/analyze`
 - `/api/ingest/memory`
-- `/api/health`
+- `/health`
+- `/ready`
+
+운영 체크 의미:
+
+- `/health`: process liveness
+- `/ready`: DB readiness(`select 1`) 기반 준비 상태
 
 ### 5.3 Client -> Server Events
 

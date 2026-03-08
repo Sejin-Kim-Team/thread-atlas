@@ -107,7 +107,8 @@ flowchart TB
 - `/api/token`
 - `/api/analyze`
 - `/api/ingest/memory`
-- `/api/health`
+- `/health` (liveness)
+- `/ready` (DB readiness)
 
 선정 이유:
 
@@ -122,6 +123,7 @@ v0.1 운영 원칙:
 - 인스턴스 재시작 또는 재배치 시 active session 유실 가능성을 감수한다
 - reconnect는 지원하되, 완전한 session recovery는 v0.1 필수가 아니다
 - `/ws/session/events`는 canonical transport가 아니며 FE 실서비스 경로로 사용하지 않는다
+- 부트 시 필수 env(`DATABASE_URL`) 누락은 `BOOT_CONFIG_ERROR`로 fail-fast 처리한다
 
 ### 5.2 Cloud SQL for PostgreSQL + pgvector
 

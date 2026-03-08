@@ -9,6 +9,7 @@ const DATABASE_URL: string = configuredDatabaseUrl
 
 let pool: Pool | null = null
 let ensureMigrationsPromise: Promise<void> | null = null
+let closePoolPromise: Promise<void> | null = null
 
 function getDatabaseUrl(): string {
   return DATABASE_URL
@@ -47,4 +48,25 @@ export async function queryDbRaw<T extends QueryResultRow = QueryResultRow>(
   values?: unknown[]
 ): Promise<QueryResult<T>> {
   return getPool().query<T>(text, values)
+}
+
+export async function closePool(): Promise<void> {
+  if (!pool) {
+    return
+  }
+
+  if (closePoolPromise) {
+    await closePoolPromise
+    return
+  }
+
+  // 종료 경로에서는 pool.end를 한 번만 호출해 중복 신호에서도 안전하게 정리한다.
+  const target = pool
+  closePoolPromise = target.end().finally(() => {
+    pool = null
+    ensureMigrationsPromise = null
+    closePoolPromise = null
+  })
+
+  await closePoolPromise
 }

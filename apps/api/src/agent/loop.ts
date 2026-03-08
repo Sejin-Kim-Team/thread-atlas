@@ -45,6 +45,8 @@ export async function runAgentLoop(args: {
   conversationContext?: ConversationContext
   sseWriter: SseWriter
 }): Promise<EvaluateDonePayload> {
+  // 이 루프는 `/api/evaluate` legacy SSE 호환을 위한 스텁 경로다.
+  // current-page answer generation, recall, enrich 같은 canonical 기능은 `/ws/session` 런타임에서만 확장한다.
   const { stateSnapshot, conversationContext, sseWriter } = args
 
   const firstResponse = createStubResponseProjection(

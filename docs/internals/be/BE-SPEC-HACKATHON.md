@@ -50,6 +50,7 @@ Companion:
 - 제한적 long-term memory recall
 - `@google/genai` + Vertex 기반 current-page answer generation
 - `/api/evaluate` legacy compatibility route 유지 (FE migration 완료 전까지)
+- 운영 엔드포인트 `/health`(liveness), `/ready`(DB readiness) 유지
 
 제외:
 
