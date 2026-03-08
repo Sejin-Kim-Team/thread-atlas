@@ -1,7 +1,7 @@
 import { createServer as createHttpNodeServer, type Server as HttpServer } from "node:http"
 import express from "express"
 import type { Express } from "express"
-import { queryDbRaw } from "./db/pool"
+import { queryDb } from "./db/pool"
 import analyzeRouter from "./routes/analyze"
 import evaluateRouter from "./routes/evaluate"
 import ingestMemoryRouter from "./routes/ingest-memory"
@@ -48,7 +48,7 @@ export async function getReadinessStatus(): Promise<{
     | { ok: false; code: "NOT_READY"; checks: { db: "down" } }
 }> {
   try {
-    await queryDbRaw("select 1")
+    await queryDb("select 1")
     return {
       status: 200,
       body: {

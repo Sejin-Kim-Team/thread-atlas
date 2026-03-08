@@ -49,8 +49,29 @@ function runApiIndex(env: Record<string, string>, timeoutMs: number): Promise<Ch
 describe("deploy hardening runtime contract", () => {
   it("returns readiness payload from readiness status helper", async () => {
     vi.resetModules()
+    vi.doMock("../../src/routes/analyze", () => ({
+      default: {}
+    }))
+    vi.doMock("../../src/routes/evaluate", () => ({
+      default: {}
+    }))
+    vi.doMock("../../src/routes/ingest-memory", () => ({
+      default: {}
+    }))
+    vi.doMock("../../src/routes/token", () => ({
+      default: {}
+    }))
+    vi.doMock("../../src/routes/ws-session-events", () => ({
+      createWsSessionEventsRouter: vi.fn(() => ({}))
+    }))
+    vi.doMock("../../src/session/runtime/manager", () => ({
+      RuntimeManager: class FakeRuntimeManager {}
+    }))
+    vi.doMock("../../src/ws/session-ws-server", () => ({
+      attachSessionWebSocketServer: vi.fn()
+    }))
     vi.doMock("../../src/db/pool", () => ({
-      queryDbRaw: vi.fn(async () => ({
+      queryDb: vi.fn(async () => ({
         rowCount: 1,
         rows: [{ ok: true }]
       }))
