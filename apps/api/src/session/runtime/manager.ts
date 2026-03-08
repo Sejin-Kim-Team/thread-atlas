@@ -1121,7 +1121,6 @@ export class RuntimeManager {
     }
 
     const turnId = this.newTurnId()
-    const nowMs = Date.now()
     session.activeTurnId = turnId
     session.activeTurn = {
       turnId,
@@ -1136,21 +1135,24 @@ export class RuntimeManager {
     }
 
     const enrichDecision = await this.decideEnrichTrigger(parsed.text, latest)
+
+    const activeTurn = session.activeTurn
+    if (!activeTurn || session.activeTurnId !== turnId || activeTurn.turnId !== turnId) {
+      return invalidEvent("active turn mismatch after enrich decision")
+    }
+
     if (!enrichDecision.ok) {
       this.clearActiveTurn(session)
       return enrichDecision.error
     }
 
     if (enrichDecision.decision.shouldRequestEnrich) {
-      const activeTurn = session.activeTurn
-      if (!activeTurn) {
-        return invalidEvent("active turn is missing")
-      }
       activeTurn.pendingEnrichRequest = {
         requestKind: enrichDecision.decision.requestKind,
         targetRef: buildEnrichTargetRef(latest, enrichDecision.decision.requestKind)
       }
 
+      const nowMs = Date.now()
       activeTurn.status = "waiting-enrich"
       activeTurn.enrichRequestedAtMs = nowMs
       activeTurn.enrichTimeoutAtMs = nowMs + ENRICH_DEFAULT_TIMEOUT_MS

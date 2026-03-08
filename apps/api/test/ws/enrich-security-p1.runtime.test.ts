@@ -444,6 +444,106 @@ describe("ws enrich security P1 contract (red)", () => {
     expect(prompt).not.toContain("onclick")
   })
 
+  it("does not consume enrich timeout budget while waiting for assist decision", async () => {
+    geminiGenerateTextMock.mockImplementation(async (prompt: string) => {
+      if (prompt.includes("ENRICH_TRIGGER_ASSIST")) {
+        await new Promise((resolve) => setTimeout(resolve, 3200))
+        return JSON.stringify({
+          decision: "enrich",
+          requestKind: "visible-region",
+          reason: "slow assist but still should allow full timeout"
+        })
+      }
+      return "GENAI_SLOW_ASSIST_ANSWER"
+    })
+
+    const setup = await prepareSession({ mode: "hybrid-simple" })
+    const intent = await postIntent(setup, "지금 화면에서 추가 확인이 필요한지 판단해줘.", "req-security-slow-assist")
+
+    expect(intent.status).toBe(200)
+    const events = intent.body.events as Array<Record<string, unknown>>
+    const enrichRequest = findEvent(events, "context.enrich.request")
+    const turnId = enrichRequest?.turnId as string | undefined
+    const requestPayload = enrichRequest?.payload as Record<string, unknown> | undefined
+
+    const enrichResult = await postWsEventWithAuth(
+      setup.client,
+      createEnvelope(
+        "context.enrich.result",
+        {
+          requestKind: requestPayload?.requestKind,
+          targetRef: requestPayload?.targetRef,
+          status: "ok",
+          capturedAt: "2026-03-08T11:40:06.500Z",
+          detail: {
+            text: "immediate enrich result after delayed assist"
+          }
+        },
+        {
+          requestId: "req-security-slow-assist-result",
+          sessionId: setup.sessionId,
+          turnId
+        }
+      ),
+      setup.token
+    )
+
+    expect(enrichResult.status).toBe(200)
+    expect(hasEvent(enrichResult.body.events as Array<Record<string, unknown>>, "turn.done")).toBe(true)
+  })
+
+  it("rejects stale enrich request mutation when a newer intent replaced the active turn", async () => {
+    let releaseAssist: (() => void) | null = null
+    const assistBlocked = new Promise<void>((resolve) => {
+      releaseAssist = resolve
+    })
+
+    geminiGenerateTextMock.mockImplementation(async (prompt: string) => {
+      if (prompt.includes("ENRICH_TRIGGER_ASSIST")) {
+        if (prompt.includes("첫 번째")) {
+          await assistBlocked
+          return JSON.stringify({
+            decision: "enrich",
+            requestKind: "visible-region",
+            reason: "stale decision"
+          })
+        }
+        return JSON.stringify({
+          decision: "enrich",
+          requestKind: "visible-region",
+          reason: "latest decision"
+        })
+      }
+      return "GENAI_CONCURRENT_INTENT_ANSWER"
+    })
+
+    const setup = await prepareSession({ mode: "hybrid-simple" })
+
+    const staleIntentPromise = postIntent(
+      setup,
+      "첫 번째 요청: 지금 화면에서 추가 확인이 필요한지 판단해줘.",
+      "req-security-stale-intent"
+    )
+
+    await new Promise((resolve) => setTimeout(resolve, 50))
+
+    const latestIntent = await postIntent(
+      setup,
+      "두 번째 요청: 최신 의도로 추가 확인이 필요한지 판단해줘.",
+      "req-security-latest-intent"
+    )
+
+    expect(latestIntent.status).toBe(200)
+    const latestEvents = latestIntent.body.events as Array<Record<string, unknown>>
+    expect(hasEvent(latestEvents, "context.enrich.request")).toBe(true)
+
+    releaseAssist?.()
+    const staleIntent = await staleIntentPromise
+
+    expect(staleIntent.status).toBe(400)
+    expect(staleIntent.body.payload.code).toBe("INVALID_EVENT")
+  })
+
   it("handles non-json LLM assist response conservatively instead of forcing enrich", async () => {
     geminiGenerateTextMock.mockImplementation(async (prompt: string) => {
       if (prompt.includes("ENRICH_TRIGGER_ASSIST")) {
