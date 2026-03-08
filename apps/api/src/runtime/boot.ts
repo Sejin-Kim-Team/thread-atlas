@@ -1,9 +1,10 @@
 import { resolveDatabaseConfig } from "../db/config"
+import { createLogger, type Logger } from "./logger"
 
 type ShutdownOptions = {
   timeoutMs?: number
   exit?: (code: number) => void
-  logger?: Pick<typeof console, "log" | "error">
+  logger?: Pick<Logger, "info" | "error">
 }
 
 export class BootConfigError extends Error {
@@ -20,11 +21,15 @@ export async function shutdown(
   closePoolFn: () => Promise<void>,
   options: ShutdownOptions = {}
 ): Promise<void> {
-  const logger = options.logger ?? console
+  const logger = options.logger ?? createLogger("runtime/boot")
   const exit = options.exit ?? ((code: number) => process.exit(code))
+  const timeoutMs = options.timeoutMs ?? 15_000
 
   // Cloud Run 종료 시그널 수신 후에는 신규 요청 수락을 중지하고 리소스를 정리한다.
-  logger.log(`received ${signal}, starting graceful shutdown`)
+  logger.info("graceful-shutdown-started", {
+    signal,
+    timeoutMs
+  })
 
   const closeServer = new Promise<void>((resolve, reject) => {
     server.close((error) => {
@@ -36,17 +41,21 @@ export async function shutdown(
     })
   })
 
-  const timeoutMs = options.timeoutMs ?? 15_000
   const withTimeout = new Promise<void>((_, reject) => {
     setTimeout(() => reject(new Error("GRACEFUL_SHUTDOWN_TIMEOUT")), timeoutMs)
   })
 
   try {
     await Promise.race([Promise.all([closeServer, closePoolFn()]).then(() => undefined), withTimeout])
-    logger.log("graceful shutdown complete")
+    logger.info("graceful-shutdown-complete", {
+      signal
+    })
     exit(0)
   } catch (error) {
-    logger.error("graceful shutdown failed", error)
+    logger.error("graceful-shutdown-failed", {
+      signal,
+      error
+    })
     exit(1)
   }
 }

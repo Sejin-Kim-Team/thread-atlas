@@ -124,6 +124,7 @@ v0.1 운영 원칙:
 - reconnect는 지원하되, 완전한 session recovery는 v0.1 필수가 아니다
 - `/ws/session/events`는 canonical transport가 아니며 FE 실서비스 경로로 사용하지 않는다
 - DB 연결 모드별 필수 env 누락은 `BOOT_CONFIG_ERROR`로 fail-fast 처리한다
+- application log는 구조화 JSON line으로 출력하고 Cloud Logging에서 바로 수집 가능한 형식을 유지한다
 
 ### 5.2 Cloud SQL for PostgreSQL + pgvector
 
@@ -288,6 +289,12 @@ v0.1 운영 원칙:
 - `retrievalScope`
 - `memoryLinkDecision`
 - `projectionKind`
+
+구현 원칙:
+
+- application log는 최소 `timestamp`, `level`, `scope`, `event`를 포함해야 한다
+- 가능하면 `userId`, `requestId`, `sessionId`, `turnId`를 함께 남긴다
+- `bearer token`, `google id_token`, `bootstrap key`, prompt 원문 전문은 로그에 남기지 않는다
 
 ---
 

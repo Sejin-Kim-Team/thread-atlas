@@ -5,10 +5,12 @@ import {
   GoogleIdTokenVerifierUnavailableError,
   verifyGoogleIdToken
 } from "../auth/google-id-token-verifier"
+import { createLogger } from "../runtime/logger"
 import { upsertGoogleIdentity } from "../auth/user-identities-repository"
 import { findUserById, upsertUserFromBootstrapSubject } from "../auth/users-repository"
 
 const router: ReturnType<typeof Router> = Router()
+const logger = createLogger("routes/token")
 
 function normalizeText(value: unknown): string | null {
   if (typeof value !== "string") {
@@ -94,7 +96,8 @@ function readProfileFromRequest(body: TokenRequestBody): {
 async function issueSessionResponse(
   req: Parameters<RequestHandler>[0],
   res: Parameters<RequestHandler>[1],
-  user: UserPayload
+  user: UserPayload,
+  grantType: "dev-bootstrap" | "google-id-token"
 ): Promise<void> {
   const issueInput: {
     userId: string
@@ -110,6 +113,11 @@ async function issueSessionResponse(
   }
 
   const issued = await issueAuthSession(issueInput)
+  logger.info("token-issued", {
+    grantType,
+    userId: user.id,
+    clientKind: issueInput.clientKind
+  })
   res.status(200).json({
     token: issued.token,
     expiresAt: issued.expiresAt,
@@ -122,6 +130,9 @@ const handleToken: RequestHandler = async (req, res) => {
   const grantType = normalizeText(body?.grantType)
 
   if (grantType !== "dev-bootstrap" && grantType !== "google-id-token") {
+    logger.warn("token-request-invalid-grant-type", {
+      grantType: normalizeText(body?.grantType) ?? "missing"
+    })
     res.status(400).json({
       code: "INVALID_EVENT",
       message: "unsupported grantType"
@@ -132,6 +143,7 @@ const handleToken: RequestHandler = async (req, res) => {
   if (grantType === "google-id-token") {
     const idToken = normalizeText(body.idToken)
     if (!idToken) {
+      logger.warn("token-request-missing-google-id-token")
       res.status(400).json({
         code: "INVALID_EVENT",
         message: "idToken is required"
@@ -139,6 +151,7 @@ const handleToken: RequestHandler = async (req, res) => {
       return
     }
     try {
+      logger.info("token-request-google-started")
       const verified = await verifyGoogleIdToken(idToken)
       const googleProfile: {
         displayName?: string
@@ -192,10 +205,14 @@ const handleToken: RequestHandler = async (req, res) => {
           displayName: user.displayName,
           primaryEmail: user.primaryEmail,
           avatarUrl: user.avatarUrl
-        })
+        }),
+        "google-id-token"
       )
       return
     } catch (error) {
+      logger.warn("token-request-google-failed", {
+        error
+      })
       if (error instanceof GoogleIdTokenUnauthorizedError) {
         res.status(401).json({
           code: "UNAUTHORIZED",
@@ -220,6 +237,7 @@ const handleToken: RequestHandler = async (req, res) => {
 
   const bootstrapSubject = normalizeText(body.bootstrapSubject)
   if (!bootstrapSubject) {
+    logger.warn("token-request-missing-bootstrap-subject")
     res.status(400).json({
       code: "INVALID_EVENT",
       message: "bootstrapSubject is required"
@@ -230,6 +248,7 @@ const handleToken: RequestHandler = async (req, res) => {
   const configuredBootstrapKey = getConfiguredBootstrapKey()
   if (!configuredBootstrapKey) {
     // 보안 경계: 부트스트랩 키가 없으면 토큰 발급 자체를 중단한다.
+    logger.error("token-request-bootstrap-key-missing")
     res.status(503).json({
       code: "SERVICE_UNAVAILABLE",
       message: "AUTH_BOOTSTRAP_KEY is not configured"
@@ -240,6 +259,9 @@ const handleToken: RequestHandler = async (req, res) => {
   const bootstrapKey = req.header("x-bootstrap-key")
   // 보안 경계: 부트스트랩 키가 다르면 인증 주체 생성을 허용하지 않는다.
   if (!isBootstrapKeyAuthorized(bootstrapKey, configuredBootstrapKey)) {
+    logger.warn("token-request-bootstrap-key-invalid", {
+      bootstrapSubject
+    })
     res.status(403).json({
       code: "FORBIDDEN",
       message: "invalid bootstrap key"
@@ -248,6 +270,9 @@ const handleToken: RequestHandler = async (req, res) => {
   }
 
   try {
+    logger.info("token-request-bootstrap-started", {
+      bootstrapSubject
+    })
     const profile = readProfileFromRequest(body)
     const user = await upsertUserFromBootstrapSubject({
       bootstrapSubject,
@@ -262,9 +287,14 @@ const handleToken: RequestHandler = async (req, res) => {
         displayName: user.displayName,
         primaryEmail: user.primaryEmail,
         avatarUrl: user.avatarUrl
-      })
+      }),
+      "dev-bootstrap"
     )
-  } catch (_error) {
+  } catch (error) {
+    logger.error("token-request-bootstrap-failed", {
+      bootstrapSubject,
+      error
+    })
     res.status(500).json({
       code: "TOKEN_ISSUE_FAILED",
       message: "failed to issue token"

@@ -1,6 +1,7 @@
 import path from "node:path"
 import dotenv from "dotenv"
 import { BootConfigError, shutdown, validateBootConfig } from "./runtime/boot"
+import { createLogger } from "./runtime/logger"
 
 // apps/api 실행은 루트/패키지 경로 어디서 시작해도 동일한 .env를 읽어야 한다.
 dotenv.config({
@@ -8,6 +9,7 @@ dotenv.config({
 })
 
 const port = Number(process.env.PORT ?? 8080)
+const logger = createLogger("index")
 
 let shuttingDown = false
 
@@ -16,11 +18,16 @@ function start(): void {
     validateBootConfig()
   } catch (error) {
     if (error instanceof BootConfigError) {
-      // eslint-disable-next-line no-console
-      console.error(`[${error.code}] ${error.message}`)
+      logger.error("boot-config-invalid", {
+        code: error.code,
+        message: error.message
+      })
       process.exit(1)
       return
     }
+    logger.error("boot-config-unexpected-error", {
+      error
+    })
     throw error
   }
 
@@ -30,8 +37,9 @@ function start(): void {
 
   const app = createServer()
   const server = createHttpServer(app).listen(port, () => {
-    // eslint-disable-next-line no-console
-    console.log(`threadatlas-api listening on :${port}`)
+    logger.info("server-listening", {
+      port
+    })
   })
 
   process.on("SIGTERM", () => {
@@ -39,14 +47,18 @@ function start(): void {
       return
     }
     shuttingDown = true
-    void shutdown(server, "SIGTERM", closePool)
+    void shutdown(server, "SIGTERM", closePool, {
+      logger: createLogger("runtime/boot")
+    })
   })
   process.on("SIGINT", () => {
     if (shuttingDown) {
       return
     }
     shuttingDown = true
-    void shutdown(server, "SIGINT", closePool)
+    void shutdown(server, "SIGINT", closePool, {
+      logger: createLogger("runtime/boot")
+    })
   })
 }
 

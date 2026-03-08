@@ -213,6 +213,42 @@ describe("ws /ws/session handshake contract (red)", () => {
     ws.close()
   })
 
+  it("accepts binary websocket payload that contains valid JSON envelope", async () => {
+    const app = createServer()
+    const httpServer = createHttpServer(app).listen(0)
+    servers.push(httpServer)
+    const port = getPort(httpServer)
+
+    const client = request(app)
+    const tokenResponse = await client
+      .post("/api/token")
+      .set("X-Bootstrap-Key", requireEnv("AUTH_BOOTSTRAP_KEY"))
+      .send({
+        grantType: "dev-bootstrap",
+        bootstrapSubject: "google-sub-ws-binary-alpha"
+      })
+
+    expect(tokenResponse.status).toBe(200)
+    const token = tokenResponse.body.token as string
+
+    const ws = await connectNodeWebSocket(`ws://127.0.0.1:${port}/ws/session?token=${token}`)
+
+    ws.send(
+      Buffer.from(
+        JSON.stringify({
+          type: "session.open",
+          requestId: "req-ws-open-binary-1",
+          timestamp: "2026-03-08T00:00:00.000Z",
+          payload: createSessionOpenPayload()
+        })
+      )
+    )
+
+    const message = await waitForNodeMessage(ws)
+    expect(message.type).toBe("session.ready")
+    ws.close()
+  })
+
   it("rejects invalid token at handshake stage before websocket open", async () => {
     const app = createServer()
     const httpServer = createHttpServer(app).listen(0)
