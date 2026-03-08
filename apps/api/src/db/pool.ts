@@ -21,7 +21,8 @@ async function createPool(): Promise<Pool> {
 
   const nextConnector = new Connector()
   const connectorOptions = await nextConnector.getOptions({
-    instanceConnectionName: config.instanceConnectionName
+    instanceConnectionName: config.instanceConnectionName,
+    authType: config.iamAuthn ? "IAM" : "PASSWORD"
   })
 
   connector = nextConnector
