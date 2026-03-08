@@ -63,12 +63,13 @@ function parseAllowedOrigins(): string[] {
     .filter((origin) => origin.length > 0)
 }
 
-function rejectUpgrade(socket: Socket, statusCode: 400 | 401 | 403 | 404, reason: string): void {
+function rejectUpgrade(socket: Socket, statusCode: 400 | 401 | 403 | 404 | 500, reason: string): void {
   const statusTextByCode: Record<number, string> = {
     400: "Bad Request",
     401: "Unauthorized",
     403: "Forbidden",
-    404: "Not Found"
+    404: "Not Found",
+    500: "Internal Server Error"
   }
   // 보안 경계: handshake 단계에서 실패하면 WebSocket 연결을 성립시키지 않고 즉시 종료한다.
   socket.write(
@@ -242,18 +243,22 @@ export function attachSessionWebSocketServer(
   })
 
   server.on("upgrade", async (req: IncomingMessage, socket: Socket, head: Buffer) => {
-    const authResult = await authenticateUpgradeRequest(req)
-    if (!authResult.ok) {
-      rejectUpgrade(socket, authResult.code, authResult.reason)
-      return
+    try {
+      const authResult = await authenticateUpgradeRequest(req)
+      if (!authResult.ok) {
+        rejectUpgrade(socket, authResult.code, authResult.reason)
+        return
+      }
+
+      // 핸드셰이크를 통과한 연결만 인증 컨텍스트를 주입해 런타임으로 전달한다.
+      const upgradedRequest = req as AuthenticatedUpgradeRequest
+      upgradedRequest.authContext = authResult.context
+
+      wss.handleUpgrade(upgradedRequest, socket, head, (ws) => {
+        wss.emit("connection", ws, upgradedRequest)
+      })
+    } catch {
+      rejectUpgrade(socket, 500, "internal auth error")
     }
-
-    // 핸드셰이크를 통과한 연결만 인증 컨텍스트를 주입해 런타임으로 전달한다.
-    const upgradedRequest = req as AuthenticatedUpgradeRequest
-    upgradedRequest.authContext = authResult.context
-
-    wss.handleUpgrade(upgradedRequest, socket, head, (ws) => {
-      wss.emit("connection", ws, upgradedRequest)
-    })
   })
 }
