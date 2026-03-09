@@ -73,7 +73,7 @@ function toLocalUser(row: {
 }
 
 async function withTransaction<T>(fn: (client: PoolClient) => Promise<T>): Promise<T> {
-  const pool = getPool()
+  const pool = await getPool()
   const client = await pool.connect()
   try {
     // 사용자/아이덴티티 동기화는 원자적으로 처리해야 하므로 트랜잭션으로 묶는다.
@@ -97,7 +97,7 @@ export async function findUserById(userId: string): Promise<LocalUser | null> {
     return null
   }
 
-  const result = await getPool().query<{
+  const result = await (await getPool()).query<{
     id: string
     display_name: string | null
     primary_email: string | null

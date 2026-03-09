@@ -1,7 +1,7 @@
 import request from "supertest"
 import { afterEach, describe, expect, it } from "vitest"
 import { WebSocket as NodeWebSocket } from "ws"
-import { createServer } from "../../src/server"
+import { createHttpServer, createServer } from "../../src/server"
 import { requireEnv } from "../helpers/env"
 import { createSessionOpenPayload } from "./helpers/ws-contract"
 
@@ -180,7 +180,7 @@ describe("ws /ws/session handshake contract (red)", () => {
 
   it("accepts handshake with valid app token and allows first session.open event", async () => {
     const app = createServer()
-    const httpServer = app.listen(0)
+    const httpServer = createHttpServer(app).listen(0)
     servers.push(httpServer)
     const port = getPort(httpServer)
 
@@ -215,7 +215,7 @@ describe("ws /ws/session handshake contract (red)", () => {
 
   it("rejects invalid token at handshake stage before websocket open", async () => {
     const app = createServer()
-    const httpServer = app.listen(0)
+    const httpServer = createHttpServer(app).listen(0)
     servers.push(httpServer)
     const port = getPort(httpServer)
 
@@ -224,7 +224,7 @@ describe("ws /ws/session handshake contract (red)", () => {
 
   it("rejects upgrade for non-target websocket path immediately", async () => {
     const app = createServer()
-    const httpServer = app.listen(0)
+    const httpServer = createHttpServer(app).listen(0)
     servers.push(httpServer)
     const port = getPort(httpServer)
 
@@ -235,7 +235,7 @@ describe("ws /ws/session handshake contract (red)", () => {
     process.env.WS_ALLOWED_ORIGINS = "https://allowed.example"
 
     const app = createServer()
-    const httpServer = app.listen(0)
+    const httpServer = createHttpServer(app).listen(0)
     servers.push(httpServer)
     const port = getPort(httpServer)
 
@@ -260,7 +260,7 @@ describe("ws /ws/session handshake contract (red)", () => {
 
   it("does not require origin header for extension-style websocket clients", async () => {
     const app = createServer()
-    const httpServer = app.listen(0)
+    const httpServer = createHttpServer(app).listen(0)
     servers.push(httpServer)
     const port = getPort(httpServer)
 
@@ -292,7 +292,7 @@ describe("ws /ws/session handshake contract (red)", () => {
 
   it("rejects session reuse when clientSessionId is same but principal differs", async () => {
     const app = createServer()
-    const httpServer = app.listen(0)
+    const httpServer = createHttpServer(app).listen(0)
     servers.push(httpServer)
     const port = getPort(httpServer)
 

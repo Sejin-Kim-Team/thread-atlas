@@ -34,4 +34,13 @@ describe("auth schema migration contract (red)", () => {
     expect(sql).toContain("owner_user_id uuid")
     expect(sql).toMatch(/references\s+users\s*\(id\)/i)
   })
+
+  it("moves legacy bootstrap identities out of google namespace", () => {
+    const sql = readSqlFile("003_auth_identity_provider_bootstrap.sql")
+
+    expect(sql).toContain("provider in ('google', 'bootstrap')")
+    expect(sql).toMatch(/set provider = 'bootstrap'/i)
+    expect(sql).toMatch(/where provider = 'google'/i)
+    expect(sql).toMatch(/raw_claims \? 'bootstrapSubject'/i)
+  })
 })

@@ -121,7 +121,7 @@ export async function retrieveMemoryCandidates(
   const vectorScoreByRecordId = new Map(
     vectorHits.map((hit) => [hit.recordId, hit.similarityScore] as const)
   )
-  const result = await getPool().query<RetrievalCandidateDbRow>(SELECT_RETRIEVAL_CANDIDATE_ROWS_SQL, [
+  const result = await (await getPool()).query<RetrievalCandidateDbRow>(SELECT_RETRIEVAL_CANDIDATE_ROWS_SQL, [
     ownerUserId,
     vectorHits.map((hit) => hit.recordId),
     pageKind,

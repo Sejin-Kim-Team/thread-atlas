@@ -10,7 +10,7 @@ create table if not exists users (
 create table if not exists user_identities (
   id uuid primary key,
   user_id uuid not null references users(id) on delete cascade,
-  provider text not null check (provider in ('google')),
+  provider text not null check (provider in ('google', 'bootstrap')),
   provider_subject text not null,
   email text,
   email_verified boolean,

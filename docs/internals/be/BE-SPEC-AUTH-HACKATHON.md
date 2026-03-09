@@ -195,13 +195,18 @@ create table if not exists auth_sessions (
 
 ## 7. Recommended Token Contract
 
-### 7.1 Google Exchange Request
+### 7.1 Canonical Token Request
 
 ```ts
-export interface GoogleAuthExchangeRequest {
-  provider: "google"
-  idToken: string
-}
+export type TokenRequest =
+  | {
+      grantType: "google-id-token"
+      idToken: string
+    }
+  | {
+      grantType: "dev-bootstrap"
+      bootstrapSubject: string
+    }
 ```
 
 ### 7.2 Google Exchange Response
@@ -230,24 +235,35 @@ export interface GoogleAuthExchangeResponse {
 
 해커톤 구현에서는 Google 검증 연결 전 단계로 `dev-bootstrap` grant를 허용한다.
 
-요청 호환 규칙:
+핵심 원칙:
 
-- 신규 입력:
+- `dev-bootstrap`는 **local/test 전용 전환 경로**다.
+- canonical public auth contract는 `google-id-token`이다.
+- FE가 실사용 경로에서 `{ userId }`만 보내는 방식은 더 이상 canonical contract로 보지 않는다.
+- `{ userId }` 입력은 해커톤 마이그레이션 중 임시 호환에 불과하며, Google OAuth 경로 연결 전후로 제거 대상이다.
+- `dev-bootstrap`로 생성되는 identity는 실제 Google identity namespace와 분리되어야 한다.
+
+요청 규칙:
+
+- canonical Google 입력:
+  - `grantType: "google-id-token"`
+  - `idToken: string`
+- local/test 입력:
   - `grantType: "dev-bootstrap"`
   - `bootstrapSubject: string`
-- legacy compatibility 입력:
-  - `{ userId: string }`
-- 해커톤 기간에는 위 2가지 입력을 모두 허용한다.
-- FE migration 완료 후 legacy compatibility 입력은 제거 대상으로 본다.
+- `{ userId }` 단독 입력은 canonical contract가 아니다.
+- FE는 auth realization 이후 `{ userId }` 단독 입력을 사용하지 않는다.
 
 요구사항:
 
-- `DATABASE_URL` 환경변수는 필수다. (auth session store가 PostgreSQL 기반)
+- 로컬 개발 canonical 모드에서는 `DATABASE_URL` 환경변수가 필수다.
+- Cloud Run connector 모드에서는 `CLOUD_SQL_INSTANCE_CONNECTION_NAME`, `DB_NAME`, `DB_USER`가 필수다.
 - `AUTH_BOOTSTRAP_KEY` 환경변수는 필수다.
 - `AUTH_BOOTSTRAP_KEY` 미설정 상태에서는 `dev-bootstrap` grant를 처리하지 않고 `503 SERVICE_UNAVAILABLE`를 반환한다.
 - fallback key 또는 hardcoded dev key는 허용하지 않는다.
 - bootstrap key mismatch는 `403 FORBIDDEN`를 반환한다.
-- `google-id-token` grant는 verifier 연동 전까지 `501 NOT_IMPLEMENTED`를 반환한다.
+- `google-id-token` grant는 verifier 연동 이후 canonical success path가 된다.
+- `dev-bootstrap` 경로는 운영 경로가 아니라 local/test 경로로만 취급한다.
 
 응답 규칙:
 
@@ -269,6 +285,10 @@ BE는 Google credential을 검증할 때 최소한 아래를 확인해야 한다
 
 - `401 UNAUTHORIZED`
 
+검증/Google 통신 장애 시:
+
+- `503 SERVICE_UNAVAILABLE`
+
 검증 성공 시:
 
 1. `user_identities(provider='google', provider_subject=sub)` lookup
@@ -276,6 +296,12 @@ BE는 Google credential을 검증할 때 최소한 아래를 확인해야 한다
 3. 있으면 `users.last_login_at`, `user_identities.last_login_at` 갱신
 4. `auth_sessions` insert
 5. app session token 발급
+
+`dev-bootstrap` 경로의 identity 저장 규칙:
+
+- `dev-bootstrap`에서 생성되는 identity는 `provider='bootstrap'`와 같은 별도 namespace를 사용해야 한다.
+- `provider='google'` namespace를 점유해서는 안 된다.
+- 따라서 임시 bootstrap subject가 실제 Google `sub` 공간을 선점하지 못해야 한다.
 
 ---
 
@@ -320,3 +346,11 @@ BE는 Google credential을 검증할 때 최소한 아래를 확인해야 한다
 즉 해커톤 canonical auth는 단순 stub token이 아니라,
 **Google verified login + backend-issued session token + DB-backed user/session ownership**
 이다.
+
+---
+
+## 12. Shared Contract Note
+
+- 현재 `packages/shared`의 `TokenRequest { userId }`는 해커톤 canonical auth 계약과 다르다.
+- 이번 auth realization 구현에서는 `packages/shared`를 변경하지 않고, BE route contract를 우선 적용한다.
+- shared 동기화는 사용자 승인 후 별도 작업으로 진행한다.

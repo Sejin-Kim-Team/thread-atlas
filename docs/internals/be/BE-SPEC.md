@@ -9,7 +9,7 @@ Status: Draft
 > 2026-03-16 제출 기준의 구현 우선순위는 [BE-SPEC-HACKATHON.md](./BE-SPEC-HACKATHON.md)를 먼저 따른다.
 > `feature/be-rag-persistence` 브랜치 구현 범위는 [BE-SPEC-RAG-HACKATHON.md](./BE-SPEC-RAG-HACKATHON.md)의 브랜치 범위/완료 조건을 우선 적용한다.
 > `feature/be-enrich-subloop` 브랜치에서는 enrich sub-loop(runtime state transition, request/result, fallback) 연결 규칙과 trigger mode(`rule | hybrid-simple | hybrid-complex`) 정책을 우선 적용한다.
-> `feature/be-enrich-subloop`에서 `requestKind`는 `node-screenshot | visible-region | node-detail`만 허용하며, `page-entity`는 `targetRef`로만 표현한다. `ENRICH_TRIGGER_MODE` 미설정/오설정은 fail-fast 대상이다.
+> `feature/be-enrich-subloop`에서 `requestKind`는 `node-screenshot | visible-region | node-detail`만 허용하며, `page-entity`는 `targetRef`로만 표현한다. `ENRICH_TRIGGER_MODE` 미설정 시 기본값은 `hybrid-complex`이며, 오설정은 fail-fast 대상이다.
 > 해커톤 RAG embedding canonical path는 `Vertex AI(gemini-embedding-001, output_dimensionality=768)`이며, pseudo embedding 대체는 허용하지 않는다.
 > 해커톤 current-page answer canonical path는 `@google/genai` + Vertex `models.generateContent`이며, stub/placeholder answer 대체는 허용하지 않는다.
 
@@ -103,6 +103,8 @@ LLM responsibility:
 - backend는 raw DOM을 reasoning truth로 사용하지 않는다
 - backend는 `SemanticSnapshot`을 canonical input truth로 사용한다
 - `ContextPack`은 snapshot-derived input이며 authoritative source가 아니다
+- 입력 계약 타입은 `@threadatlas/shared`를 canonical source로 사용한다
+- BE는 입력 계약 타입을 자체 축약/재정의하지 않고, 내부 모델은 `NormalizedContextPack`으로 분리한다
 
 ---
 
@@ -158,7 +160,19 @@ v0.1에서 HTTP는 다음 범위로 제한한다.
 - `/api/token`
 - `/api/analyze`
 - `/api/ingest/memory`
-- `/api/health`
+- `/health`
+- `/ready`
+
+운영 체크 의미:
+
+- `/health`: process liveness
+- `/ready`: DB readiness(`select 1`) 기반 준비 상태
+
+DB 연결 규칙:
+
+- 로컬 개발의 canonical path는 `DATABASE_URL` direct connection이다
+- Cloud Run 배포의 canonical path는 `@google-cloud/cloud-sql-connector` 기반 connector profile이다
+- 두 프로파일은 동일한 `pg` pool 인터페이스를 공유해야 하며 repository/query 계층 계약을 변경하지 않아야 한다
 
 ### 5.3 Client -> Server Events
 

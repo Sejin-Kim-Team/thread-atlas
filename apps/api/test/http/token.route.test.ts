@@ -1,12 +1,17 @@
 import request from "supertest"
-import { describe, expect, it } from "vitest"
+import { beforeEach, describe, expect, it } from "vitest"
 import { createServer } from "../../src/server"
 import { requireEnv } from "../helpers/env"
+import { GOOGLE_ID_TOKEN_FIXTURE_AUDIENCE } from "../helpers/google-id-token-fixtures"
 
 describe("POST /api/token", () => {
   const BOOTSTRAP_KEY = requireEnv("AUTH_BOOTSTRAP_KEY")
   const UUID_V4_REGEX =
     /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+
+  beforeEach(() => {
+    process.env.GOOGLE_OAUTH_CLIENT_ID = GOOGLE_ID_TOKEN_FIXTURE_AUDIENCE
+  })
 
   it("issues app session token from dev-bootstrap grant", async () => {
     const app = createServer()
@@ -65,7 +70,7 @@ describe("POST /api/token", () => {
     }
   })
 
-  it("rejects unsupported grantType before oauth integration is implemented", async () => {
+  it("rejects invalid google-id-token grant request with unauthorized", async () => {
     const app = createServer()
     const response = await request(app)
       .post("/api/token")
@@ -75,9 +80,9 @@ describe("POST /api/token", () => {
         idToken: "dummy-token"
       })
 
-    expect(response.status).toBe(501)
+    expect(response.status).toBe(401)
     expect(response.body).toMatchObject({
-      code: "NOT_IMPLEMENTED"
+      code: "UNAUTHORIZED"
     })
   })
 
@@ -129,16 +134,15 @@ describe("POST /api/token", () => {
     })
   })
 
-  it("accepts legacy compatibility payload with userId only", async () => {
+  it("rejects legacy userId-only payload after canonical contract migration", async () => {
     const app = createServer()
     const response = await request(app).post("/api/token").send({
       userId: "user_sungwoo"
     })
 
-    expect(response.status).toBe(200)
-    expect(typeof response.body.token).toBe("string")
-    expect(typeof response.body.expiresAt).toBe("number")
-    expect(typeof response.body.user?.id).toBe("string")
-    expect(response.body.user.id).toMatch(UUID_V4_REGEX)
+    expect(response.status).toBe(400)
+    expect(response.body).toMatchObject({
+      code: "INVALID_EVENT"
+    })
   })
 })

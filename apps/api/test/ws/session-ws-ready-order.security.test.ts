@@ -1,7 +1,7 @@
 import { createServer, type Server } from "node:http"
 import type { AddressInfo } from "node:net"
 import { afterEach, describe, expect, it, vi } from "vitest"
-import { WebSocket as NodeWebSocket } from "ws"
+import { WebSocket as NodeWebSocket, type RawData } from "ws"
 import type { RuntimeManager } from "../../src/session/runtime/manager"
 import { attachSessionWebSocketServer } from "../../src/ws/session-ws-server"
 
@@ -68,7 +68,7 @@ function waitForMessages(ws: NodeWebSocket, count: number, timeoutMs = 2000): Pr
   return new Promise((resolve, reject) => {
     const messages: Array<Record<string, unknown>> = []
 
-    const onMessage = (raw: NodeWebSocket.RawData) => {
+    const onMessage = (raw: RawData) => {
       try {
         const parsed = JSON.parse(String(raw)) as Record<string, unknown>
         messages.push(parsed)

@@ -6,6 +6,8 @@ import { SseWriter } from "../lib/sse"
 const router: ReturnType<typeof Router> = Router()
 
 const handleEvaluate: RequestHandler = async (req, res) => {
+  // FE 마이그레이션이 끝날 때까지 유지하는 legacy 호환 경로다.
+  // 해커톤 canonical runtime 은 `/ws/session`이며, 이 경로에는 신규 기능을 추가하지 않는다.
   const body = req.body as EvaluateRequest
   const writer = new SseWriter(res)
 

@@ -50,6 +50,8 @@ Companion:
 - 제한적 long-term memory recall
 - `@google/genai` + Vertex 기반 current-page answer generation
 - `/api/evaluate` legacy compatibility route 유지 (FE migration 완료 전까지)
+- 운영 엔드포인트 `/health`(liveness), `/ready`(DB readiness) 유지
+- 로컬 direct DB 연결과 Cloud Run용 Cloud SQL Connector 프로파일을 함께 유지
 
 제외:
 
@@ -154,6 +156,22 @@ grounding input 최소 규칙:
 
 - placeholder/stub answer text를 사용자 응답으로 반환하지 않는다
 - 모델 호출 실패 시 fabricated answer를 반환하지 않는다
+
+### 2.5 Database Connection Canonical Rule
+
+해커톤 DB 연결 규칙은 아래로 고정한다.
+
+- 로컬 개발/테스트 canonical path:
+  - `DB_CONNECTION_MODE=database-url`
+  - `DATABASE_URL`
+- Cloud Run 배포 canonical path:
+  - `DB_CONNECTION_MODE=cloudsql-connector`
+  - `@google-cloud/cloud-sql-connector`
+
+부트 규칙:
+
+- `database-url` 모드에서 `DATABASE_URL`이 없으면 `BOOT_CONFIG_ERROR`
+- `cloudsql-connector` 모드에서 필수 env(`CLOUD_SQL_INSTANCE_CONNECTION_NAME`, `DB_NAME`, `DB_USER`)가 없으면 `BOOT_CONFIG_ERROR`
 
 ---
 
@@ -300,16 +318,21 @@ grounding input 최소 규칙:
 - canonical input truth
 - 반드시 required
 - FE local workspace memory에서 파생된 최신 snapshot을 기준으로 한다
+- 타입 계약은 `@threadatlas/shared`의 `SemanticSnapshot`을 그대로 사용한다
+- BE에서 입력 계약을 축약/재정의하지 않는다
 
 ### 5.2 ContextPack
 
 - optional input
 - FE가 보내면 수용 가능
 - backend는 snapshot 기준으로 canonical pack을 재구성 가능해야 함
+- 타입 계약은 `@threadatlas/shared`의 `ContextPack`을 그대로 사용한다
 
 ### 5.3 Planner Input
 
 planner는 raw snapshot이나 FE pack 대신 `NormalizedContextPack`을 사용한다.
+- `NormalizedContextPack`은 planner/reasoner용 BE 내부 모델이며 shared 입력 계약이 아니다.
+- 이번 정렬 작업은 shared 승격이 아니라 BE 구현이 기존 shared 입력 계약에 맞추는 작업이다.
 
 ---
 
@@ -375,7 +398,8 @@ backend는 current-page reasoning 중 필요한 경우 FE에 추가 컨텍스트
 - 같은 intent category(예: screenshot/detail/region recapture)에 대해 한국어 키워드 집합과 영어 키워드 집합이 모두 정의되어야 한다.
 - 한 언어만 정의된 규칙은 유효 규칙으로 간주하지 않는다.
 - `rule`/`hybrid-simple`/`hybrid-complex` 모두 동일 규칙 사전을 입력으로 사용한다.
-- `ENRICH_TRIGGER_MODE`가 미설정이거나 허용 집합 밖이면 부팅 단계에서 fail-fast 해야 하며, `rule` 기본값으로 묵살하면 안 된다.
+- `ENRICH_TRIGGER_MODE`가 미설정이면 `hybrid-complex`를 기본값으로 사용한다.
+- `ENRICH_TRIGGER_MODE`가 허용 집합 밖이면 부팅 단계에서 fail-fast 해야 한다.
 
 `SemanticSnapshot suspicious` 최소 판단 기준:
 

@@ -82,8 +82,8 @@ function toMemoryRecordEmbeddingRow(row: MemoryRecordEmbeddingDbRow): MemoryReco
   }
 }
 
-function resolveQueryable(db?: Queryable): Queryable {
-  return db ?? getPool()
+async function resolveQueryable(db?: Queryable): Promise<Queryable> {
+  return db ?? (await getPool())
 }
 
 export async function upsertMemoryRecordEmbedding(
@@ -93,7 +93,7 @@ export async function upsertMemoryRecordEmbedding(
   await ensureDatabaseMigrations()
   assertEmbeddingVector(input)
 
-  const queryable = resolveQueryable(db)
+  const queryable = await resolveQueryable(db)
   const recordId = assertRequiredText(input.recordId, "recordId")
   const ownerUserId = assertRequiredText(input.ownerUserId, "ownerUserId")
   const embeddingModel = assertRequiredText(input.embeddingModel, "embeddingModel")
@@ -125,7 +125,7 @@ export async function getMemoryRecordEmbeddingByRecordId(
   if (!normalizedRecordId) {
     return null
   }
-  const found = await getPool().query<MemoryRecordEmbeddingDbRow>(
+  const found = await (await getPool()).query<MemoryRecordEmbeddingDbRow>(
     SELECT_MEMORY_RECORD_EMBEDDING_BY_RECORD_ID_SQL,
     [normalizedRecordId]
   )

@@ -6,6 +6,11 @@ export const SELECT_EXISTING_GOOGLE_IDENTITY_SQL = `
   limit 1
 `
 
+// 동일 Google sub 동시 로그인을 직렬화해 unique 충돌을 방지한다.
+export const LOCK_GOOGLE_IDENTITY_SUBJECT_SQL = `
+  select pg_advisory_xact_lock(hashtextextended($1, 0))
+`
+
 // 아이덴티티가 없을 때 연결할 users 레코드를 먼저 생성한다.
 export const INSERT_USER_FOR_GOOGLE_IDENTITY_SQL = `
   insert into users (

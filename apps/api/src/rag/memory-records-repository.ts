@@ -119,8 +119,8 @@ function toMemoryRecordRow(row: MemoryRecordDbRow): MemoryRecordRow {
   return result
 }
 
-function resolveQueryable(db?: Queryable): Queryable {
-  return db ?? getPool()
+async function resolveQueryable(db?: Queryable): Promise<Queryable> {
+  return db ?? (await getPool())
 }
 
 export async function insertMemoryRecord(
@@ -129,7 +129,7 @@ export async function insertMemoryRecord(
 ): Promise<MemoryRecordRow> {
   await ensureDatabaseMigrations()
 
-  const queryable = resolveQueryable(db)
+  const queryable = await resolveQueryable(db)
   const ownerUserId = assertRequiredText(input.ownerUserId, "ownerUserId")
   const kind = assertMemoryRecordKind(input.kind)
   const summary = assertRequiredText(input.summary, "summary")
@@ -190,7 +190,7 @@ export async function getMemoryRecordById(recordId: string): Promise<MemoryRecor
   if (!normalizedRecordId) {
     return null
   }
-  const found = await getPool().query<MemoryRecordDbRow>(SELECT_MEMORY_RECORD_BY_ID_SQL, [normalizedRecordId])
+  const found = await (await getPool()).query<MemoryRecordDbRow>(SELECT_MEMORY_RECORD_BY_ID_SQL, [normalizedRecordId])
   const row = found.rows[0]
   if (!row) {
     return null
@@ -205,7 +205,7 @@ export async function listMemoryRecordsByOwner(input: {
   await ensureDatabaseMigrations()
   const ownerUserId = assertRequiredText(input.ownerUserId, "ownerUserId")
   const limit = normalizeLimit(input.limit, 8)
-  const listed = await getPool().query<MemoryRecordDbRow>(SELECT_MEMORY_RECORDS_BY_OWNER_SQL, [
+  const listed = await (await getPool()).query<MemoryRecordDbRow>(SELECT_MEMORY_RECORDS_BY_OWNER_SQL, [
     ownerUserId,
     limit
   ])
@@ -221,7 +221,7 @@ export async function listMemoryRecordsByOwnerAndKind(input: {
   const ownerUserId = assertRequiredText(input.ownerUserId, "ownerUserId")
   const kind = assertMemoryRecordKind(input.kind)
   const limit = normalizeLimit(input.limit, 8)
-  const listed = await getPool().query<MemoryRecordDbRow>(
+  const listed = await (await getPool()).query<MemoryRecordDbRow>(
     SELECT_MEMORY_RECORDS_BY_OWNER_AND_KIND_SQL,
     [ownerUserId, kind, limit]
   )

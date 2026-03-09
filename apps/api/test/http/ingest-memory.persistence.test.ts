@@ -35,7 +35,47 @@ interface IssuedToken {
   userId: string
 }
 
-function buildStorableRecord(ownerUserId: string, recordId = randomUUID()) {
+interface StorableRecord {
+  id: string
+  ownerUserId: string
+  kind: string
+  summary: string
+  keywords: string[]
+  entities: string[]
+  provenance: {
+    sourceUrl: string
+    pageKind: string
+    snapshotCapturedAt: string
+    extractorId: string
+    skeletonVersion: number
+  }
+  source: {
+    pageId: string
+    rootNodeIds: string[]
+    unitId: string
+  }
+  navigation: {
+    canonicalUrl: string
+    pageTitle: string
+    nodeAnchor: {
+      commentId: string
+      textQuote: string
+    }
+    openMode: string
+  }
+  evidence: {
+    textSpans: string[]
+    referencedNodeIds: string[]
+  }
+  createdAt: string
+  visual?: {
+    kind: string
+    summaryText: string
+    extractedLabels: string[]
+  }
+}
+
+function buildStorableRecord(ownerUserId: string, recordId: string = randomUUID()): StorableRecord {
   return {
     id: recordId,
     ownerUserId,
@@ -201,12 +241,14 @@ describe("POST /api/ingest/memory (persistence red)", () => {
   it("rejects visual-only record", async () => {
     const app = createServer()
     const issued = await issueToken(app, "google-sub-ingest-persistence-gamma")
-    const visualOnly = buildStorableRecord(issued.userId)
-    visualOnly.summary = ""
-    visualOnly.visual = {
-      kind: "chart-summary",
-      summaryText: "line chart shows rising trend",
-      extractedLabels: ["Q1", "Q2"]
+    const visualOnly: StorableRecord = {
+      ...buildStorableRecord(issued.userId),
+      summary: "",
+      visual: {
+        kind: "chart-summary",
+        summaryText: "line chart shows rising trend",
+        extractedLabels: ["Q1", "Q2"]
+      }
     }
 
     const response = await request(app)
@@ -230,7 +272,7 @@ describe("POST /api/ingest/memory (persistence red)", () => {
   it("rejects record with incomplete provenance", async () => {
     const app = createServer()
     const issued = await issueToken(app, "google-sub-ingest-persistence-delta")
-    const missingProvenance = buildStorableRecord(issued.userId) as Record<string, unknown>
+    const missingProvenance = buildStorableRecord(issued.userId) as unknown as Record<string, unknown>
     delete missingProvenance.provenance
 
     const response = await request(app)

@@ -107,7 +107,8 @@ flowchart TB
 - `/api/token`
 - `/api/analyze`
 - `/api/ingest/memory`
-- `/api/health`
+- `/health` (liveness)
+- `/ready` (DB readiness)
 
 선정 이유:
 
@@ -122,6 +123,7 @@ v0.1 운영 원칙:
 - 인스턴스 재시작 또는 재배치 시 active session 유실 가능성을 감수한다
 - reconnect는 지원하되, 완전한 session recovery는 v0.1 필수가 아니다
 - `/ws/session/events`는 canonical transport가 아니며 FE 실서비스 경로로 사용하지 않는다
+- DB 연결 모드별 필수 env 누락은 `BOOT_CONFIG_ERROR`로 fail-fast 처리한다
 
 ### 5.2 Cloud SQL for PostgreSQL + pgvector
 
@@ -144,6 +146,56 @@ v0.1 운영 원칙:
 - `Cloud SQL for PostgreSQL`은 RAG persistence를 위해 필수다
 - `pgvector`는 해커톤 RAG를 실제 semantic recall로 동작시키기 위한 필수 확장이다
 - canonical 테이블과 retrieval 규칙은 [BE-SPEC-RAG-HACKATHON.md](./BE-SPEC-RAG-HACKATHON.md)를 따른다
+- 로컬 개발의 canonical 연결 경로는 `DATABASE_URL` 기반 direct connection이다
+- Cloud Run 배포의 canonical 연결 경로는 `@google-cloud/cloud-sql-connector` 기반 connector profile이다
+
+### 5.2.1 Connection Modes
+
+해커톤 DB 연결은 아래 두 모드로 고정한다.
+
+#### A. `database-url`
+
+용도:
+
+- 로컬 개발
+- 로컬 테스트
+- 수동 검증
+
+필수 env:
+
+- `DB_CONNECTION_MODE=database-url` 또는 미설정
+- `DATABASE_URL`
+
+규칙:
+
+- `DATABASE_URL` 누락 시 부트는 `BOOT_CONFIG_ERROR`로 즉시 실패해야 한다
+- 로컬 개발의 canonical 경로는 이 모드다
+
+#### B. `cloudsql-connector`
+
+용도:
+
+- Cloud Run 배포
+- Cloud SQL 연결 설정을 사용하는 런타임
+
+필수 env:
+
+- `DB_CONNECTION_MODE=cloudsql-connector`
+- `CLOUD_SQL_INSTANCE_CONNECTION_NAME`
+- `DB_NAME`
+- `DB_USER`
+
+조건부 env:
+
+- `DB_PASSWORD` (`DB_IAM_AUTHN`을 사용하지 않는 경우)
+- `DB_IAM_AUTHN=true|false`
+
+규칙:
+
+- Cloud Run 배포의 canonical 경로는 이 모드다
+- connector 모드에서 필수 env 누락 시 부트는 `BOOT_CONFIG_ERROR`로 즉시 실패해야 한다
+- connector는 `pg`를 대체하지 않고 `pg` 연결 옵션을 생성하는 인프라 어댑터로 사용한다
+- connector 모드에서도 query/migration/repository 계층은 동일한 `pg` pool 인터페이스를 사용해야 한다
 
 권장 저장 대상:
 

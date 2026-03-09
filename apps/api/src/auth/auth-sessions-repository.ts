@@ -85,7 +85,7 @@ export async function issueAuthSession(
   const sessionTokenHash = hashSessionToken(token)
   const sessionId = randomUUID()
 
-  const pool = getPool()
+  const pool = await getPool()
   // 세션 발급 전 사용자 로그인 시각을 갱신해 소유권 추적 기준을 유지한다.
   await pool.query(UPSERT_USER_LAST_LOGIN_SQL, [userId])
 
@@ -119,7 +119,7 @@ export async function resolveAuthSession(token: string): Promise<ResolveAuthSess
   }
 
   const sessionTokenHash = hashSessionToken(normalizedToken)
-  const pool = getPool()
+  const pool = await getPool()
   const result = await pool.query<{
     id: string
     user_id: string
@@ -159,5 +159,5 @@ export async function revokeAuthSession(sessionId: string): Promise<void> {
   }
 
   // 세션 폐기는 복구 불가한 보안 상태 전이이므로 폐기 시각만 갱신한다.
-  await getPool().query(REVOKE_AUTH_SESSION_SQL, [normalizedSessionId])
+  await (await getPool()).query(REVOKE_AUTH_SESSION_SQL, [normalizedSessionId])
 }
