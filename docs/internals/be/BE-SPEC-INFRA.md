@@ -51,6 +51,23 @@ v0.1 canonical infra stack은 다음으로 고정한다.
 
 이 외의 GCP 서비스는 v0.1 필수가 아니다.
 
+### 3.1 Canonical Region
+
+v0.1의 canonical Google Cloud region은 `us-central1`로 고정한다.
+
+원칙:
+
+- `Cloud Run` 배포 region은 `us-central1`을 사용한다
+- `Vertex AI` location은 `GOOGLE_CLOUD_LOCATION=us-central1`로 고정한다
+- `Artifact Registry` 저장소도 `us-central1` 기준으로 맞춘다
+- `Cloud SQL` 인스턴스도 가능하면 동일 region에 둬서 cross-region latency를 피한다
+
+선정 이유:
+
+- 현재 사용 중인 Vertex AI 기능 호환성과 운영 단순성을 우선한다
+- Cloud Run, Vertex AI, Cloud SQL 간 cross-region hop을 줄여 tail latency와 네트워크 비용을 낮춘다
+- 지역별 지원 편차 때문에 deployment/runtime 설정이 분기되는 것을 피한다
+
 ---
 
 ## 4. Reference Architecture

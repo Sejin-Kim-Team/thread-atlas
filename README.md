@@ -45,6 +45,10 @@ Default base URL: `http://localhost:8080`
 pnpm extension:build
 ```
 
+## Deployment
+
+- Cloud Run 배포 가이드: [docs/cloud-run-deployment-guide.md](/Users/spark/workspace/thread-atlas/docs/cloud-run-deployment-guide.md)
+
 Load unpacked extension from:
 
 `apps/extension/dist`

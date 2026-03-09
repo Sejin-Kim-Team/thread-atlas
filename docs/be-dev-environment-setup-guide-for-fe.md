@@ -22,6 +22,7 @@
 선택:
 
 - Google OAuth / Vertex AI 기능까지 함께 검증하려면 아래 환경변수 준비
+- canonical GCP region은 `us-central1` 기준이다
 
 ```bash
 export GOOGLE_CLOUD_PROJECT=threadatlas
@@ -145,7 +146,9 @@ docker compose down -v
 ## 8. 주의사항
 
 - 이 compose는 **로컬 개발 편의용**이다.
+- canonical cloud 배포 region은 `us-central1`이다.
 - Cloud Run 배포 시에는 Cloud SQL Connector 기반 경로를 사용한다.
+- Cloud Run, Vertex AI, Cloud SQL은 가능하면 모두 `us-central1`에 맞춰 운영한다.
 - Compose의 API 서비스는 `DATABASE_URL` direct connection 모드로 동작한다.
 - Vertex AI / Google OAuth를 실제로 검증하려면 호스트 환경의 인증과 client id 설정이 필요하다.
 - 로컬 Node로 API를 직접 띄우는 경로가 필요하다면 별도 오버라이드 compose 또는 `apps/api/.env` 기반 실행을 사용한다.
