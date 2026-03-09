@@ -1,8 +1,9 @@
 import type { IncomingMessage } from "node:http"
 import type { Socket } from "node:net"
 import { WebSocketServer } from "ws"
-import type { WebSocket } from "ws"
+import type { RawData, WebSocket } from "ws"
 import { resolveAuthSession } from "../auth/auth-sessions-repository"
+import { createLogger } from "../runtime/logger"
 import { RuntimeManager } from "../session/runtime/manager"
 
 interface SocketContext {
@@ -23,6 +24,8 @@ interface PendingEnrichBinding {
   targetRef: Record<string, unknown>
 }
 
+const logger = createLogger("ws/session")
+
 function sendUnauthorized(ws: WebSocket, message: string): void {
   ws.send(
     JSON.stringify({
@@ -39,9 +42,34 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null
 }
 
-function parseEnvelope(raw: string): Record<string, unknown> | null {
+function rawDataToText(raw: RawData): string | null {
+  if (typeof raw === "string") {
+    return raw
+  }
+
+  if (Buffer.isBuffer(raw)) {
+    return raw.toString("utf8")
+  }
+
+  if (raw instanceof ArrayBuffer) {
+    return Buffer.from(raw).toString("utf8")
+  }
+
+  if (Array.isArray(raw)) {
+    return Buffer.concat(raw).toString("utf8")
+  }
+
+  return null
+}
+
+function parseEnvelope(raw: RawData): Record<string, unknown> | null {
+  const text = rawDataToText(raw)
+  if (!text) {
+    return null
+  }
+
   try {
-    const parsed = JSON.parse(raw) as unknown
+    const parsed = JSON.parse(text) as unknown
     return isRecord(parsed) ? parsed : null
   } catch {
     return null
@@ -144,10 +172,14 @@ export function attachSessionWebSocketServer(
     const principalUserId = (req as AuthenticatedUpgradeRequest).authContext?.principalUserId ?? null
 
     if (!principalUserId) {
+      logger.warn("ws-connection-missing-auth-context")
       sendUnauthorized(ws, "missing authenticated websocket context")
       ws.close()
       return
     }
+    logger.info("ws-connection-opened", {
+      principalUserId
+    })
 
     const context: SocketContext = {
       principalUserId,
@@ -186,6 +218,11 @@ export function attachSessionWebSocketServer(
 
     const emitRuntimeBody = (body: Record<string, unknown>): void => {
       const bodyType = isRecord(body) && typeof body.type === "string" ? body.type : ""
+      logger.debug("ws-outbound-runtime-body", {
+        principalUserId: context.principalUserId,
+        sessionId: context.sessionId,
+        type: bodyType || "unknown"
+      })
       if (bodyType !== "session.ready" && deferredSessionReady) {
         // canonical WS flow 가시성: deferred session.ready가 후속 이벤트 배치 뒤로 밀리지 않게 선전송한다.
         flushDeferredReady(true)
@@ -274,6 +311,11 @@ export function attachSessionWebSocketServer(
                   emitRuntimeBody(timeoutResult.body)
                 })
                 .catch(() => {
+                  logger.error("ws-enrich-timeout-fallback-failed", {
+                    principalUserId: context.principalUserId,
+                    sessionId: context.sessionId,
+                    turnId: eventTurnId
+                  })
                   ws.send(
                     JSON.stringify({
                       type: "error",
@@ -303,9 +345,13 @@ export function attachSessionWebSocketServer(
 
       ws.send(JSON.stringify(body))
     }
-    const processInbound = async (chunk: unknown): Promise<void> => {
-      const envelope = parseEnvelope(String(chunk))
+    const processInbound = async (chunk: RawData): Promise<void> => {
+      const envelope = parseEnvelope(chunk)
       if (!envelope) {
+        logger.warn("ws-invalid-envelope", {
+          principalUserId: context.principalUserId,
+          sessionId: context.sessionId
+        })
         ws.send(
           JSON.stringify({
             type: "error",
@@ -317,6 +363,13 @@ export function attachSessionWebSocketServer(
         )
         return
       }
+      logger.debug("ws-inbound-envelope", {
+        principalUserId: context.principalUserId,
+        sessionId: context.sessionId,
+        type: envelope.type,
+        requestId: typeof envelope.requestId === "string" ? envelope.requestId : null,
+        turnId: typeof envelope.turnId === "string" ? envelope.turnId : null
+      })
 
       if (envelope.type === "interrupt") {
         // 중단 이벤트는 pending enrich 대기 상태를 즉시 폐기해야 한다.
@@ -333,6 +386,12 @@ export function attachSessionWebSocketServer(
       })
 
       if (result.status !== 200) {
+        logger.warn("ws-runtime-rejected-envelope", {
+          principalUserId: context.principalUserId,
+          sessionId: context.sessionId,
+          type: envelope.type,
+          status: result.status
+        })
         ws.send(JSON.stringify(result.body))
         return
       }
@@ -355,7 +414,12 @@ export function attachSessionWebSocketServer(
         .then(async () => {
           await processInbound(chunk)
         })
-        .catch(() => {
+        .catch((error) => {
+          logger.error("ws-message-handling-failed", {
+            principalUserId: context.principalUserId,
+            sessionId: context.sessionId,
+            error
+          })
           ws.send(
             JSON.stringify({
               type: "error",
@@ -373,6 +437,10 @@ export function attachSessionWebSocketServer(
     })
 
     ws.on("close", () => {
+      logger.info("ws-connection-closed", {
+        principalUserId: context.principalUserId,
+        sessionId: context.sessionId
+      })
       clearAllEnrichTimeouts()
     })
   })
@@ -381,6 +449,11 @@ export function attachSessionWebSocketServer(
     try {
       const authResult = await authenticateUpgradeRequest(req)
       if (!authResult.ok) {
+        logger.warn("ws-upgrade-rejected", {
+          code: authResult.code,
+          reason: authResult.reason,
+          path: parseRequestUrl(req)?.pathname ?? "unknown"
+        })
         rejectUpgrade(socket, authResult.code, authResult.reason)
         return
       }
@@ -388,11 +461,17 @@ export function attachSessionWebSocketServer(
       // 핸드셰이크를 통과한 연결만 인증 컨텍스트를 주입해 런타임으로 전달한다.
       const upgradedRequest = req as AuthenticatedUpgradeRequest
       upgradedRequest.authContext = authResult.context
+      logger.info("ws-upgrade-accepted", {
+        principalUserId: authResult.context.principalUserId
+      })
 
       wss.handleUpgrade(upgradedRequest, socket, head, (ws) => {
         wss.emit("connection", ws, upgradedRequest)
       })
-    } catch {
+    } catch (error) {
+      logger.error("ws-upgrade-auth-error", {
+        error
+      })
       rejectUpgrade(socket, 500, "internal auth error")
     }
   })

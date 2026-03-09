@@ -1,0 +1,45 @@
+info:
+  name: analyze
+  type: http
+  seq: 3
+
+http:
+  method: POST
+  url: "{{serverUrl}}/api/analyze"
+  body:
+    type: json
+    data: |-
+      {
+        "tabId": 101,
+        "mode": "seed",
+        "snapshot": {
+          "page": {
+            "id": "doc-1",
+            "url": "https://example.com/article",
+            "title": "Example",
+            "kind": "article"
+          },
+          "focus": {
+            "nodeId": "node-1",
+            "node": {
+              "id": "node-1",
+              "kind": "content",
+              "text": "WebSocket is better for interruption."
+            },
+            "region": "section"
+          },
+          "context": [],
+          "meta": {
+            "capturedAt": "2026-03-08T10:00:00.000Z",
+            "skeletonVersion": 1,
+            "extractorId": "generic"
+          }
+        }
+      }
+  auth: inherit
+
+settings:
+  encodeUrl: true
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5

@@ -1,0 +1,40 @@
+services:
+  db:
+    image: pgvector/pgvector:pg17
+    container_name: threadatlas-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: thread-atlas
+      POSTGRES_USER: testuser
+      POSTGRES_PASSWORD: test1234
+    volumes:
+      - threadatlas-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U testuser -d thread-atlas"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    container_name: threadatlas-api
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://testuser:test1234@db:5432/thread-atlas
+      AUTH_BOOTSTRAP_KEY: ${AUTH_BOOTSTRAP_KEY:-threadatlas-dev-bootstrap-2026-7Xq9Lr2Vm!K8pS4}
+      DB_CONNECTION_MODE: database-url
+      ENRICH_TRIGGER_MODE: ${ENRICH_TRIGGER_MODE:-hybrid-complex}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      GOOGLE_CLOUD_PROJECT: ${GOOGLE_CLOUD_PROJECT:-}
+      GOOGLE_CLOUD_LOCATION: ${GOOGLE_CLOUD_LOCATION:-us-central1}
+      GOOGLE_OAUTH_CLIENT_ID: ${GOOGLE_OAUTH_CLIENT_ID:-}
+    ports:
+      - "${THREADATLAS_API_PORT:-8080}:8080"
+
+volumes:
+  threadatlas-db-data:

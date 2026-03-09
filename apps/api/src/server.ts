@@ -6,6 +6,7 @@ import analyzeRouter from "./routes/analyze"
 import evaluateRouter from "./routes/evaluate"
 import ingestMemoryRouter from "./routes/ingest-memory"
 import tokenRouter from "./routes/token"
+import { createLogger } from "./runtime/logger"
 import { createWsSessionEventsRouter } from "./routes/ws-session-events"
 import { RuntimeManager } from "./session/runtime/manager"
 import { attachSessionWebSocketServer } from "./ws/session-ws-server"
@@ -19,6 +20,7 @@ type RuntimeBoundExpress = Express & {
 export function createServer(): Express {
   const app = express()
   const runtime = new RuntimeManager()
+  const logger = createLogger("server")
   ;(app as RuntimeBoundExpress).locals.runtimeManager = runtime
   app.use(express.json({ limit: "2mb" }))
 
@@ -28,6 +30,12 @@ export function createServer(): Express {
 
   app.get("/ready", async (_req, res) => {
     const readiness = await getReadinessStatus()
+    if (readiness.status !== 200) {
+      logger.warn("readiness-check-failed", {
+        status: readiness.status,
+        checks: readiness.body.checks
+      })
+    }
     res.status(readiness.status).json(readiness.body)
   })
 

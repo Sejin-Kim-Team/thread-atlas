@@ -1,4 +1,5 @@
 import { GoogleAuth } from "google-auth-library"
+import { createLogger } from "../runtime/logger"
 
 export const CANONICAL_VERTEX_EMBEDDING_MODEL = "gemini-embedding-001"
 export const CANONICAL_VERTEX_EMBEDDING_DIMS = 768
@@ -6,6 +7,7 @@ export const CANONICAL_VERTEX_EMBEDDING_DIMS = 768
 const CLOUD_PLATFORM_SCOPE = "https://www.googleapis.com/auth/cloud-platform"
 const EMBEDDING_ENDPOINT_PATH =
   "publishers/google/models/gemini-embedding-001:predict"
+const logger = createLogger("rag/vertex-embedding")
 
 export type EmbeddingTaskType =
   | "RETRIEVAL_DOCUMENT"
@@ -177,6 +179,13 @@ export async function embedTextWithVertex(
 
   let payload: VertexPredictResponse
   try {
+    logger.debug("vertex-embedding-request-started", {
+      model: CANONICAL_VERTEX_EMBEDDING_MODEL,
+      taskType,
+      inputLength: content.length,
+      embeddingDims: CANONICAL_VERTEX_EMBEDDING_DIMS,
+      location: config.location
+    })
     // 인증 헤더 직렬화 이슈를 피하기 위해 auth client의 request 경로를 사용한다.
     const response = await client.request<VertexPredictResponse>({
       url: endpoint,
@@ -201,6 +210,15 @@ export async function embedTextWithVertex(
     const message = detail
       ? `Vertex embedding request failed with status ${status ?? "unknown"}: ${detail}`
       : `Vertex embedding request failed with status ${status ?? "unknown"}`
+    logger.error("vertex-embedding-request-failed", {
+      model: CANONICAL_VERTEX_EMBEDDING_MODEL,
+      taskType,
+      inputLength: content.length,
+      embeddingDims: CANONICAL_VERTEX_EMBEDDING_DIMS,
+      location: config.location,
+      status,
+      error: message
+    })
     throw new EmbeddingProviderError(
       "EMBEDDING_PROVIDER_REQUEST_FAILED",
       message,
@@ -209,6 +227,13 @@ export async function embedTextWithVertex(
   }
 
   const embedding = extractVectorFromPrediction(payload)
+  logger.info("vertex-embedding-request-completed", {
+    model: CANONICAL_VERTEX_EMBEDDING_MODEL,
+    taskType,
+    inputLength: content.length,
+    embeddingDims: embedding.length,
+    location: config.location
+  })
   return {
     embeddingModel: CANONICAL_VERTEX_EMBEDDING_MODEL,
     embeddingDims: CANONICAL_VERTEX_EMBEDDING_DIMS,

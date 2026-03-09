@@ -130,7 +130,7 @@ describe("deploy hardening runtime contract", () => {
       resolveClose = () => callback(null)
     })
     const closePool = vi.fn(async () => undefined)
-    const log = vi.fn()
+    const info = vi.fn()
     const error = vi.fn()
     const exit = vi.fn()
 
@@ -144,7 +144,7 @@ describe("deploy hardening runtime contract", () => {
       {
         timeoutMs: 100,
         exit,
-        logger: { log, error }
+        logger: { info, error }
       }
     )
 
@@ -155,8 +155,13 @@ describe("deploy hardening runtime contract", () => {
 
     expect(close).toHaveBeenCalledTimes(1)
     expect(closePool).toHaveBeenCalledTimes(1)
-    expect(log).toHaveBeenCalledWith("received SIGTERM, starting graceful shutdown")
-    expect(log).toHaveBeenCalledWith("graceful shutdown complete")
+    expect(info).toHaveBeenCalledWith("graceful-shutdown-started", {
+      signal: "SIGTERM",
+      timeoutMs: 100
+    })
+    expect(info).toHaveBeenCalledWith("graceful-shutdown-complete", {
+      signal: "SIGTERM"
+    })
     expect(exit).toHaveBeenCalledWith(0)
   })
 

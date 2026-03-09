@@ -1,6 +1,7 @@
 import { Router, type RequestHandler } from "express"
 import { resolvePrincipalFromAuthorizationHeader } from "../auth/principal"
 import { insertAnalysisRun } from "../rag/analysis-runs-repository"
+import { createLogger } from "../runtime/logger"
 import { buildCanonicalContextPack } from "../session/context-pack/build"
 import { normalizeForAnalyze } from "../session/context-pack/normalize"
 import type {
@@ -12,6 +13,7 @@ import type {
 import { validateSemanticSnapshot } from "../session/context-pack/validate"
 
 const router: ReturnType<typeof Router> = Router()
+const logger = createLogger("routes/analyze")
 const POSTGRES_INT32_MIN = -2147483648
 const POSTGRES_INT32_MAX = 2147483647
 
@@ -35,6 +37,9 @@ const handleAnalyze: RequestHandler = async (req, res) => {
   // 보안 경계: 분석 요청은 인증된 주체만 처리한다.
   const principal = await resolvePrincipalFromAuthorizationHeader(req.header("authorization"))
   if (!principal.ok) {
+    logger.warn("analyze-unauthorized", {
+      message: principal.message
+    })
     res.status(401).json({
       code: "UNAUTHORIZED",
       message: principal.message
@@ -44,6 +49,9 @@ const handleAnalyze: RequestHandler = async (req, res) => {
 
   const body = req.body as AnalyzeRequestBody
   if (!isValidTabId(body.tabId)) {
+    logger.warn("analyze-invalid-tab-id", {
+      userId: principal.userId
+    })
     res.status(400).json({
       code: "INVALID_EVENT",
       message: "tabId is required"
@@ -53,6 +61,11 @@ const handleAnalyze: RequestHandler = async (req, res) => {
 
   const validation = validateSemanticSnapshot(body.snapshot)
   if (!validation.ok || !body.snapshot) {
+    logger.warn("analyze-invalid-snapshot", {
+      userId: principal.userId,
+      tabId: body.tabId,
+      errors: validation.errors
+    })
     res.status(400).json({
       code: "INVALID_SNAPSHOT",
       message: validation.errors[0] ?? "snapshot is required"
@@ -64,6 +77,12 @@ const handleAnalyze: RequestHandler = async (req, res) => {
     // 스냅샷을 표준 문맥으로 재구성한 뒤 요청 유형별 응답 계약으로 축약한다.
     const mode = normalizeMode(body.mode)
     const snapshot = body.snapshot as SemanticSnapshot
+    logger.info("analyze-started", {
+      userId: principal.userId,
+      tabId: body.tabId,
+      mode,
+      pageId: snapshot.page.id
+    })
     const canonicalPack = buildCanonicalContextPack(snapshot)
     const normalized = normalizeForAnalyze(snapshot, canonicalPack, mode)
     // analyze 결과는 해커톤 규약에 따라 analysis_runs에 최소 감사 로그를 남긴다.
@@ -105,8 +124,22 @@ const handleAnalyze: RequestHandler = async (req, res) => {
       }
     }
 
+    logger.info("analyze-completed", {
+      userId: principal.userId,
+      tabId: body.tabId,
+      mode,
+      analysisId: analysisRun.id,
+      normalizedMode: normalized.normalizedMode,
+      summaryCandidateCount: normalized.summaryCandidates.length,
+      visualSummaryCount: normalized.visualSummaries.length
+    })
     res.status(200).json(response)
   } catch (error) {
+    logger.error("analyze-failed", {
+      userId: principal.userId,
+      tabId: body.tabId,
+      error
+    })
     res.status(500).json({
       code: "ANALYZE_FAILED",
       message: "analyze failed"

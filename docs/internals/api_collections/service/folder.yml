@@ -1,0 +1,58 @@
+info:
+  name: service
+  type: folder
+  seq: 1
+
+request:
+  auth:
+    type: bearer
+    token: "{{authToken}}"
+  scripts:
+    - type: before-request
+      code: |-
+        const existingToken = bru.getEnvVar('authToken');
+        const expiresAtRaw = bru.getEnvVar('authTokenExpiresAt');
+        const expiresAt = Number(expiresAtRaw || 0);
+        const nowSeconds = Math.floor(Date.now() / 1000);
+
+        // 아직 유효한 토큰이 있으면 재발급하지 않는다.
+        if (existingToken && Number.isFinite(expiresAt) && expiresAt > nowSeconds + 30) {
+          return;
+        }
+
+        const serverUrl = bru.interpolate('{{serverUrl}}');
+        const bootstrapKey = bru.getEnvVar('authBootstrapKey');
+
+        if (!serverUrl) {
+          throw new Error('serverUrl 환경변수가 필요합니다.');
+        }
+
+        if (!bootstrapKey) {
+          throw new Error('authBootstrapKey (BE AUTH_BOOTSTRAP_KEY로 설정한 값) 환경변수가 필요합니다.');
+        }
+
+        const response = await bru.sendRequest({
+          method: 'POST',
+          url: `${serverUrl}/api/token`,
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Bootstrap-Key': bootstrapKey
+          },
+          data: {
+            grantType: 'dev-bootstrap',
+            bootstrapSubject: 'bruno-local-dev-user',
+            profile: {
+              displayName: 'Bruno Local Dev',
+              primaryEmail: 'bruno-local-dev@example.com'
+            }
+          }
+        });
+
+        if (response.status !== 200 || !response.data?.token) {
+          throw new Error(`dev-bootstrap 토큰 발급 실패: status=${response.status}`);
+        }
+
+        // 이후 요청이 같은 bearer 토큰을 재사용할 수 있게 환경변수에 저장한다.
+        bru.setEnvVar('authToken', response.data.token, { persist: true });
+        bru.setEnvVar('authTokenExpiresAt', String(response.data.expiresAt || 0), { persist: true });
+        bru.setEnvVar('ownerUserId', response.data.user.id, {persist: true});

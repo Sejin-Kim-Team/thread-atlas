@@ -1,11 +1,13 @@
 import { ensureDatabaseMigrations } from "../db/migrate"
 import { getPool } from "../db/pool"
+import { createLogger } from "../runtime/logger"
 import { normalizeLimit, normalizeText } from "./repository-helpers"
 import { SELECT_RETRIEVAL_CANDIDATE_ROWS_SQL } from "./retrieval-service.queries"
 import { embedTextWithVertex } from "./vertex-embedding-adapter"
 import { searchByVector } from "./vector-retrieval"
 
 const DEFAULT_TOP_K = 8
+const logger = createLogger("rag/retrieval-service")
 
 export interface RetrieveMemoryInput {
   ownerUserId: string
@@ -95,6 +97,13 @@ export async function retrieveMemoryCandidates(
     queryText,
     "RETRIEVAL_QUERY"
   )
+  logger.info("memory-retrieval-started", {
+    ownerUserId,
+    limit,
+    pageKind: pageKind ?? "any",
+    sourceDomain: sourceDomain ?? "any",
+    queryLength: queryText.length
+  })
   const vectorSearchInput: {
     ownerUserId: string
     queryEmbedding: number[]
@@ -115,6 +124,11 @@ export async function retrieveMemoryCandidates(
 
   const vectorHits = await searchByVector(vectorSearchInput)
   if (vectorHits.length === 0) {
+    logger.info("memory-retrieval-empty", {
+      ownerUserId,
+      pageKind: pageKind ?? "any",
+      sourceDomain: sourceDomain ?? "any"
+    })
     return []
   }
 
@@ -161,5 +175,13 @@ export async function retrieveMemoryCandidates(
     return new Date(createdAtB ?? 0).getTime() - new Date(createdAtA ?? 0).getTime()
   })
 
-  return ranked.slice(0, limit)
+  const selected = ranked.slice(0, limit)
+  logger.info("memory-retrieval-completed", {
+    ownerUserId,
+    vectorHitCount: vectorHits.length,
+    selectedCount: selected.length,
+    topRecordId: selected[0]?.recordId ?? null,
+    topSimilarityScore: selected[0]?.similarityScore ?? null
+  })
+  return selected
 }

@@ -19,6 +19,7 @@ Companion:
 - raw SQL 사용 경계
 - Express framework-thin 레이어 경계
 - 한글 주석 작성 원칙
+- 구조화 로깅 원칙
 
 ---
 
@@ -95,3 +96,36 @@ route는 비즈니스 규칙과 DB 접근을 가지면 안 된다.
 - route는 DB pool 또는 client를 직접 참조하지 않아야 한다.
 - 비자명한 구현 경계에 한국어 주석이 있어야 한다.
 
+---
+
+## 6. Structured Logging Rule
+
+### 6.1 Mandatory
+
+- backend는 공통 structured logger를 사용해야 한다.
+- 로그는 JSON line 형식으로 출력해야 한다.
+- 아래 경계에는 최소한의 구조화 로그가 있어야 한다.
+  - boot / shutdown
+  - auth token issue / verify
+  - analyze / ingest-memory
+  - websocket handshake / connection / invalid envelope
+  - turn start / enrich / recall / completion
+  - generation / embedding / retrieval
+
+### 6.2 Sensitive Data Rule
+
+- 아래 값은 로그에 남기면 안 된다.
+  - bearer token
+  - google `id_token`
+  - bootstrap key
+  - 원문 prompt 전문
+- 필요 시 길이, 개수, 식별자, 상태코드 같은 메타 정보만 남긴다.
+
+### 6.3 Correlation Rule
+
+- 가능하면 아래 식별자를 로그 필드에 포함한다.
+  - `userId`
+  - `sessionId`
+  - `turnId`
+  - `requestId`
+- 단, 값이 없는 경로에서는 억지로 생성하지 않는다.

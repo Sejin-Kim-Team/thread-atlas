@@ -1,0 +1,29 @@
+info:
+  name: create-token-dev
+  type: http
+  seq: 1
+
+http:
+  method: POST
+  url: "{{serverUrl}}/api/token"
+  headers:
+    - name: X-Bootstrap-Key
+      value: "{{authBootstrapKey}}"
+  body:
+    type: json
+    data: |-
+      {
+        "grantType": "dev-bootstrap",
+        "bootstrapSubject": "local-dev-user-1",
+        "profile": {
+          "displayName": "Local Dev",
+          "primaryEmail": "local-dev@example.com"
+        }
+      }
+  auth: inherit
+
+settings:
+  encodeUrl: true
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5

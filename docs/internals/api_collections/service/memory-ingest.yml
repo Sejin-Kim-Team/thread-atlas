@@ -1,0 +1,65 @@
+info:
+  name: memory-ingest
+  type: http
+  seq: 2
+
+http:
+  method: POST
+  url: "{{serverUrl}}/api/ingest/memory"
+  body:
+    type: json
+    data: |-
+      {
+        "source": "analyze",
+        "records": [
+          {
+            "id": "mem-e2e-001",
+            "ownerUserId": "{{ownerUserId}}",
+            "kind": "branch-summary",
+            "summary": "A previous discussion argued WebSocket is better for interruption and bidirectional updates.",
+            "keywords": [
+              "websocket",
+              "interruption",
+              "bidirectional"
+            ],
+            "entities": [
+              "WebSocket"
+            ],
+            "provenance": {
+              "sourceUrl": "https://news.ycombinator.com/item?id=123",
+              "pageKind": "thread",
+              "snapshotCapturedAt": "2026-03-08T09:00:00.000Z",
+              "extractorId": "generic+hacker-news-enhancer",
+              "skeletonVersion": 1
+            },
+            "source": {
+              "pageId": "hn-123",
+              "rootNodeIds": [
+                "comment-1"
+              ],
+              "unitId": "branch-1"
+            },
+            "navigation": {
+              "canonicalUrl": "https://news.ycombinator.com/item?id=123",
+              "pageTitle": "Example thread",
+              "openMode": "new-tab"
+            },
+            "evidence": {
+              "textSpans": [
+                "WebSocket is better for interruption and bidirectional updates."
+              ],
+              "referencedNodeIds": [
+                "comment-1"
+              ]
+            },
+            "createdAt": "2026-03-08T09:00:00.000Z"
+          }
+        ]
+      }
+  auth: inherit
+
+settings:
+  encodeUrl: true
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5

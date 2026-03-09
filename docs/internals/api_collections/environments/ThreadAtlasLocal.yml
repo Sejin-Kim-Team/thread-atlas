@@ -1,0 +1,16 @@
+name: ThreadAtlasLocal
+variables:
+  - name: serverUrl
+    value: http://localhost:8080
+  - name: authToken
+    value: ""
+  - name: googleOauthToken
+    value: ""
+  - name: authTokenExpiresAt
+    value: ""
+  - name: authBootstrapKey
+    value: threadatlas-dev-bootstrap-2026-7Xq9Lr2Vm!K8pS4
+  - name: wsServerUrl
+    value: ws://localhost:8080
+  - name: ownerUserId
+    value: ""

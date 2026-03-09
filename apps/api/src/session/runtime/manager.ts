@@ -8,6 +8,7 @@ import type {
   SnapshotPushPayload,
   UserIntentPayload
 } from "./types"
+import { createLogger } from "../../runtime/logger"
 
 type RuntimeResult =
   | { status: 200; body: Record<string, unknown> }
@@ -16,6 +17,8 @@ type RuntimeResult =
 interface RuntimeHandleContext {
   principalUserId: string
 }
+
+const logger = createLogger("session/runtime")
 
 const MAX_RUNTIME_SESSIONS = 256
 const RECALL_CARD_MIN_SIMILARITY = 0.8
@@ -969,6 +972,9 @@ export class RuntimeManager {
   async handle(raw: unknown, context: RuntimeHandleContext): Promise<RuntimeResult> {
     const envelope = validateEnvelope(raw)
     if (!envelope) {
+      logger.warn("runtime-invalid-envelope", {
+        principalUserId: context.principalUserId
+      })
       return invalidEvent("invalid envelope")
     }
 
@@ -1027,6 +1033,10 @@ export class RuntimeManager {
     const existingOwner = this.ownerByClientSessionId.get(parsed.clientSessionId)
     if (existingOwner && existingOwner !== principalUserId) {
       // 보안 경계: 다른 주체가 같은 세션 식별자를 재사용하지 못하게 막는다.
+      logger.warn("runtime-session-open-owner-mismatch", {
+        principalUserId,
+        clientSessionId: parsed.clientSessionId
+      })
       return unauthorized("clientSessionId is owned by another principal")
     }
 
@@ -1049,6 +1059,13 @@ export class RuntimeManager {
         activeTurnId: null
       })
     }
+
+    logger.info("runtime-session-opened", {
+      principalUserId,
+      sessionId,
+      clientSessionId: parsed.clientSessionId,
+      reused: Boolean(existing)
+    })
 
     return {
       status: 200,
@@ -1075,6 +1092,12 @@ export class RuntimeManager {
     if (shouldSetPrimary) {
       session.primaryTabId = parsed.tabId
     }
+    logger.debug("runtime-context-updated", {
+      userId: session.ownerUserId,
+      sessionId: session.sessionId,
+      primaryTabId: session.primaryTabId,
+      requestId: envelope.requestId
+    })
 
     return {
       status: 200,
@@ -1114,6 +1137,13 @@ export class RuntimeManager {
     }
 
     session.latestSnapshotByTab.set(parsed.tabId, parsed.snapshot)
+    logger.debug("runtime-snapshot-pushed", {
+      userId: session.ownerUserId,
+      sessionId: session.sessionId,
+      tabId: parsed.tabId,
+      focusNodeId: parsed.snapshot.focus?.nodeId ?? null,
+      capturedAt: parsed.snapshot.meta?.capturedAt ?? null
+    })
 
     return {
       status: 200,
@@ -1171,6 +1201,14 @@ export class RuntimeManager {
       enrichTimeoutAtMs: 0,
       latestSnapshot: latest
     }
+    logger.info("runtime-turn-started", {
+      userId: session.ownerUserId,
+      sessionId: session.sessionId,
+      turnId,
+      primaryTabId: parsed.primaryTabId,
+      intentLength: parsed.text.length,
+      enrichTriggerMode: this.enrichTriggerMode
+    })
 
     const enrichDecision = await this.decideEnrichTrigger(parsed.text, latest)
 
@@ -1194,6 +1232,13 @@ export class RuntimeManager {
       activeTurn.status = "waiting-enrich"
       activeTurn.enrichRequestedAtMs = nowMs
       activeTurn.enrichTimeoutAtMs = nowMs + ENRICH_DEFAULT_TIMEOUT_MS
+      logger.info("runtime-enrich-requested", {
+        userId: session.ownerUserId,
+        sessionId: session.sessionId,
+        turnId,
+        requestKind: enrichDecision.decision.requestKind,
+        reason: enrichDecision.decision.reason
+      })
 
       const events: Array<Record<string, unknown>> = [
         this.makeProgressEvent(session.sessionId, turnId, "intent-routed"),
@@ -1277,6 +1322,14 @@ export class RuntimeManager {
     activeTurn.status = "resumed"
     activeTurn.enrichApplied = true
     delete activeTurn.pendingEnrichRequest
+    logger.info("runtime-enrich-result-received", {
+      userId: session.ownerUserId,
+      sessionId: session.sessionId,
+      turnId,
+      status: parsed.status,
+      requestKind: parsed.requestKind,
+      timedOut: isTimeout
+    })
 
     if (isTimeout) {
       return this.finalizeTurn(
@@ -1329,6 +1382,12 @@ export class RuntimeManager {
     const suspicious = isSnapshotSuspicious(snapshot)
 
     if (this.enrichTriggerMode === "rule") {
+      logger.debug("runtime-enrich-rule-decision", {
+        mode: this.enrichTriggerMode,
+        shouldRequestEnrich: ruleDecision.shouldRequestEnrich,
+        requestKind: ruleDecision.requestKind,
+        reason: ruleDecision.reason
+      })
       return {
         ok: true,
         decision: ruleDecision
@@ -1337,6 +1396,12 @@ export class RuntimeManager {
 
     if (this.enrichTriggerMode === "hybrid-simple") {
       if (ruleSignals.hardPositive || ruleSignals.hardNegative) {
+        logger.debug("runtime-enrich-hybrid-simple-rule-shortcut", {
+          mode: this.enrichTriggerMode,
+          shouldRequestEnrich: ruleDecision.shouldRequestEnrich,
+          requestKind: ruleDecision.requestKind,
+          reason: ruleDecision.reason
+        })
         return {
           ok: true,
           decision: ruleDecision
@@ -1347,20 +1412,35 @@ export class RuntimeManager {
     }
 
     if (ruleSignals.hardPositive) {
+      logger.debug("runtime-enrich-hybrid-complex-rule-positive", {
+        mode: this.enrichTriggerMode,
+        requestKind: ruleDecision.requestKind
+      })
       return {
         ok: true,
         decision: ruleDecision
       }
     }
     if (ruleSignals.hardNegative && !suspicious) {
+      logger.debug("runtime-enrich-hybrid-complex-rule-negative", {
+        mode: this.enrichTriggerMode
+      })
       return {
         ok: true,
         decision: ruleDecision
       }
     }
     if (ruleSignals.ambiguous || suspicious) {
+      logger.debug("runtime-enrich-hybrid-complex-llm-assist", {
+        mode: this.enrichTriggerMode,
+        suspicious
+      })
       return this.decideEnrichWithLlmAssist(intentText, snapshot, ruleSignals, suspicious)
     }
+    logger.debug("runtime-enrich-hybrid-complex-fallback-rule", {
+      mode: this.enrichTriggerMode,
+      shouldRequestEnrich: ruleDecision.shouldRequestEnrich
+    })
     return {
       ok: true,
       decision: ruleDecision
@@ -1387,6 +1467,7 @@ export class RuntimeManager {
 
     const parsedAssist = parseEnrichAssistDecision(assistResult.text)
     if (!parsedAssist) {
+      logger.warn("runtime-enrich-llm-assist-unparseable")
       return {
         ok: true,
         decision: {
@@ -1413,6 +1494,7 @@ export class RuntimeManager {
     fallbackErrorMessage: string
   ): Promise<{ ok: true; text: string } | { ok: false; error: RuntimeResult }> {
     if (!process.env.GOOGLE_CLOUD_PROJECT || !process.env.GOOGLE_CLOUD_LOCATION) {
+      logger.warn("runtime-generation-config-missing")
       return {
         ok: false,
         error: modelConfigMissing("GOOGLE_CLOUD_PROJECT and GOOGLE_CLOUD_LOCATION are required")
@@ -1437,6 +1519,10 @@ export class RuntimeManager {
           error: modelConfigMissing(message)
         }
       }
+      logger.error("runtime-generation-failed", {
+        fallbackErrorMessage,
+        error
+      })
 
       return {
         ok: false,
@@ -1522,6 +1608,11 @@ export class RuntimeManager {
   ): Promise<RuntimeResult> {
     const generation = await this.generateCurrentPageAnswer(intentText, snapshot, enrichDetail)
     if (!generation.ok) {
+      logger.warn("runtime-turn-generation-rejected", {
+        userId: session.ownerUserId,
+        sessionId: session.sessionId,
+        turnId
+      })
       this.clearActiveTurn(session)
       return generation.error
     }
@@ -1606,9 +1697,22 @@ export class RuntimeManager {
           }
         })
         usedMemoryRecordIds.push(selectedRecall.recordId)
+        logger.info("runtime-recall-attached", {
+          userId: session.ownerUserId,
+          sessionId: session.sessionId,
+          turnId,
+          recordId: selectedRecall.recordId,
+          similarityScore: selectedRecall.similarityScore
+        })
       }
-    } catch {
+    } catch (error) {
       // retrieval 오류는 전체 턴 실패로 전파하지 않고 answer 우선 정책을 유지한다.
+      logger.warn("runtime-recall-skipped-after-error", {
+        userId: session.ownerUserId,
+        sessionId: session.sessionId,
+        turnId,
+        error
+      })
     }
 
     const turnDonePayload: Record<string, unknown> = {
@@ -1627,6 +1731,13 @@ export class RuntimeManager {
     })
 
     this.clearActiveTurn(session)
+    logger.info("runtime-turn-completed", {
+      userId: session.ownerUserId,
+      sessionId: session.sessionId,
+      turnId,
+      usedMemoryRecordCount: usedMemoryRecordIds.length,
+      provenanceSummary
+    })
     return this.toEventBatch(requestId, session.sessionId, turnId, events)
   }
 

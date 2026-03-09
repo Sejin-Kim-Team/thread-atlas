@@ -1,6 +1,8 @@
 import { GoogleGenAI } from "@google/genai"
+import { createLogger } from "../runtime/logger"
 
 const DEFAULT_GENERATION_MODEL = "gemini-2.5-flash"
+const logger = createLogger("services/gemini")
 
 export class ModelConfigError extends Error {
   readonly code = "MODEL_CONFIG_MISSING"
@@ -36,6 +38,11 @@ export function isModelConfigError(error: unknown): error is ModelConfigError {
 
 export function createGeminiClient(): GeminiClient {
   const config = resolveModelConfig()
+  logger.info("gemini-client-configured", {
+    model: config.model,
+    project: config.project,
+    location: config.location
+  })
   const ai = new GoogleGenAI({
     vertexai: true,
     project: config.project,
@@ -44,15 +51,33 @@ export function createGeminiClient(): GeminiClient {
 
   return {
     async generateText(prompt: string): Promise<string> {
-      const response = await ai.models.generateContent({
+      logger.debug("gemini-generate-started", {
         model: config.model,
-        contents: prompt
+        promptLength: prompt.length
       })
-      const text = response.text
-      if (!text || text.trim().length === 0) {
-        throw new Error("empty model response")
+      try {
+        const response = await ai.models.generateContent({
+          model: config.model,
+          contents: prompt
+        })
+        const text = response.text
+        if (!text || text.trim().length === 0) {
+          throw new Error("empty model response")
+        }
+        logger.info("gemini-generate-completed", {
+          model: config.model,
+          promptLength: prompt.length,
+          responseLength: text.trim().length
+        })
+        return text.trim()
+      } catch (error) {
+        logger.error("gemini-generate-failed", {
+          model: config.model,
+          promptLength: prompt.length,
+          error
+        })
+        throw error
       }
-      return text.trim()
     }
   }
 }
