@@ -1,8 +1,8 @@
 substitutions:
-  _SERVICE_NAME: threadatlas-api
+  _SERVICE_NAME: threadatlas-api-server
   _REGION: us-central1
   _REPOSITORY: threadatlas
-  _IMAGE_NAME: threadatlas-api
+  _IMAGE_NAME: threadatlas-api-server
 
 steps:
   - name: gcr.io/cloud-builders/docker
