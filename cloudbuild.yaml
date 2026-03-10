@@ -1,7 +1,7 @@
 substitutions:
   _SERVICE_NAME: threadatlas-api-server
   _REGION: us-central1
-  _REPOSITORY: threadatlas
+  _REPOSITORY: cloud-run-source-deploy
   _IMAGE_NAME: threadatlas-api-server
 
 steps:
