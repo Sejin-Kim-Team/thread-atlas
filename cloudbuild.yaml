@@ -1,7 +1,7 @@
 substitutions:
   _SERVICE_NAME: threadatlas-api
-  _REGION: asia-northeast3
-  _IMAGE: asia-northeast3-docker.pkg.dev/$PROJECT_ID/threadatlas/threadatlas-api
+  _REGION: us-central1
+  _IMAGE: us-central1-docker.pkg.dev/$PROJECT_ID/threadatlas/threadatlas-api
 
 steps:
   - name: gcr.io/cloud-builders/docker
@@ -24,7 +24,7 @@ steps:
       - managed
       - --allow-unauthenticated
       - --set-env-vars
-      - GEMINI_API_KEY=${_GEMINI_API_KEY},GOOGLE_CLOUD_PROJECT=$PROJECT_ID,FIRESTORE_DATABASE=(default),NODE_ENV=production
+      - GEMINI_API_KEY=${_GEMINI_API_KEY},GOOGLE_CLOUD_PROJECT=$PROJECT_ID,GOOGLE_CLOUD_LOCATION=${_REGION},FIRESTORE_DATABASE=(default),NODE_ENV=production
 
 images:
   - ${_IMAGE}:$COMMIT_SHA

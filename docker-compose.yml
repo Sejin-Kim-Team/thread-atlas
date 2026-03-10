@@ -18,7 +18,7 @@ services:
   api:
     build:
       context: .
-      dockerfile: apps/api/Dockerfile
+      dockerfile: Dockerfile
     container_name: threadatlas-api
     restart: unless-stopped
     depends_on:
