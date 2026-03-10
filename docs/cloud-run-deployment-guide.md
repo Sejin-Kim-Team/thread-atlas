@@ -186,7 +186,7 @@ printf '%s' '<DB_PASSWORD>' | gcloud secrets versions add threadatlas-db-passwor
 
 ## 8. 이미지 빌드 및 푸시
 
-이 리포지토리는 API Dockerfile이 루트가 아니라 [apps/api/Dockerfile](../apps/api/Dockerfile)에 있으므로, **빌드 컨텍스트는 리포지토리 루트 `.`** 로 유지해야 한다.
+이 리포지토리는 API Dockerfile이 루트가 아니라 [apps/api/Dockerfile](../Dockerfile)에 있으므로, **빌드 컨텍스트는 리포지토리 루트 `.`** 로 유지해야 한다.
 
 ```bash
 PROJECT_ID=<PROJECT_ID>
@@ -268,7 +268,7 @@ Cloud Run은 WebSocket을 지원하지만, 세션 유지 특성상 아래를 고
 ## 12. 참고 파일
 
 - [cloudbuild.yaml](../cloudbuild.yaml)
-- [apps/api/Dockerfile](../apps/api/Dockerfile)
+- [apps/api/Dockerfile](../Dockerfile)
 - [config.ts](../apps/api/src/db/config.ts)
 - [gemini.ts](../apps/api/src/services/gemini.ts)
 - [BE-SPEC-INFRA.md](./internals/be/BE-SPEC-INFRA.md)
