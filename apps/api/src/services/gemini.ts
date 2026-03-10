@@ -1,4 +1,11 @@
-import { GoogleGenAI } from "@google/genai"
+import {
+  GoogleGenAI,
+  createPartFromFunctionCall,
+  createPartFromFunctionResponse,
+  type Content,
+  type FunctionCall,
+  type FunctionDeclaration
+} from "@google/genai"
 import { createLogger } from "../runtime/logger"
 
 const DEFAULT_GENERATION_MODEL = "gemini-2.5-flash"
@@ -8,8 +15,24 @@ export class ModelConfigError extends Error {
   readonly code = "MODEL_CONFIG_MISSING"
 }
 
+export interface GeminiToolCall {
+  name: string
+  args: Record<string, unknown>
+  id: string | undefined
+}
+
+export interface GeminiToolResponse {
+  text: string | undefined
+  toolCalls: GeminiToolCall[] | undefined
+}
+
 export interface GeminiClient {
   generateText(prompt: string): Promise<string>
+  generateWithTools(
+    contents: Content[],
+    tools: FunctionDeclaration[],
+    systemInstruction?: string
+  ): Promise<GeminiToolResponse>
 }
 
 function resolveModelConfig(): {
@@ -78,6 +101,62 @@ export function createGeminiClient(): GeminiClient {
         })
         throw error
       }
+    },
+
+    async generateWithTools(
+      contents: Content[],
+      tools: FunctionDeclaration[],
+      systemInstruction?: string
+    ): Promise<GeminiToolResponse> {
+      logger.debug("gemini-tool-generate-started", {
+        model: config.model,
+        contentTurns: contents.length,
+        toolCount: tools.length
+      })
+      try {
+        const response = await ai.models.generateContent({
+          model: config.model,
+          contents,
+          config: {
+            tools: [{ functionDeclarations: tools }],
+            ...(systemInstruction ? { systemInstruction } : {})
+          }
+        })
+
+        const functionCalls = response.functionCalls
+        if (functionCalls && functionCalls.length > 0) {
+          logger.info("gemini-tool-calls-received", {
+            model: config.model,
+            callCount: functionCalls.length,
+            toolNames: functionCalls.map((fc) => fc.name)
+          })
+          return {
+            text: undefined,
+            toolCalls: functionCalls.map((fc) => ({
+              name: fc.name ?? "unknown",
+              args: fc.args ?? {},
+              id: fc.id ?? undefined
+            }))
+          }
+        }
+
+        const text = response.text?.trim()
+        logger.info("gemini-tool-generate-completed", {
+          model: config.model,
+          responseLength: text?.length ?? 0
+        })
+        return { text: text || undefined, toolCalls: undefined }
+      } catch (error) {
+        logger.error("gemini-tool-generate-failed", {
+          model: config.model,
+          error
+        })
+        throw error
+      }
     }
   }
 }
+
+// Re-export helpers for building multi-turn tool conversations
+export { createPartFromFunctionCall, createPartFromFunctionResponse }
+export type { Content, FunctionCall, FunctionDeclaration }

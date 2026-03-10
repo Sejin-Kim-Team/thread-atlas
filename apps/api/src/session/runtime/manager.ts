@@ -1595,6 +1595,23 @@ export class RuntimeManager {
     }
   }
 
+  private shouldUseAgentLoop(intentText: string, snapshot: SnapshotLike): boolean {
+    // 보수적 접근: claims가 있고, intent에 분석/비교/기억 관련 키워드가 있을 때만 agent loop 사용
+    const semantics = snapshot as { semantics?: { claims?: unknown[] } }
+    const hasClaims = Array.isArray(semantics.semantics?.claims) && semantics.semantics.claims.length > 0
+    if (!hasClaims) return false
+
+    const lower = intentText.toLowerCase()
+    const agentKeywords = [
+      "비교", "분석", "compare", "analyze", "analysis",
+      "기억", "이전", "remember", "memory", "recall",
+      "주장", "근거", "evidence", "claim", "rebuttal",
+      "요약", "summary", "summarize",
+      "차이", "공통", "difference", "common"
+    ]
+    return agentKeywords.some((kw) => lower.includes(kw))
+  }
+
   private async finalizeTurn(
     session: RuntimeSession,
     turnId: string,
@@ -1606,6 +1623,22 @@ export class RuntimeManager {
     progressStages: Array<"intent-routed" | "enrich-received">,
     provenanceSummary: string[]
   ): Promise<RuntimeResult> {
+    if (this.shouldUseAgentLoop(intentText, snapshot)) {
+      try {
+        return await this.finalizeTurnWithAgentLoop(
+          session, turnId, requestId, intentText, primaryTabId,
+          snapshot, progressStages, provenanceSummary
+        )
+      } catch (error) {
+        // Agent loop 실패 시 fast-path로 fallback
+        logger.warn("runtime-agent-loop-fallback", {
+          sessionId: session.sessionId,
+          turnId,
+          error
+        })
+      }
+    }
+
     const generation = await this.generateCurrentPageAnswer(intentText, snapshot, enrichDetail)
     if (!generation.ok) {
       logger.warn("runtime-turn-generation-rejected", {
@@ -1715,6 +1748,22 @@ export class RuntimeManager {
       })
     }
 
+    // fire-and-forget: 메모리 쓰기 실패가 턴 완료를 막지 않는다
+    this.writeMemoryFromTurn({
+      ownerUserId: session.ownerUserId,
+      turnId,
+      intentText,
+      answerText: generation.answerText,
+      snapshot,
+      sessionId: session.sessionId
+    }).catch((error) => {
+      logger.warn("runtime-memory-write-failed", {
+        sessionId: session.sessionId,
+        turnId,
+        error
+      })
+    })
+
     const turnDonePayload: Record<string, unknown> = {
       referencedTabIds: [primaryTabId]
     }
@@ -1739,6 +1788,212 @@ export class RuntimeManager {
       provenanceSummary
     })
     return this.toEventBatch(requestId, session.sessionId, turnId, events)
+  }
+
+  private async finalizeTurnWithAgentLoop(
+    session: RuntimeSession,
+    turnId: string,
+    requestId: string | undefined,
+    intentText: string,
+    primaryTabId: number,
+    snapshot: SnapshotLike,
+    progressStages: Array<"intent-routed" | "enrich-received">,
+    provenanceSummary: string[]
+  ): Promise<RuntimeResult> {
+    const { runAgentLoop } = await import("../../agent/loop")
+
+    // Build StateSnapshot from SnapshotLike + intent
+    const snapshotAny = snapshot as Record<string, unknown>
+    const pageAny = (snapshotAny.page ?? {}) as Record<string, unknown>
+    const stateSnapshot = {
+      intent: {
+        type: "UserSpeech" as const,
+        transcript: intentText,
+        intentType: "contextual_query" as const
+      },
+      page: {
+        url: (pageAny.url as string) ?? "",
+        title: (pageAny.title as string) ?? "",
+        content: {
+          threadDoc: null,
+          structure: { headings: [], landmarks: [], commentCount: 0, nestingDepth: 0 },
+          visibleComments: []
+        }
+      },
+      user: {
+        speech: intentText,
+        selection: null,
+        focus: null
+      },
+      viewport: null,
+      sourceArticle: null,
+      semantics: (snapshotAny.semantics as import("@threadatlas/shared").ThreadSemantics) ?? null,
+      conversationContext: null
+    }
+
+    // Collect projections into events
+    const events: Array<Record<string, unknown>> = []
+    for (const stage of progressStages) {
+      events.push(this.makeProgressEvent(session.sessionId, turnId, stage))
+    }
+    events.push(this.makeProgressEvent(session.sessionId, turnId, "response-planning"))
+
+    // Create a mock SseWriter that collects projections into events array
+    const collectedProjections: unknown[] = []
+    const mockSseWriter = {
+      projection(projection: unknown) {
+        collectedProjections.push(projection)
+      },
+      done(_payload: unknown) {
+        // handled after loop
+      },
+      error(_payload: unknown) {
+        // handled by outer catch
+      },
+      close() {
+        // no-op
+      }
+    }
+
+    const loopResult = await runAgentLoop({
+      stateSnapshot,
+      ownerUserId: session.ownerUserId,
+      sseWriter: mockSseWriter as import("../../lib/sse").SseWriter
+    })
+
+    // Convert collected projections to WS event format
+    for (const projection of collectedProjections) {
+      const proj = projection as { type: string; payload: unknown }
+      if (proj.type === "respond") {
+        const payload = proj.payload as { text: string; mode: string }
+        events.push({
+          type: "projection",
+          turnId,
+          sessionId: session.sessionId,
+          timestamp: makeTimestamp(),
+          payload: {
+            kind: "present",
+            body: {
+              type: "answer",
+              text: payload.text,
+              responseMode: payload.mode,
+              provenanceSummary
+            }
+          }
+        })
+      } else {
+        events.push({
+          type: "projection",
+          turnId,
+          sessionId: session.sessionId,
+          timestamp: makeTimestamp(),
+          payload: {
+            kind: proj.type,
+            body: proj.payload
+          }
+        })
+      }
+    }
+
+    const turnDonePayload: Record<string, unknown> = {
+      referencedTabIds: [primaryTabId]
+    }
+
+    events.push({
+      type: "turn.done",
+      turnId,
+      sessionId: session.sessionId,
+      timestamp: makeTimestamp(),
+      payload: turnDonePayload
+    })
+
+    // fire-and-forget memory write
+    const answerText = collectedProjections
+      .filter((p) => (p as { type: string }).type === "respond")
+      .map((p) => ((p as { payload: { text: string } }).payload.text))
+      .join(" ")
+
+    if (answerText) {
+      this.writeMemoryFromTurn({
+        ownerUserId: session.ownerUserId,
+        turnId,
+        intentText,
+        answerText,
+        snapshot,
+        sessionId: session.sessionId
+      }).catch((error) => {
+        logger.warn("runtime-memory-write-failed", {
+          sessionId: session.sessionId,
+          turnId,
+          error
+        })
+      })
+    }
+
+    this.clearActiveTurn(session)
+    logger.info("runtime-agent-loop-turn-completed", {
+      userId: session.ownerUserId,
+      sessionId: session.sessionId,
+      turnId,
+      projectionCount: collectedProjections.length,
+      provenanceSummary
+    })
+    return this.toEventBatch(requestId, session.sessionId, turnId, events)
+  }
+
+  private async writeMemoryFromTurn(args: {
+    ownerUserId: string
+    turnId: string
+    intentText: string
+    answerText: string
+    snapshot: SnapshotLike
+    sessionId: string
+  }): Promise<void> {
+    const { ownerUserId, turnId, intentText, answerText, snapshot, sessionId } = args
+    const pageUrl = asStringOrNull(snapshot.page?.url)
+    if (!pageUrl || !answerText.trim()) {
+      logger.info("runtime-memory-write-skipped", { sessionId, turnId, reason: "missing-page-url-or-answer" })
+      return
+    }
+
+    const summary = answerText.length > 500 ? answerText.slice(0, 500) : answerText
+    const pageKind = (snapshot.page?.kind ?? "generic") as "article" | "thread" | "post" | "generic"
+    const capturedAt = asStringOrNull(snapshot.meta?.capturedAt) ?? new Date().toISOString()
+    const skeletonVersion = (snapshot.meta?.skeletonVersion as number | undefined) ?? 1
+
+    const { ingestMemoryRecords } = await import("../memory/ingest-records")
+    await ingestMemoryRecords(
+      {
+        records: [
+          {
+            id: `memory-${turnId}-${Date.now()}`,
+            ownerUserId,
+            kind: "branch-summary",
+            summary,
+            provenance: {
+              sourceUrl: pageUrl,
+              pageKind,
+              snapshotCapturedAt: capturedAt,
+              extractorId: "runtime-manager",
+              skeletonVersion
+            },
+            source: {
+              pageId: asStringOrNull(snapshot.page?.id) ?? "runtime"
+            },
+            navigation: {
+              canonicalUrl: pageUrl
+            },
+            evidence: {
+              textSpans: [intentText]
+            }
+          }
+        ],
+        source: "turn-completion"
+      },
+      ownerUserId
+    )
+
+    logger.info("runtime-memory-write-completed", { sessionId, turnId })
   }
 
   private newSessionId(): string {
