@@ -6,9 +6,15 @@
 
 ## 1. 배포 전략
 
-현재 [cloudbuild.yaml](../cloudbuild.yaml)은 이미지 빌드와 Cloud Run 배포 기본 흐름은 포함하지만, 첫 배포에 필요한 DB connector 환경변수와 secret 주입까지는 포함하지 않는다.
+현재 [cloudbuild.yaml](../cloudbuild.yaml)은 **이미지 빌드 + 이미지 배포만 담당하는 콘솔 관리형 배포 파일**이다.
 
-따라서 **첫 배포는 수동 `docker build` + `docker push` + `gcloud run deploy` 기준**으로 진행하는 것을 권장한다.
+- Cloud Run의 `Cloud SQL 연결`
+- `DB_CONNECTION_MODE`, `CLOUD_SQL_INSTANCE_CONNECTION_NAME`, `DB_NAME`, `DB_USER`
+- `DB_PASSWORD`, `AUTH_BOOTSTRAP_KEY`, `GOOGLE_OAUTH_CLIENT_ID`
+- 서비스 계정
+
+같은 런타임 설정은 Cloud Run 콘솔에서 직접 관리해야 한다.
+`cloudbuild.yaml`은 위 설정을 생성하거나 덮어쓰지 않는다.
 
 핵심 원칙:
 
@@ -186,17 +192,40 @@ printf '%s' '<DB_PASSWORD>' | gcloud secrets versions add threadatlas-db-passwor
 
 ## 8. 이미지 빌드 및 푸시
 
-이 리포지토리는 API Dockerfile이 루트가 아니라 [apps/api/Dockerfile](../Dockerfile)에 있으므로, **빌드 컨텍스트는 리포지토리 루트 `.`** 로 유지해야 한다.
+이 리포지토리는 API 이미지를 루트 [Dockerfile](../Dockerfile)로 빌드하므로, **빌드 컨텍스트는 리포지토리 루트 `.`** 로 유지해야 한다.
 
 ```bash
 PROJECT_ID=<PROJECT_ID>
 IMAGE=us-central1-docker.pkg.dev/$PROJECT_ID/threadatlas/threadatlas-api:$(git rev-parse --short HEAD)
 
-docker build -f apps/api/Dockerfile -t "$IMAGE" .
+docker build -f Dockerfile -t "$IMAGE" .
 docker push "$IMAGE"
 ```
 
-## 9. 첫 배포 명령
+## 9. Cloud Build 자동 배포
+
+기본 [cloudbuild.yaml](../cloudbuild.yaml)은 아래만 담당한다.
+
+- 서비스: `threadatlas-api`
+- region: `us-central1`
+- Artifact Registry에 이미지 push
+- 새 이미지를 Cloud Run 서비스에 deploy
+
+예시:
+
+```bash
+gcloud builds submit \
+  --config=cloudbuild.yaml \
+  --substitutions=_REGION=us-central1,_REPOSITORY=threadatlas,_IMAGE_NAME=threadatlas-api,_SERVICE_NAME=threadatlas-api
+```
+
+주의:
+
+- `cloudbuild.yaml`은 Cloud Run 콘솔의 env, secrets, Cloud SQL 연결, 서비스 계정을 건드리지 않는다.
+- 따라서 운영 설정 변경은 Cloud Run 콘솔 또는 별도 `gcloud run services update` 절차에서 관리해야 한다.
+- 첫 배포 전에 콘솔에서 이 문서의 필수 런타임 값을 먼저 넣어둬야 한다.
+
+## 9.1 수동 `gcloud run deploy` 예시
 
 비밀번호 기반 Cloud SQL 인증 기준 예시:
 
@@ -210,11 +239,11 @@ gcloud run deploy threadatlas-api \
   --platform=managed \
   --allow-unauthenticated \
   --service-account="threadatlas-api@${PROJECT_ID}.iam.gserviceaccount.com" \
-  --set-env-vars="NODE_ENV=production,GOOGLE_CLOUD_PROJECT=${PROJECT_ID},GOOGLE_CLOUD_LOCATION=us-central1,DB_CONNECTION_MODE=cloudsql-connector,CLOUD_SQL_INSTANCE_CONNECTION_NAME=${PROJECT_ID}:us-central1:thread-atlas,DB_NAME=thread-atlas,DB_USER=threadatlas_app" \
-  --set-secrets="DB_PASSWORD=threadatlas-db-password:latest,AUTH_BOOTSTRAP_KEY=threadatlas-auth-bootstrap-key:latest,GOOGLE_OAUTH_CLIENT_ID=threadatlas-google-oauth-client-id:latest"
+  --set-cloudsql-instances="${PROJECT_ID}:us-central1:thread-atlas" \
+  --remove-env-vars="DATABASE_URL,FIRESTORE_DATABASE,GEMINI_API_KEY" \
+  --update-env-vars="NODE_ENV=production,GOOGLE_CLOUD_PROJECT=${PROJECT_ID},GOOGLE_CLOUD_LOCATION=us-central1,DB_CONNECTION_MODE=cloudsql-connector,CLOUD_SQL_INSTANCE_CONNECTION_NAME=${PROJECT_ID}:us-central1:thread-atlas,DB_NAME=thread-atlas,DB_USER=threadatlas_app,ENRICH_TRIGGER_MODE=hybrid-complex" \
+  --update-secrets="DB_PASSWORD=threadatlas-db-password:latest,AUTH_BOOTSTRAP_KEY=threadatlas-auth-bootstrap-key:latest,GOOGLE_OAUTH_CLIENT_ID=threadatlas-google-oauth-client-id:latest"
 ```
-
-운영 정책에 따라 `AUTH_BOOTSTRAP_KEY`, `GOOGLE_OAUTH_CLIENT_ID`가 필요 없으면 `--set-secrets`에서 제외해도 된다.
 
 ## 10. 배포 확인
 
@@ -248,14 +277,15 @@ curl "$SERVICE_URL/ready"
 현재 [cloudbuild.yaml](../cloudbuild.yaml)은 아래 성격으로 이해해야 한다.
 
 - `us-central1` region/registry 기준은 반영되어 있다
-- 하지만 첫 배포에 필요한 DB connector env와 secret 주입은 아직 포함하지 않는다
+- Cloud Build는 이미지를 빌드하고 같은 이름의 Cloud Run 서비스에 새 이미지를 배포한다
+- 런타임 env, secret, Cloud SQL attachment, 서비스 계정은 Cloud Run 콘솔에 남겨둔다
 
-특히 `gcloud run deploy --set-env-vars`는 기존 env 전체를 교체할 수 있으므로, Cloud Run 콘솔에서 수동으로 넣어둔 값을 이후 배포에서 덮어쓸 수 있다.
+즉 아래는 사전에 Cloud Run 콘솔 또는 별도 운영 절차로 준비되어 있어야 한다.
 
-따라서 현재 단계에서는:
-
-1. 첫 배포는 이 문서의 수동 배포 절차를 사용한다
-2. 이후 자동화가 필요하면 `cloudbuild.yaml`에 `DB_*`, `--set-secrets`, 서비스 계정 설정까지 포함해 별도로 보강한다
+1. `Cloud SQL` 인스턴스/DB/유저
+2. `threadatlas-api` 서비스 계정과 IAM 권한
+3. Secret Manager의 `threadatlas-db-password`, `threadatlas-auth-bootstrap-key`, `threadatlas-google-oauth-client-id`
+4. Cloud Run 서비스의 env/secrets/Cloud SQL 연결
 
 ### 11.2 WebSocket 운영
 
@@ -268,7 +298,7 @@ Cloud Run은 WebSocket을 지원하지만, 세션 유지 특성상 아래를 고
 ## 12. 참고 파일
 
 - [cloudbuild.yaml](../cloudbuild.yaml)
-- [apps/api/Dockerfile](../Dockerfile)
+- [Dockerfile](../Dockerfile)
 - [config.ts](../apps/api/src/db/config.ts)
 - [gemini.ts](../apps/api/src/services/gemini.ts)
 - [BE-SPEC-INFRA.md](./internals/be/BE-SPEC-INFRA.md)
