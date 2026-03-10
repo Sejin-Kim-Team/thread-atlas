@@ -202,6 +202,9 @@ describe("ws enrich trigger mode redesign contract (red)", () => {
     expect(hasEvent(events, "context.enrich.request")).toBe(true)
     expect(hasEvent(events, "turn.done")).toBe(false)
     expect(countAssistCalls()).toBe(0)
+    const enrichRequest = findEvent(events, "context.enrich.request")
+    const requestPayload = enrichRequest?.payload as Record<string, unknown> | undefined
+    expect(requestPayload?.timeoutMs).toBe(5000)
   })
 
   it("does not request enrich in rule mode when rule does not match", async () => {

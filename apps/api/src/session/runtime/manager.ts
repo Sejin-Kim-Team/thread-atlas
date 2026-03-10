@@ -22,7 +22,7 @@ const logger = createLogger("session/runtime")
 
 const MAX_RUNTIME_SESSIONS = 256
 const RECALL_CARD_MIN_SIMILARITY = 0.8
-const ENRICH_DEFAULT_TIMEOUT_MS = 3000
+const ENRICH_DEFAULT_TIMEOUT_MS = 5000
 const ENRICH_TRIGGER_MODES = ["rule", "hybrid-simple", "hybrid-complex"] as const
 const ENRICH_REQUEST_KINDS = [
   "node-screenshot",

@@ -368,6 +368,7 @@ export interface ContextEnrichRequestPayload {
 - request는 current primary tab 또는 그 page/entity를 대상으로만 보낼 수 있다
 - request는 현재 active turn에만 유효하다
 - 해커톤 기본값은 `visibility = "status-only"`다
+- `timeoutMs`가 생략되면 backend 기본값 `5000ms`를 사용한다
 - request는 FE가 deterministic하게 처리 가능한 구조화 필드만 사용해야 한다
 - request 필드는 backend가 판단한 capture target 명세이며, 실제 캡처 방법은 FE가 결정한다
 - FE가 처리할 수 없으면 실패 상태 또는 대응 error를 반환하는 것이 권장된다
