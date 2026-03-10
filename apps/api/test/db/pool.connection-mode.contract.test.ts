@@ -32,6 +32,10 @@ vi.mock("pg", () => ({
 }))
 
 vi.mock("@google-cloud/cloud-sql-connector", () => ({
+  AuthTypes: {
+    PASSWORD: "PASSWORD",
+    IAM: "IAM"
+  },
   Connector: class FakeConnector {
     getOptions = mocks.connectorGetOptions
     close = mocks.connectorClose

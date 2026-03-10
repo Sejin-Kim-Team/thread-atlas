@@ -1,4 +1,4 @@
-import { Connector } from "@google-cloud/cloud-sql-connector"
+import { AuthTypes, Connector } from "@google-cloud/cloud-sql-connector"
 import { Pool, type QueryResult, type QueryResultRow } from "pg"
 import { resolveDatabaseConfig } from "./config"
 
@@ -22,7 +22,7 @@ async function createPool(): Promise<Pool> {
   const nextConnector = new Connector()
   const connectorOptions = await nextConnector.getOptions({
     instanceConnectionName: config.instanceConnectionName,
-    authType: config.iamAuthn ? "IAM" : "PASSWORD"
+    authType: config.iamAuthn ? AuthTypes.IAM : AuthTypes.PASSWORD
   })
 
   connector = nextConnector
