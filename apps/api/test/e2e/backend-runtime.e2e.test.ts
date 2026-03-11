@@ -12,6 +12,9 @@ import {
   type E2EHarness,
 } from "./helpers/e2e-harness"
 
+const ONE_BY_ONE_PNG_BASE64 =
+  "iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAGUlEQVR4nGP47+DwnxLMMGrAqAGjBgwXAwBAAH4fx7aKCQAAAABJRU5ErkJggg=="
+
 describe.sequential("BE 자동 E2E", () => {
   let harness: E2EHarness | null = null
 
@@ -286,6 +289,62 @@ describe.sequential("BE 자동 E2E", () => {
       const projectionBody = projectionPayload?.body as Record<string, unknown> | undefined
 
       expect(projectionBody?.type).toBe("answer")
+    } finally {
+      ws.close()
+    }
+  }, 120_000)
+
+  it("ws image-only enrich result가 실제 서버 경로에서 거부되지 않고 turn completion까지 진행된다", async () => {
+    if (!harness) {
+      throw new Error("e2e harness is not ready")
+    }
+
+    const session = await issueDevBootstrapSession(harness, "e2e-enrich-image-user")
+    const ws = await connectE2EWebSocket(harness.port, session.token)
+
+    try {
+      const collector = createWebSocketMessageCollector(ws)
+      await openCurrentPageSession(ws)
+      ws.send(
+        JSON.stringify(createCurrentPageIntent("이 화면의 중요한 영역을 자세히 설명해줘"))
+      )
+
+      const waitingMessages = await collector.waitForRequiredTypes(["context.enrich.request"], 30_000)
+      const enrichRequest = waitingMessages.find((message) => message.type === "context.enrich.request")
+      const enrichPayload = enrichRequest?.payload as Record<string, unknown> | undefined
+      const turnId = enrichRequest?.turnId as string | undefined
+
+      expect(typeof turnId).toBe("string")
+      expect(enrichPayload?.requestKind).toBe("visible-region")
+
+      ws.send(
+        JSON.stringify({
+          type: "context.enrich.result",
+          requestId: "req-e2e-enrich-image-result",
+          sessionId: enrichRequest?.sessionId,
+          turnId,
+          timestamp: new Date().toISOString(),
+          payload: {
+            requestKind: enrichPayload?.requestKind,
+            targetRef: enrichPayload?.targetRef,
+            status: "ok",
+            capturedAt: new Date().toISOString(),
+            mimeType: "image/png",
+            imageBase64: ONE_BY_ONE_PNG_BASE64
+          }
+        })
+      )
+
+      const completedMessages = await collector.waitForRequiredTypes(["projection", "turn.done"], 45_000)
+      const errorMessage = completedMessages.find((message) => message.type === "error")
+      const projection = completedMessages.find((message) => message.type === "projection")
+      const projectionPayload = projection?.payload as Record<string, unknown> | undefined
+      const projectionBody = projectionPayload?.body as Record<string, unknown> | undefined
+      const turnDone = completedMessages.find((message) => message.type === "turn.done")
+
+      expect(errorMessage).toBeUndefined()
+      expect(projectionBody?.type).toBe("answer")
+      expect(turnDone?.turnId).toBe(turnId)
     } finally {
       ws.close()
     }

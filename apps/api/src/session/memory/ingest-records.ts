@@ -147,6 +147,41 @@ function buildCanonicalRetrievalText(record: MemoryRecord): string {
     lines.push(`visual: ${visualSummary}`)
   }
 
+  const visualLabels = normalizeTextItems(record.visual?.extractedLabels)
+  if (visualLabels.length > 0) {
+    lines.push(`visual labels: ${visualLabels.join(", ")}`)
+  }
+
+  const visualExtractedText = normalizeTextItems(record.visual?.extractedText)
+  if (visualExtractedText.length > 0) {
+    lines.push(`visual text: ${visualExtractedText.join("; ")}`)
+  }
+
+  const comparedSeries = normalizeTextItems(record.visual?.chart?.comparedSeries)
+  if (comparedSeries.length > 0) {
+    lines.push(`chart series: ${comparedSeries.join(", ")}`)
+  }
+
+  const diagramEntities = normalizeTextItems(record.visual?.diagram?.entities)
+  if (diagramEntities.length > 0) {
+    lines.push(`diagram entities: ${diagramEntities.join(", ")}`)
+  }
+
+  const diagramRelations = normalizeTextItems(record.visual?.diagram?.relations)
+  if (diagramRelations.length > 0) {
+    lines.push(`diagram relations: ${diagramRelations.join("; ")}`)
+  }
+
+  const visibleControls = normalizeTextItems(record.visual?.uiVisual?.visibleControls)
+  if (visibleControls.length > 0) {
+    lines.push(`visible controls: ${visibleControls.join(", ")}`)
+  }
+
+  const visibleSections = normalizeTextItems(record.visual?.uiVisual?.visibleSections)
+  if (visibleSections.length > 0) {
+    lines.push(`visible sections: ${visibleSections.join(", ")}`)
+  }
+
   return lines.join("\n").trim()
 }
 

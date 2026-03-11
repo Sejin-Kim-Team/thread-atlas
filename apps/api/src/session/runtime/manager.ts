@@ -9,6 +9,12 @@ import type {
   UserIntentPayload
 } from "./types"
 import { createLogger } from "../../runtime/logger"
+import { normalizeEnrichEvidence } from "../visual/enrich-result"
+import type {
+  NormalizedEnrichDetail,
+  NormalizedEnrichEvidence,
+  VisualDerivedSummary
+} from "../visual/types"
 
 type RuntimeResult =
   | { status: 200; body: Record<string, unknown> }
@@ -194,6 +200,8 @@ interface ContextEnrichResultPayload {
   status: "ok" | "failed" | "unsupported"
   capturedAt: string
   detail?: Record<string, unknown>
+  imageBase64?: string
+  mimeType?: "image/png" | "image/jpeg"
   failureReason?: string
 }
 
@@ -461,6 +469,16 @@ function parseContextEnrichResultPayload(payload: unknown): ContextEnrichResultP
     parsed.detail = payload.detail
   }
 
+  const imageBase64 = asString(payload.imageBase64)
+  if (imageBase64) {
+    parsed.imageBase64 = imageBase64
+  }
+
+  const mimeType = asString(payload.mimeType)
+  if (mimeType === "image/png" || mimeType === "image/jpeg") {
+    parsed.mimeType = mimeType
+  }
+
   const failureReason = asString(payload.failureReason)
   if (failureReason) {
     parsed.failureReason = failureReason
@@ -557,89 +575,6 @@ function isExactTargetRefMatch(
 function isCrossTabTargetRef(targetRef: Record<string, unknown>): boolean {
   const normalizedKind = asString(targetRef.kind) ?? asString(targetRef.type)
   return normalizedKind === "cross-tab"
-}
-
-interface NormalizedEnrichDetailForPrompt {
-  textPreview?: string
-  htmlPreview?: string
-  attributes?: Record<string, string>
-  bounds?: {
-    x: number
-    y: number
-    width: number
-    height: number
-  }
-}
-
-function sanitizePromptText(value: string, maxLength: number): string {
-  return value.replace(/\s+/g, " ").trim().slice(0, maxLength)
-}
-
-function normalizeEnrichDetailForPrompt(
-  enrichDetail?: Record<string, unknown>
-): NormalizedEnrichDetailForPrompt | null {
-  if (!enrichDetail) {
-    return null
-  }
-
-  const normalized: NormalizedEnrichDetailForPrompt = {}
-
-  const detailText = asString(enrichDetail.text)
-  if (detailText) {
-    normalized.textPreview = sanitizePromptText(detailText, 300)
-  }
-
-  const htmlSnippet = asString(enrichDetail.htmlSnippet)
-  if (htmlSnippet) {
-    const strippedScript = htmlSnippet.replace(/<script[\s\S]*?<\/script>/gi, " ")
-    normalized.htmlPreview = sanitizePromptText(strippedScript, 240)
-  }
-
-  if (isObject(enrichDetail.attributes)) {
-    const safeAttributes: Record<string, string> = {}
-    const keys = Object.keys(enrichDetail.attributes)
-      .sort((a, b) => a.localeCompare(b))
-      .slice(0, 12)
-    for (const key of keys) {
-      const lowered = key.toLowerCase()
-      if (lowered.startsWith("on")) {
-        continue
-      }
-      const isSafeKey =
-        lowered === "id" ||
-        lowered === "class" ||
-        lowered === "role" ||
-        lowered === "title" ||
-        lowered.startsWith("aria-") ||
-        lowered.startsWith("data-")
-      if (!isSafeKey) {
-        continue
-      }
-      const rawValue = asString(enrichDetail.attributes[key])
-      if (!rawValue) {
-        continue
-      }
-      safeAttributes[key] = sanitizePromptText(rawValue, 80)
-    }
-    if (Object.keys(safeAttributes).length > 0) {
-      normalized.attributes = safeAttributes
-    }
-  }
-
-  if (isObject(enrichDetail.bounds)) {
-    const x = asFiniteNumber(enrichDetail.bounds.x)
-    const y = asFiniteNumber(enrichDetail.bounds.y)
-    const width = asFiniteNumber(enrichDetail.bounds.width)
-    const height = asFiniteNumber(enrichDetail.bounds.height)
-    if (x !== null && y !== null && width !== null && height !== null) {
-      normalized.bounds = { x, y, width, height }
-    }
-  }
-
-  if (Object.keys(normalized).length === 0) {
-    return null
-  }
-  return normalized
 }
 
 function ensureBilingualRuleDictionary(dictionary: Record<string, BilingualKeywordSet>): void {
@@ -844,11 +779,12 @@ function buildRecallQueryText(intentText: string, snapshot: SnapshotLike, answer
 function buildGenerationPrompt(
   intentText: string,
   snapshot: SnapshotLike,
-  enrichDetail?: Record<string, unknown>
+  enrichDetail?: NormalizedEnrichDetail,
+  visualSummary?: VisualDerivedSummary,
+  answerSupplement?: string
 ): string {
   const focusText = resolveFocusText(snapshot)
-  const normalizedEnrichDetail = normalizeEnrichDetailForPrompt(enrichDetail)
-  const enrichText = normalizedEnrichDetail ? JSON.stringify(normalizedEnrichDetail) : null
+  const enrichText = enrichDetail ? JSON.stringify(enrichDetail) : null
   // 현재 페이지 근거를 유지하기 위해 intent와 focus 텍스트를 함께 프롬프트에 포함한다.
   const promptLines = [
     "You are a current-page semantic assistant.",
@@ -860,6 +796,16 @@ function buildGenerationPrompt(
   if (enrichText) {
     // 보안 경계: 자유형 원문 전체 대신 허용 필드 정규화 결과만 프롬프트에 포함한다.
     promptLines.splice(promptLines.length - 1, 0, `Enriched detail: ${enrichText}`)
+  }
+  if (visualSummary) {
+    promptLines.splice(
+      promptLines.length - 1,
+      0,
+      `Visual summary: ${JSON.stringify(visualSummary)}`
+    )
+  }
+  if (answerSupplement) {
+    promptLines.splice(promptLines.length - 1, 0, `Visual answer hint: ${answerSupplement}`)
   }
 
   return promptLines.join("\n")
@@ -1346,6 +1292,29 @@ export class RuntimeManager {
     }
 
     if (parsed.status === "ok") {
+      const normalizeInput: Parameters<typeof normalizeEnrichEvidence>[0] = {
+        requestKind: parsed.requestKind,
+        targetRef: parsed.targetRef,
+        capturedAt: parsed.capturedAt
+      }
+      if (parsed.detail) {
+        normalizeInput.detail = parsed.detail
+      }
+      if (parsed.imageBase64) {
+        normalizeInput.imageBase64 = parsed.imageBase64
+      }
+      if (parsed.mimeType) {
+        normalizeInput.mimeType = parsed.mimeType
+      }
+
+      const normalizedEvidence = normalizeEnrichEvidence(normalizeInput)
+      if (!normalizedEvidence.ok) {
+        activeTurn.status = "waiting-enrich"
+        activeTurn.enrichApplied = false
+        activeTurn.pendingEnrichRequest = pendingRequest
+        return invalidEvent(normalizedEvidence.message)
+      }
+
       return this.finalizeTurn(
         session,
         turnId,
@@ -1353,7 +1322,7 @@ export class RuntimeManager {
         activeTurn.intentText,
         activeTurn.primaryTabId,
         activeTurn.latestSnapshot,
-        parsed.detail,
+        normalizedEvidence.evidence,
         ["enrich-received"],
         ["current-page", "enrich"]
       )
@@ -1577,13 +1546,66 @@ export class RuntimeManager {
     delete session.activeTurn
   }
 
+  private async generateVisualSummaryWithGemini(
+    intentText: string,
+    snapshot: SnapshotLike,
+    enrichEvidence?: NormalizedEnrichEvidence
+  ): Promise<{ visualSummary?: VisualDerivedSummary; answerSupplement?: string }> {
+    if (!enrichEvidence) {
+      return {}
+    }
+    if (!process.env.GOOGLE_CLOUD_PROJECT || !process.env.GOOGLE_CLOUD_LOCATION) {
+      return {}
+    }
+
+    const geminiModule = await import("../../services/gemini")
+    try {
+      const geminiClient = geminiModule.createGeminiClient()
+      if (typeof geminiClient.generateStructuredVisualSummary !== "function") {
+        return {}
+      }
+
+      const visualReasonerInput: Parameters<typeof geminiClient.generateStructuredVisualSummary>[0] = {
+        intentText,
+        focusText: resolveFocusText(snapshot),
+        requestKind: enrichEvidence.requestKind,
+        targetRef: enrichEvidence.targetRef
+      }
+      if (enrichEvidence.detail) {
+        visualReasonerInput.detail = enrichEvidence.detail
+      }
+      if (enrichEvidence.image) {
+        visualReasonerInput.image = enrichEvidence.image
+      }
+
+      const result = await geminiClient.generateStructuredVisualSummary(visualReasonerInput)
+      return result
+    } catch (error) {
+      logger.warn("runtime-visual-summary-fallback", {
+        error
+      })
+      return {}
+    }
+  }
+
   private async generateCurrentPageAnswer(
     intentText: string,
     snapshot: SnapshotLike,
-    enrichDetail?: Record<string, unknown>
+    enrichEvidence?: NormalizedEnrichEvidence
   ): Promise<{ ok: true; answerText: string } | { ok: false; error: RuntimeResult }> {
+    const visualSummaryResult = await this.generateVisualSummaryWithGemini(
+      intentText,
+      snapshot,
+      enrichEvidence
+    )
     const generation = await this.generateTextWithGemini(
-      buildGenerationPrompt(intentText, snapshot, enrichDetail),
+      buildGenerationPrompt(
+        intentText,
+        snapshot,
+        enrichEvidence?.detail,
+        visualSummaryResult.visualSummary,
+        visualSummaryResult.answerSupplement
+      ),
       "generation failed"
     )
     if (!generation.ok) {
@@ -1602,11 +1624,11 @@ export class RuntimeManager {
     intentText: string,
     primaryTabId: number,
     snapshot: SnapshotLike,
-    enrichDetail: Record<string, unknown> | undefined,
+    enrichEvidence: NormalizedEnrichEvidence | undefined,
     progressStages: Array<"intent-routed" | "enrich-received">,
     provenanceSummary: string[]
   ): Promise<RuntimeResult> {
-    const generation = await this.generateCurrentPageAnswer(intentText, snapshot, enrichDetail)
+    const generation = await this.generateCurrentPageAnswer(intentText, snapshot, enrichEvidence)
     if (!generation.ok) {
       logger.warn("runtime-turn-generation-rejected", {
         userId: session.ownerUserId,

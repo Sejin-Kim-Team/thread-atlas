@@ -1,3 +1,5 @@
+import type { VisualDerivedSummary } from "../visual/types"
+
 export type MemoryRecordKind =
   | "branch-summary"
   | "section-summary"
@@ -34,11 +36,7 @@ export interface MemoryRecord {
     referencedNodeIds?: string[]
     [key: string]: unknown
   }
-  visual?: {
-    kind: "chart-summary" | "diagram-summary" | "ui-visual-summary"
-    summaryText: string
-    extractedLabels: string[]
-  }
+  visual?: VisualDerivedSummary
   kindPayload?: Record<string, unknown>
   createdAt?: string
 }
