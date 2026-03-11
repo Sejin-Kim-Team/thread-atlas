@@ -1,6 +1,7 @@
 import express from "express"
 import request from "supertest"
 import { beforeEach, describe, expect, it, vi } from "vitest"
+import { DEFAULT_JSON_BODY_LIMIT } from "../../src/http/json-body-limit"
 import { createWsSessionEventsRouter } from "../../src/routes/ws-session-events"
 import { RuntimeManager } from "../../src/session/runtime/manager"
 import {
@@ -67,7 +68,7 @@ interface IntentInput {
 function createTestClient(mode?: TriggerMode): TestClient {
   const runtime = new RuntimeManager(mode ? { enrichTriggerMode: mode } : undefined)
   const app = express()
-  app.use(express.json({ limit: "2mb" }))
+  app.use(express.json({ limit: DEFAULT_JSON_BODY_LIMIT }))
   app.use("/ws/session/events", createWsSessionEventsRouter(runtime))
   return request(app)
 }

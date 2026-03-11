@@ -2,6 +2,7 @@ import express from "express"
 import request from "supertest"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { WebSocket as NodeWebSocket } from "ws"
+import { DEFAULT_JSON_BODY_LIMIT } from "../../src/http/json-body-limit"
 import { createWsSessionEventsRouter } from "../../src/routes/ws-session-events"
 import { RuntimeManager } from "../../src/session/runtime/manager"
 import { attachSessionWebSocketServer } from "../../src/ws/session-ws-server"
@@ -191,7 +192,7 @@ function expectHandshakeRejected(url: string): Promise<void> {
 function createCanonicalHarness(): { app: express.Express; server: import("http").Server } {
   const app = express()
   const manager = new RuntimeManager()
-  app.use(express.json({ limit: "2mb" }))
+  app.use(express.json({ limit: DEFAULT_JSON_BODY_LIMIT }))
   app.use("/ws/session/events", createWsSessionEventsRouter(manager))
   const server = app.listen(0)
   attachSessionWebSocketServer(server, manager)

@@ -1,6 +1,7 @@
 import express from "express"
 import request from "supertest"
 import { beforeEach, describe, expect, it, vi } from "vitest"
+import { DEFAULT_JSON_BODY_LIMIT } from "../../src/http/json-body-limit"
 import { createWsSessionEventsRouter } from "../../src/routes/ws-session-events"
 import { RuntimeManager } from "../../src/session/runtime/manager"
 import {
@@ -78,7 +79,7 @@ interface SessionSetup {
 function createTestClient(mode?: TriggerMode): TestClient {
   const runtime = new RuntimeManager(mode ? { enrichTriggerMode: mode } : undefined)
   const app = express()
-  app.use(express.json({ limit: "2mb" }))
+  app.use(express.json({ limit: DEFAULT_JSON_BODY_LIMIT }))
   app.use("/ws/session/events", createWsSessionEventsRouter(runtime))
   return request(app)
 }
@@ -594,7 +595,7 @@ describe("ws enrich security P1 contract (red)", () => {
     expect(badMime.body.payload.code).toBe("INVALID_EVENT")
   })
 
-  it("lets the transport reject oversized image enrich payloads before runtime processing", async () => {
+  it("rejects oversized image enrich payloads through runtime validation", async () => {
     const setup = await prepareSession({ mode: "rule" })
     const intent = await postIntent(setup, "이 차트 영역을 더 자세히 확인해서 설명해줘.", "req-security-oversized-image-intent")
     const events = intent.body.events as Array<Record<string, unknown>>
@@ -624,7 +625,8 @@ describe("ws enrich security P1 contract (red)", () => {
       setup.token
     )
 
-    expect(oversizedResult.status).toBe(413)
+    expect(oversizedResult.status).toBe(400)
+    expect(oversizedResult.body.payload.code).toBe("INVALID_EVENT")
   })
 
   it("does not consume enrich timeout budget while waiting for assist decision", async () => {

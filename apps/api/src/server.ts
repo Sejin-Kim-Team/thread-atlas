@@ -2,6 +2,7 @@ import { createServer as createHttpNodeServer, type Server as HttpServer } from 
 import express from "express"
 import type { Express } from "express"
 import { queryDb } from "./db/pool"
+import { DEFAULT_JSON_BODY_LIMIT } from "./http/json-body-limit"
 import analyzeRouter from "./routes/analyze"
 import evaluateRouter from "./routes/evaluate"
 import ingestMemoryRouter from "./routes/ingest-memory"
@@ -22,7 +23,7 @@ export function createServer(): Express {
   const runtime = new RuntimeManager()
   const logger = createLogger("server")
   ;(app as RuntimeBoundExpress).locals.runtimeManager = runtime
-  app.use(express.json({ limit: "2mb" }))
+  app.use(express.json({ limit: DEFAULT_JSON_BODY_LIMIT }))
 
   app.get("/health", (_req, res) => {
     res.status(200).json({ ok: true })

@@ -138,6 +138,39 @@ function normalizeStringArray(value: unknown, limit = 12): string[] {
   return [...deduped]
 }
 
+function normalizeChartType(
+  value: unknown
+): "line" | "bar" | "pie" | "scatter" | "table-like" | "unknown" | null {
+  const normalized = normalizeText(value)
+  if (!normalized) {
+    return null
+  }
+  return normalized === "line" ||
+    normalized === "bar" ||
+    normalized === "pie" ||
+    normalized === "scatter" ||
+    normalized === "table-like" ||
+    normalized === "unknown"
+    ? normalized
+    : "unknown"
+}
+
+function normalizeChartTrend(
+  value: unknown
+): "up" | "down" | "flat" | "mixed" | "unknown" | null {
+  const normalized = normalizeText(value)
+  if (!normalized) {
+    return null
+  }
+  return normalized === "up" ||
+    normalized === "down" ||
+    normalized === "flat" ||
+    normalized === "mixed" ||
+    normalized === "unknown"
+    ? normalized
+    : "unknown"
+}
+
 function buildVisualSummaryPrompt(input: VisualReasonerInput): string {
   const promptLines = [
     "You analyze current-page visual evidence for a browser assistant.",
@@ -191,21 +224,8 @@ function parseVisualReasonerOutput(rawText: string): VisualReasonerOutput {
 
   if (isObject(visualSummary.chart)) {
     const chart: NonNullable<typeof visualSummaryInput.chart> = {}
-    const chartType = normalizeText(visualSummary.chart.chartType) as
-      | "line"
-      | "bar"
-      | "pie"
-      | "scatter"
-      | "table-like"
-      | "unknown"
-      | null
-    const trend = normalizeText(visualSummary.chart.trend) as
-      | "up"
-      | "down"
-      | "flat"
-      | "mixed"
-      | "unknown"
-      | null
+    const chartType = normalizeChartType(visualSummary.chart.chartType)
+    const trend = normalizeChartTrend(visualSummary.chart.trend)
     const comparedSeries = normalizeStringArray(visualSummary.chart.comparedSeries)
     if (chartType) {
       chart.chartType = chartType
