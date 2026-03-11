@@ -368,6 +368,12 @@ Long-term RAG는 다음을 기준으로 검색한다.
 - `entities`
 - `visual.summaryText`
 - `visual.extractedLabels`
+- `visual.extractedText`
+- `visual.chart.chartType`
+- `visual.chart.trend`
+- `visual.chart.comparedSeries`
+- `visual.diagram.*`
+- `visual.uiVisual.*`
 
 ## 8.2 Recall Output Rule
 

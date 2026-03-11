@@ -346,4 +346,40 @@ describe("ingestMemoryRecords", () => {
     expect(response.acceptedIds).toEqual(["mem-record-1"])
     expect(calls.slice(0, 2)).toEqual(["embed", "begin"])
   })
+
+  it("includes chart type and trend in retrieval text for visual summaries", async () => {
+    const visualRecord = {
+      ...buildRecord("00000000-0000-4000-8000-000000000121"),
+      visual: {
+        summaryText: "Revenue chart trends upward over time.",
+        extractedLabels: ["Revenue", "Cost"],
+        extractedText: ["Q1 to Q4"],
+        chart: {
+          chartType: "bar" as const,
+          trend: "up" as const,
+          comparedSeries: ["Revenue", "Cost"]
+        }
+      }
+    }
+
+    const { ingestMemoryRecords } = await import("../../src/session/memory/ingest-records")
+    const response = await ingestMemoryRecords(
+      {
+        source: "analyze",
+        records: [visualRecord]
+      },
+      "00000000-0000-4000-8000-000000000121"
+    )
+
+    expect(response.acceptedIds).toEqual(["mem-record-1"])
+    expect(mocks.embedTextWithVertex).toHaveBeenCalledTimes(1)
+    expect(mocks.embedTextWithVertex).toHaveBeenCalledWith(
+      expect.stringContaining("chart type: bar"),
+      "RETRIEVAL_DOCUMENT"
+    )
+    expect(mocks.embedTextWithVertex).toHaveBeenCalledWith(
+      expect.stringContaining("chart trend: up"),
+      "RETRIEVAL_DOCUMENT"
+    )
+  })
 })

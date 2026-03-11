@@ -157,6 +157,16 @@ function buildCanonicalRetrievalText(record: MemoryRecord): string {
     lines.push(`visual text: ${visualExtractedText.join("; ")}`)
   }
 
+  const chartType = record.visual?.chart?.chartType
+  if (hasNonBlankText(chartType) && chartType !== "unknown") {
+    lines.push(`chart type: ${chartType}`)
+  }
+
+  const chartTrend = record.visual?.chart?.trend
+  if (hasNonBlankText(chartTrend) && chartTrend !== "unknown") {
+    lines.push(`chart trend: ${chartTrend}`)
+  }
+
   const comparedSeries = normalizeTextItems(record.visual?.chart?.comparedSeries)
   if (comparedSeries.length > 0) {
     lines.push(`chart series: ${comparedSeries.join(", ")}`)

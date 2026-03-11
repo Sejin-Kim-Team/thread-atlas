@@ -1,6 +1,11 @@
 import type { SemanticSnapshot } from "@threadatlas/shared"
 import type { VisualDerivedSummary, VisualSummaryKind } from "./types"
 
+const CHART_KEYWORDS = ["chart", "graph", "line", "bar", "pie", "scatter", "table"] as const
+const DIAGRAM_KEYWORDS = ["diagram", "flow", "architecture", "topology", "structure"] as const
+const CHART_KOREAN_KEYWORDS = ["차트", "그래프", "표"] as const
+const DIAGRAM_KOREAN_KEYWORDS = ["다이어그램", "흐름도", "구조도"] as const
+
 function normalizeText(value: unknown): string | null {
   if (typeof value !== "string") {
     return null
@@ -24,20 +29,40 @@ function uniqueText(values: Array<string | null | undefined>, limit = 8): string
   return [...deduped]
 }
 
+function escapeRegex(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+}
+
+function containsStandaloneLatinKeyword(
+  haystack: string,
+  keywords: readonly string[]
+): boolean {
+  return keywords.some((keyword) =>
+    new RegExp(`(^|[^a-z0-9])${escapeRegex(keyword)}($|[^a-z0-9])`).test(haystack)
+  )
+}
+
+function containsAnyKeyword(haystack: string, latinKeywords: readonly string[], otherKeywords: readonly string[]): boolean {
+  return (
+    containsStandaloneLatinKeyword(haystack, latinKeywords) ||
+    otherKeywords.some((keyword) => haystack.includes(keyword))
+  )
+}
+
 function inferChartType(haystack: string): NonNullable<VisualDerivedSummary["chart"]>["chartType"] {
-  if (haystack.includes("line")) {
+  if (containsStandaloneLatinKeyword(haystack, ["line"])) {
     return "line"
   }
-  if (haystack.includes("bar")) {
+  if (containsStandaloneLatinKeyword(haystack, ["bar"])) {
     return "bar"
   }
-  if (haystack.includes("pie")) {
+  if (containsStandaloneLatinKeyword(haystack, ["pie"])) {
     return "pie"
   }
-  if (haystack.includes("scatter")) {
+  if (containsStandaloneLatinKeyword(haystack, ["scatter"])) {
     return "scatter"
   }
-  if (haystack.includes("table")) {
+  if (containsStandaloneLatinKeyword(haystack, ["table"])) {
     return "table-like"
   }
   return "unknown"
@@ -56,10 +81,10 @@ function inferVisualKind(snapshot: SemanticSnapshot): VisualSummaryKind {
     .join(" ")
     .toLowerCase()
 
-  if (/(chart|graph|line|bar|pie|scatter|table|차트|그래프|표)/.test(haystack)) {
+  if (containsAnyKeyword(haystack, CHART_KEYWORDS, CHART_KOREAN_KEYWORDS)) {
     return "chart-summary"
   }
-  if (/(diagram|flow|architecture|topology|structure|다이어그램|흐름도|구조도)/.test(haystack)) {
+  if (containsAnyKeyword(haystack, DIAGRAM_KEYWORDS, DIAGRAM_KOREAN_KEYWORDS)) {
     return "diagram-summary"
   }
   return "ui-visual-summary"
