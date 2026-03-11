@@ -4,6 +4,23 @@ const MAX_INLINE_IMAGE_BYTES = 2 * 1024 * 1024
 const SUPPORTED_IMAGE_MIME_TYPES = ["image/png", "image/jpeg"] as const
 type NormalizedInlineImage = NonNullable<NormalizedEnrichEvidence["image"]>
 
+function isStrictBase64(value: string): boolean {
+  if (value.length === 0 || value.length % 4 !== 0) {
+    return false
+  }
+
+  if (!/^[A-Za-z0-9+/]*={0,2}$/.test(value)) {
+    return false
+  }
+
+  const paddingMatch = value.match(/=+$/)
+  if (paddingMatch && paddingMatch[0].length > 2) {
+    return false
+  }
+
+  return Buffer.from(value, "base64").toString("base64") === value
+}
+
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null
 }
@@ -114,32 +131,32 @@ function normalizeInlineImage(
     }
   }
 
-  try {
-    const bytes = Buffer.from(normalizedBase64, "base64")
-    if (bytes.length === 0) {
-      return {
-        ok: false,
-        message: "imageBase64 is empty"
-      }
-    }
-    if (bytes.length > MAX_INLINE_IMAGE_BYTES) {
-      return {
-        ok: false,
-        message: "imageBase64 exceeds maximum allowed size"
-      }
-    }
-
-    return {
-      ok: true,
-      image: {
-        mimeType: normalizedMimeType as NormalizedInlineImage["mimeType"],
-        imageBytes: normalizedBase64
-      }
-    }
-  } catch {
+  if (!isStrictBase64(normalizedBase64)) {
     return {
       ok: false,
       message: "imageBase64 is not valid base64"
+    }
+  }
+
+  const bytes = Buffer.from(normalizedBase64, "base64")
+  if (bytes.length === 0) {
+    return {
+      ok: false,
+      message: "imageBase64 is empty"
+    }
+  }
+  if (bytes.length > MAX_INLINE_IMAGE_BYTES) {
+    return {
+      ok: false,
+      message: "imageBase64 exceeds maximum allowed size"
+    }
+  }
+
+  return {
+    ok: true,
+    image: {
+      mimeType: normalizedMimeType as NormalizedInlineImage["mimeType"],
+      imageBytes: normalizedBase64
     }
   }
 }
