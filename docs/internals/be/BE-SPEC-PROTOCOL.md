@@ -275,6 +275,7 @@ export interface ContextEnrichResultPayload {
 - `context.enrich.result`는 현재 active turn에만 귀속된다
 - `imageBase64` 또는 `detail` 중 최소 하나는 포함해야 한다
 - `status=ok`에서 `imageBase64`를 보낼 때는 `mimeType`을 함께 보내야 하며 허용 타입은 `image/png | image/jpeg`만이다
+- `imageBase64`는 data URL prefix 없는 raw base64 string이어야 하며, decode 결과는 2MB 이하여야 한다
 - backend는 `detail.text/htmlSnippet/attributes/bounds`만 allowlist 정규화해 프롬프트에 포함해야 한다
 - `htmlSnippet`에는 script payload를 그대로 포함하지 않는다
 - raw image bytes는 turn 처리 중 일시적으로만 사용하고 장기 저장하지 않는다

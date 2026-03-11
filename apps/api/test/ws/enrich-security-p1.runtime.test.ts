@@ -594,6 +594,39 @@ describe("ws enrich security P1 contract (red)", () => {
     expect(badMime.body.payload.code).toBe("INVALID_EVENT")
   })
 
+  it("lets the transport reject oversized image enrich payloads before runtime processing", async () => {
+    const setup = await prepareSession({ mode: "rule" })
+    const intent = await postIntent(setup, "이 차트 영역을 더 자세히 확인해서 설명해줘.", "req-security-oversized-image-intent")
+    const events = intent.body.events as Array<Record<string, unknown>>
+    const enrichRequest = findEvent(events, "context.enrich.request")
+    const turnId = enrichRequest?.turnId as string | undefined
+    const requestPayload = enrichRequest?.payload as Record<string, unknown> | undefined
+
+    const oversizedImage = Buffer.alloc(2 * 1024 * 1024 + 1, 3).toString("base64")
+    const oversizedResult = await postWsEventWithAuth(
+      setup.client,
+      createEnvelope(
+        "context.enrich.result",
+        {
+          requestKind: requestPayload?.requestKind,
+          targetRef: requestPayload?.targetRef,
+          status: "ok",
+          capturedAt: "2026-03-08T11:40:06.920Z",
+          mimeType: "image/png",
+          imageBase64: oversizedImage
+        },
+        {
+          requestId: "req-security-oversized-image-result",
+          sessionId: setup.sessionId,
+          turnId
+        }
+      ),
+      setup.token
+    )
+
+    expect(oversizedResult.status).toBe(413)
+  })
+
   it("does not consume enrich timeout budget while waiting for assist decision", async () => {
     geminiGenerateTextMock.mockImplementation(async (prompt: string) => {
       if (prompt.includes("ENRICH_TRIGGER_ASSIST")) {

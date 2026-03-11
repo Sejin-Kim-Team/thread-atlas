@@ -1,7 +1,8 @@
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import { normalizeEnrichEvidence } from "../../src/session/visual/enrich-result"
 
 describe("normalizeEnrichEvidence base64 validation", () => {
+  const oversizedEncoded = Buffer.alloc(2 * 1024 * 1024 + 1, 7).toString("base64")
   const baseInput = {
     requestKind: "visible-region" as const,
     targetRef: {
@@ -53,5 +54,20 @@ describe("normalizeEnrichEvidence base64 validation", () => {
       mimeType: "image/png",
       imageBytes: encoded
     })
+  })
+
+  it("rejects payloads whose decoded image size exceeds the limit", () => {
+    const bufferFromSpy = vi.spyOn(Buffer, "from")
+    const result = normalizeEnrichEvidence({
+      ...baseInput,
+      imageBase64: oversizedEncoded
+    })
+
+    expect(result).toEqual({
+      ok: false,
+      message: "imageBase64 exceeds maximum allowed size"
+    })
+    expect(bufferFromSpy).not.toHaveBeenCalled()
+    bufferFromSpy.mockRestore()
   })
 })
