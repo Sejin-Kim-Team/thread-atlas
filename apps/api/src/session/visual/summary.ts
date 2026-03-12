@@ -3,7 +3,7 @@ import type { VisualDerivedSummary, VisualSummaryKind } from "./types"
 
 const CHART_KEYWORDS = ["chart", "graph", "line", "bar", "pie", "scatter", "table"] as const
 const DIAGRAM_KEYWORDS = ["diagram", "flow", "architecture", "topology", "structure"] as const
-const CHART_KOREAN_KEYWORDS = ["차트", "그래프", "표"] as const
+const CHART_KOREAN_KEYWORDS = ["차트", "그래프", "도표"] as const
 const DIAGRAM_KOREAN_KEYWORDS = ["다이어그램", "흐름도", "구조도"] as const
 
 function normalizeText(value: unknown): string | null {

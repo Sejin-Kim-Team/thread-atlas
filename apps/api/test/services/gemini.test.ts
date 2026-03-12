@@ -88,4 +88,36 @@ describe("createGeminiClient", () => {
 
     expect(result?.visualSummary.kind).toBe("chart-summary")
   })
+
+  it("accepts canonical chart enums case-insensitively", async () => {
+    generateContentMock.mockResolvedValueOnce({
+      text: JSON.stringify({
+        visualSummary: {
+          kind: "chart-summary",
+          summaryText: "A bar chart trends upward.",
+          extractedLabels: ["Revenue"],
+          chart: {
+            chartType: "Bar",
+            trend: "Up"
+          }
+        }
+      })
+    })
+
+    const { createGeminiClient } = await import("../../src/services/gemini")
+    const client = createGeminiClient()
+    const result = await client.generateStructuredVisualSummary?.({
+      intentText: "차트 추세 알려줘",
+      focusText: "Revenue bar chart",
+      requestKind: "visible-region",
+      targetRef: {
+        kind: "region",
+        pageUrl: "https://example.com/chart",
+        region: "focus-node-region"
+      }
+    })
+
+    expect(result?.visualSummary.chart?.chartType).toBe("bar")
+    expect(result?.visualSummary.chart?.trend).toBe("up")
+  })
 })

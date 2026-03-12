@@ -465,12 +465,18 @@ function parseContextEnrichResultPayload(payload: unknown): ParsedContextEnrichR
     parsed.detail = payload.detail
   }
 
-  const imageBase64 = asString(payload.imageBase64)
+  const nestedDetail = isObject(parsed.detail) ? parsed.detail : undefined
+  const nestedImageBase64 = nestedDetail ? asString(nestedDetail.imageBase64) : null
+  const imageBase64 = asString(payload.imageBase64) ?? nestedImageBase64
   if (imageBase64) {
     parsed.imageBase64 = imageBase64
   }
 
-  const mimeType = asString(payload.mimeType)
+  const nestedMimeType = nestedDetail ? asString(nestedDetail.mimeType) : null
+  const mimeType =
+    asString(payload.mimeType) ??
+    nestedMimeType ??
+    (nestedImageBase64 ? "image/jpeg" : null)
   if (mimeType === "image/png" || mimeType === "image/jpeg") {
     parsed.mimeType = mimeType
   }

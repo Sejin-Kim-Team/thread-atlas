@@ -141,7 +141,7 @@ function normalizeStringArray(value: unknown, limit = 12): string[] {
 function normalizeChartType(
   value: unknown
 ): "line" | "bar" | "pie" | "scatter" | "table-like" | "unknown" | null {
-  const normalized = normalizeText(value)
+  const normalized = normalizeText(value)?.toLowerCase()
   if (!normalized) {
     return null
   }
@@ -158,7 +158,7 @@ function normalizeChartType(
 function normalizeChartTrend(
   value: unknown
 ): "up" | "down" | "flat" | "mixed" | "unknown" | null {
-  const normalized = normalizeText(value)
+  const normalized = normalizeText(value)?.toLowerCase()
   if (!normalized) {
     return null
   }

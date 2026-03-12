@@ -62,19 +62,6 @@ async function ensureEmbeddingRecordForeignKey(): Promise<void> {
       )
     `
   )
-  await queryDb(
-    `
-      alter table memory_record_embeddings
-      drop constraint if exists memory_record_embeddings_record_id_fkey
-    `
-  )
-  await queryDb(
-    `
-      alter table memory_record_embeddings
-      add constraint memory_record_embeddings_record_id_fkey
-      foreign key (record_id) references memory_records(id) on delete cascade
-    `
-  )
 }
 
 async function loadEmbeddingRepository() {

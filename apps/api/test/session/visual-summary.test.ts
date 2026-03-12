@@ -36,4 +36,21 @@ describe("buildVisualSummariesFromSnapshot", () => {
     expect(summaries[0]?.kind).toBe("chart-summary")
     expect(summaries[0]?.chart?.chartType).toBe("bar")
   })
+
+  it("does not misclassify Korean UI text containing 표시 as chart-summary", () => {
+    const snapshot = buildSemanticSnapshot()
+    snapshot.page.title = "워크스페이스 표시 설정"
+    snapshot.focus.region = "toolbar"
+    snapshot.focus.node = {
+      id: "toolbar-display-button",
+      kind: "button",
+      label: "표시 설정",
+      text: "사이드바 표시 옵션 열기"
+    }
+
+    const summaries = buildVisualSummariesFromSnapshot(snapshot)
+
+    expect(summaries).toHaveLength(1)
+    expect(summaries[0]?.kind).toBe("ui-visual-summary")
+  })
 })

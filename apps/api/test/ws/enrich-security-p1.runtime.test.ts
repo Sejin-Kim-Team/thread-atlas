@@ -531,6 +531,56 @@ describe("ws enrich security P1 contract (red)", () => {
     expect(prompt).toContain("comparison area")
   })
 
+  it("accepts legacy nested image enrich payloads from extension sender path", async () => {
+    geminiGenerateTextMock.mockResolvedValue("GENAI_NESTED_IMAGE_ANSWER")
+
+    const setup = await prepareSession({ mode: "rule" })
+    const intent = await postIntent(
+      setup,
+      "이 화면에서 중요한 영역을 자세히 설명해줘.",
+      "req-security-nested-image-intent"
+    )
+    const events = intent.body.events as Array<Record<string, unknown>>
+    const enrichRequest = findEvent(events, "context.enrich.request")
+    const turnId = enrichRequest?.turnId as string | undefined
+    const requestPayload = enrichRequest?.payload as Record<string, unknown> | undefined
+
+    const nestedImageBase64 = Buffer.from("fake-jpeg-image").toString("base64")
+    const enrichResult = await postWsEventWithAuth(
+      setup.client,
+      createEnvelope(
+        "context.enrich.result",
+        {
+          requestKind: requestPayload?.requestKind,
+          targetRef: requestPayload?.targetRef,
+          status: "ok",
+          capturedAt: "2026-03-08T11:40:16.250Z",
+          detail: {
+            imageBase64: nestedImageBase64,
+            text: "Legacy extension payload image"
+          }
+        },
+        {
+          requestId: "req-security-nested-image-result",
+          sessionId: setup.sessionId,
+          turnId
+        }
+      ),
+      setup.token
+    )
+
+    expect(enrichResult.status).toBe(200)
+    expect(geminiGenerateStructuredVisualSummaryMock).toHaveBeenCalled()
+    const latestCall =
+      geminiGenerateStructuredVisualSummaryMock.mock.calls[
+        geminiGenerateStructuredVisualSummaryMock.mock.calls.length - 1
+      ]?.[0]
+    expect(latestCall?.image).toEqual({
+      mimeType: "image/jpeg",
+      imageBytes: nestedImageBase64
+    })
+  })
+
   it("rejects ok enrich result when both detail and image are missing", async () => {
     const setup = await prepareSession({ mode: "rule" })
     const intent = await postIntent(setup, "이 차트 영역을 더 자세히 확인해서 설명해줘.", "req-security-missing-evidence-intent")
