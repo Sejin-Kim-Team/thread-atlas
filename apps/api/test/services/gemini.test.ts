@@ -120,4 +120,45 @@ describe("createGeminiClient", () => {
     expect(result?.visualSummary.chart?.chartType).toBe("bar")
     expect(result?.visualSummary.chart?.trend).toBe("up")
   })
+
+  it("drops subtype fields that do not match the normalized visual summary kind", async () => {
+    generateContentMock.mockResolvedValueOnce({
+      text: JSON.stringify({
+        visualSummary: {
+          kind: "ui-visual-summary",
+          summaryText: "A dashboard toolbar is visible.",
+          extractedLabels: ["Dashboard"],
+          chart: {
+            chartType: "bar",
+            trend: "up",
+            comparedSeries: ["Revenue"]
+          },
+          uiVisual: {
+            visibleControls: ["Refresh", "Share"],
+            visibleSections: ["Toolbar", "Filters"]
+          }
+        }
+      })
+    })
+
+    const { createGeminiClient } = await import("../../src/services/gemini")
+    const client = createGeminiClient()
+    const result = await client.generateStructuredVisualSummary?.({
+      intentText: "보이는 UI를 요약해줘",
+      focusText: "dashboard toolbar",
+      requestKind: "visible-region",
+      targetRef: {
+        kind: "region",
+        pageUrl: "https://example.com/dashboard",
+        region: "focus-node-region"
+      }
+    })
+
+    expect(result?.visualSummary.kind).toBe("ui-visual-summary")
+    expect(result?.visualSummary.chart).toBeUndefined()
+    expect(result?.visualSummary.uiVisual).toEqual({
+      visibleControls: ["Refresh", "Share"],
+      visibleSections: ["Toolbar", "Filters"]
+    })
+  })
 })

@@ -233,7 +233,7 @@ function parseVisualReasonerOutput(rawText: string): VisualReasonerOutput {
     visualSummaryInput.extractedText = extractedText
   }
 
-  if (isObject(visualSummary.chart)) {
+  if (kind === "chart-summary" && isObject(visualSummary.chart)) {
     const chart: NonNullable<typeof visualSummaryInput.chart> = {}
     const chartType = normalizeChartType(visualSummary.chart.chartType)
     const trend = normalizeChartTrend(visualSummary.chart.trend)
@@ -252,7 +252,7 @@ function parseVisualReasonerOutput(rawText: string): VisualReasonerOutput {
     }
   }
 
-  if (isObject(visualSummary.diagram)) {
+  if (kind === "diagram-summary" && isObject(visualSummary.diagram)) {
     const diagram: NonNullable<typeof visualSummaryInput.diagram> = {}
     const entities = normalizeStringArray(visualSummary.diagram.entities)
     const relations = normalizeStringArray(visualSummary.diagram.relations)
@@ -267,7 +267,7 @@ function parseVisualReasonerOutput(rawText: string): VisualReasonerOutput {
     }
   }
 
-  if (isObject(visualSummary.uiVisual)) {
+  if (kind === "ui-visual-summary" && isObject(visualSummary.uiVisual)) {
     const uiVisual: NonNullable<typeof visualSummaryInput.uiVisual> = {}
     const visibleControls = normalizeStringArray(visualSummary.uiVisual.visibleControls)
     const visibleSections = normalizeStringArray(visualSummary.uiVisual.visibleSections)
