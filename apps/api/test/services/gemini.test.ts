@@ -61,4 +61,31 @@ describe("createGeminiClient", () => {
     expect(result?.visualSummary.chart?.chartType).toBe("unknown")
     expect(result?.visualSummary.chart?.trend).toBe("unknown")
   })
+
+  it("accepts canonical visual summary kind values case-insensitively", async () => {
+    generateContentMock.mockResolvedValueOnce({
+      text: JSON.stringify({
+        visualSummary: {
+          kind: "Chart-Summary",
+          summaryText: "A bar chart compares weekly signups.",
+          extractedLabels: ["Weekly signups"]
+        }
+      })
+    })
+
+    const { createGeminiClient } = await import("../../src/services/gemini")
+    const client = createGeminiClient()
+    const result = await client.generateStructuredVisualSummary?.({
+      intentText: "차트 유형 알려줘",
+      focusText: "weekly signups bar chart",
+      requestKind: "visible-region",
+      targetRef: {
+        kind: "region",
+        pageUrl: "https://example.com/chart",
+        region: "focus-node-region"
+      }
+    })
+
+    expect(result?.visualSummary.kind).toBe("chart-summary")
+  })
 })

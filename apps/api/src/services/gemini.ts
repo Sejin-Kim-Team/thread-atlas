@@ -171,6 +171,21 @@ function normalizeChartTrend(
     : "unknown"
 }
 
+function normalizeVisualSummaryKind(
+  value: unknown
+): "chart-summary" | "diagram-summary" | "ui-visual-summary" | null {
+  const normalized = normalizeText(value)?.toLowerCase()
+  if (!normalized) {
+    return null
+  }
+
+  return normalized === "chart-summary" ||
+    normalized === "diagram-summary" ||
+    normalized === "ui-visual-summary"
+    ? normalized
+    : null
+}
+
 function buildVisualSummaryPrompt(input: VisualReasonerInput): string {
   const promptLines = [
     "You analyze current-page visual evidence for a browser assistant.",
@@ -201,13 +216,9 @@ function parseVisualReasonerOutput(rawText: string): VisualReasonerOutput {
   }
 
   const visualSummary = parsed.visualSummary
-  const kind = normalizeText(visualSummary.kind)
+  const kind = normalizeVisualSummaryKind(visualSummary.kind)
   const summaryText = normalizeText(visualSummary.summaryText)
-  if (
-    !kind ||
-    !summaryText ||
-    (kind !== "chart-summary" && kind !== "diagram-summary" && kind !== "ui-visual-summary")
-  ) {
+  if (!kind || !summaryText) {
     throw new Error("visual summary response is missing required fields")
   }
 
