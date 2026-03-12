@@ -68,6 +68,13 @@ function getSearchLabel(
   return null
 }
 
+function toRegionDescriptor(region: {
+  primitive: string
+  subtype?: string | undefined
+}): { primitive: string; subtype?: string } {
+  return region.subtype ? { primitive: region.primitive, subtype: region.subtype } : { primitive: region.primitive }
+}
+
 function resolveSearchCategory(
   region: Pick<SemanticSelectionTarget, "primitive" | "category">,
   docsSearch: boolean
@@ -84,10 +91,12 @@ function mapSkeletonRegion(
   docsSearch: boolean,
   hasResults: boolean
 ): SemanticSkeleton["regions"][number] {
-  const displayLabel = getSearchLabel(getAnchorElement(region), {
-    primitive: region.primitive,
-    subtype: region.subtype
-  }, docsSearch, hasResults)
+  const displayLabel = getSearchLabel(
+    getAnchorElement(region),
+    toRegionDescriptor(region),
+    docsSearch,
+    hasResults
+  )
 
   if (!displayLabel) {
     return region
@@ -107,10 +116,7 @@ function mapExpandedRegion(
   hasResults: boolean
 ): SemanticRegion {
   const anchor = ctx.document.querySelector(`[data-semantic-region="${region.id}"]`)
-  const displayLabel = getSearchLabel(anchor, {
-    primitive: region.primitive,
-    subtype: region.subtype
-  }, docsSearch, hasResults)
+  const displayLabel = getSearchLabel(anchor, toRegionDescriptor(region), docsSearch, hasResults)
 
   if (!displayLabel) {
     return region
@@ -198,10 +204,12 @@ export class SearchEnhancer implements SiteEnhancer {
   refineSelection(input: SemanticSelectionTarget, ctx: EnhancerContext): SemanticSelectionTarget {
     const element = findSelectionElement(ctx, input)
     const docsSearch = isDocsSearchPage(ctx.url, ctx.document)
-    const displayLabel = getSearchLabel(element, {
-      primitive: input.primitive,
-      subtype: input.subtype
-    }, docsSearch, hasResultGrid(ctx.document))
+    const displayLabel = getSearchLabel(
+      element,
+      toRegionDescriptor(input),
+      docsSearch,
+      hasResultGrid(ctx.document)
+    )
 
     if (!displayLabel) {
       return input

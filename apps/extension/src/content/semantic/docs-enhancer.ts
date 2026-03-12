@@ -135,6 +135,13 @@ function regionLabelForElement(
   return null
 }
 
+function toRegionDescriptor(region: {
+  primitive: string
+  subtype?: string | undefined
+}): { primitive: string; subtype?: string } {
+  return region.subtype ? { primitive: region.primitive, subtype: region.subtype } : { primitive: region.primitive }
+}
+
 function resolveDocsCategory(
   region: Pick<SemanticSelectionTarget, "primitive" | "subtype" | "category">
 ): SemanticSelectionTarget["category"] {
@@ -153,10 +160,7 @@ function mapSkeletonRegion(
   pageKind: DocsPageKind
 ): SemanticSkeleton["regions"][number] {
   const anchor = getAnchorElement(region)
-  const displayLabel = regionLabelForElement(anchor, {
-    primitive: region.primitive,
-    subtype: region.subtype
-  }, pageKind)
+  const displayLabel = regionLabelForElement(anchor, toRegionDescriptor(region), pageKind)
 
   if (!displayLabel) {
     return region
@@ -171,10 +175,7 @@ function mapSkeletonRegion(
 
 function mapExpandedRegion(region: SemanticRegion, ctx: EnhancerContext, pageKind: DocsPageKind): SemanticRegion {
   const anchor = ctx.document.querySelector(`[data-semantic-region="${region.id}"]`)
-  const displayLabel = regionLabelForElement(anchor, {
-    primitive: region.primitive,
-    subtype: region.subtype
-  }, pageKind)
+  const displayLabel = regionLabelForElement(anchor, toRegionDescriptor(region), pageKind)
 
   if (!displayLabel) {
     return region
@@ -267,10 +268,7 @@ export class DocsEnhancer implements SiteEnhancer {
   refineSelection(input: SemanticSelectionTarget, ctx: EnhancerContext): SemanticSelectionTarget {
     const element = findSelectionElement(ctx, input)
     const pageKind = getDocsPageKind(ctx.url, ctx.document)
-    const displayLabel = regionLabelForElement(element, {
-      primitive: input.primitive,
-      subtype: input.subtype
-    }, pageKind)
+    const displayLabel = regionLabelForElement(element, toRegionDescriptor(input), pageKind)
 
     if (!displayLabel) {
       return input

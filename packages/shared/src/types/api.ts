@@ -27,22 +27,22 @@ export type EvaluateSseEvent =
   | { event: "done"; data: EvaluateDonePayload }
   | { event: "error"; data: EvaluateErrorPayload }
 
-export interface TokenRequest {
+export interface LegacyTokenRequest {
   userId: string
 }
 
-export interface TokenResponse {
+export interface LegacyTokenResponse {
   token: string
   expiresAt: number
 }
 
-export interface AnalyzeRequest {
+export interface LegacyAnalyzeRequest {
   userId: string
   threadDoc: ThreadDoc
   articleUrl: string | null
 }
 
-export interface AnalyzeResponse {
+export interface LegacyAnalyzeResponse {
   threadSemantics: ThreadSemantics
   cached: boolean
 }

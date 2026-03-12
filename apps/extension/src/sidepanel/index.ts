@@ -1,12 +1,10 @@
 import {
   buildContextPack,
   DEFAULT_API_BASE_URL,
-  type ConversationContext,
   type Intent,
   type Projection,
-  type SemanticSnapshot,
-  type ThreadSemantics,
-  type TokenResponse
+  type SemanticNode,
+  type SemanticSnapshot
 } from "@threadatlas/shared"
 import {
   renderCompactJson,
@@ -17,17 +15,19 @@ import {
 } from "@threadatlas/shared/projection-policy"
 import type {
   AnyRuntimeMessage,
+  ContextEnrichResultPayload,
+  RuntimeErrorPayload,
+  ServerEnvelope,
   SemanticSelectionTarget,
-  SensorData
 } from "@threadatlas/shared/runtime"
 import type { RegionDump } from "../content/semantic/core/observability"
 import { isSemanticCaptureSupportedUrl } from "../common/semantic-url"
-import { assembleStateSnapshot } from "./state-assembler"
-import { callEvaluate } from "./sse-client"
 import { routeProjection } from "./projection-router"
 import { ContentGraphManager } from "./content-graph"
 import { connectGeminiLive, type LiveSession } from "./gemini-live"
 import { initializeAudio } from "./audio"
+import { createAuthClient } from "./auth-client"
+import { SessionWsTransport } from "./session-ws-transport"
 import { TokenManager } from "./token-manager"
 import {
   bindSemanticSnapshotActions,
@@ -69,12 +69,9 @@ interface SemanticRegionDumpState {
 interface SidePanelState {
   phase: Phase
   geminiLiveSession: LiveSession | null
-  tokenExpiresAt: number | null
+  sessionTransport: SessionWsTransport | null
   contentGraph: ContentGraphManager
   activeTabId: number | null
-  conversationContext: ConversationContext | null
-  cachedSemantics: ThreadSemantics | null
-  currentAbortController: AbortController | null
   latestSemanticSnapshot: SemanticSnapshotState | null
   latestRegionDump: SemanticRegionDumpState | null
   semanticSnapshotHistory: SemanticSnapshot[]
@@ -82,21 +79,25 @@ interface SidePanelState {
   semanticRawVisible: boolean
   selectionEnabled: boolean
   selectedTarget: SemanticSelectionTarget | null
+  sessionId: string | null
+  clientSessionId: string | null
+  activeTurnId: string | null
+  pendingEnrichRequest: Extract<ServerEnvelope, { type: "context.enrich.request" }> | null
+  lastRuntimeError: RuntimeErrorPayload | null
+  runtimeSnapshot: SemanticSnapshot | null
   semanticContextProfile: ContextTaskProfile
   semanticContextFormat: ContextProjectionFormat
 }
 
 const API_BASE_URL = window.localStorage.getItem("THREADATLAS_API_BASE_URL") ?? DEFAULT_API_BASE_URL
+const authClient = createAuthClient({ apiBaseUrl: API_BASE_URL })
 
 const state: SidePanelState = {
   phase: "initializing",
   geminiLiveSession: null,
-  tokenExpiresAt: null,
+  sessionTransport: null,
   contentGraph: new ContentGraphManager(),
   activeTabId: null,
-  conversationContext: null,
-  cachedSemantics: null,
-  currentAbortController: null,
   latestSemanticSnapshot: null,
   latestRegionDump: null,
   semanticSnapshotHistory: [],
@@ -104,11 +105,18 @@ const state: SidePanelState = {
   semanticRawVisible: false,
   selectionEnabled: false,
   selectedTarget: null,
+  sessionId: null,
+  clientSessionId: null,
+  activeTurnId: null,
+  pendingEnrichRequest: null,
+  lastRuntimeError: null,
+  runtimeSnapshot: null,
   semanticContextProfile: "branch-summary",
   semanticContextFormat: "context-pack-json"
 }
 
 type RegionDumpEntry = RegionDump["regions"][number]
+type RuntimeEnrichRequestEvent = Extract<ServerEnvelope, { type: "context.enrich.request" }>
 const INTERACTIVE_CONTEXT_RESTRICTION = "Interactive semantic snapshots currently support only the branch-summary profile."
 
 function setPhase(phase: Phase): void {
@@ -116,7 +124,21 @@ function setPhase(phase: Phase): void {
   updatePhaseIndicator(phase)
 }
 
+function hasActiveRuntimeTurn(): boolean {
+  return (
+    state.activeTurnId !== null ||
+    state.pendingEnrichRequest !== null ||
+    state.phase === "opening-session" ||
+    state.phase === "sending-intent" ||
+    state.phase === "waiting-enrich" ||
+    state.phase === "resuming-turn"
+  )
+}
+
 function setPhaseForUrl(url: string): void {
+  if (hasActiveRuntimeTurn()) {
+    return
+  }
   setPhase(isSemanticCaptureSupportedUrl(url) ? "ready" : "dormant")
 }
 
@@ -156,21 +178,13 @@ async function sendToContentScript<TResponse>(tabId: number, message: unknown): 
   })
 }
 
-async function requestToken(): Promise<TokenResponse> {
-  if (typeof chrome !== "undefined" && chrome.runtime) {
-    try {
-      return await sendRuntimeMessage<TokenResponse>({ type: "REQUEST_TOKEN" })
-    } catch {
-      // fall back to direct API call
-    }
+async function requestViewportCapture(): Promise<string | null> {
+  try {
+    const response = await sendRuntimeMessage<{ viewport: string | null }>({ type: "CAPTURE_VIEWPORT" })
+    return response.viewport
+  } catch {
+    return null
   }
-
-  const response = await fetch(`${API_BASE_URL}/api/token`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ userId: "user_sungwoo" })
-  })
-  return (await response.json()) as TokenResponse
 }
 
 function handleVoiceUnavailable(error: unknown): void {
@@ -644,17 +658,238 @@ async function executeProjection(projection: Projection): Promise<void> {
   })
 }
 
-async function captureViewportIfNeeded(intent: Intent): Promise<string | null> {
-  if (intent.intentType !== "contextual_query" && intent.intentType !== "general") {
-    return null
+function getSemanticNodeText(node: SemanticNode): string {
+  if (node.kind === "interactive") {
+    return node.label ?? node.valuePreview ?? ""
   }
 
-  try {
-    const response = await sendRuntimeMessage<{ viewport: string | null }>({ type: "CAPTURE_VIEWPORT" })
-    return response.viewport
-  } catch {
+  return node.text
+}
+
+function asNonEmptyString(value: unknown): string | null {
+  if (typeof value !== "string") {
     return null
   }
+  const normalized = value.trim()
+  return normalized.length > 0 ? normalized : null
+}
+
+function buildEnrichBounds(region: RegionDumpEntry | null): { x: number; y: number; width: number; height: number } | undefined {
+  if (!region) {
+    return undefined
+  }
+
+  return {
+    x: region.boundingRect.x,
+    y: region.boundingRect.y,
+    width: region.boundingRect.width,
+    height: region.boundingRect.height
+  }
+}
+
+function buildEnrichAttributes(
+  snapshot: SemanticSnapshot,
+  node: SemanticNode,
+  region: RegionDumpEntry | null
+): Record<string, string> | undefined {
+  const attributes: Record<string, string> = {
+    "data-page-kind": snapshot.page.kind,
+    "data-node-kind": node.kind,
+    "data-region-id": snapshot.focus.region
+  }
+
+  if (region) {
+    attributes["data-category"] = region.category
+    attributes["data-primitive"] = region.primitive
+    attributes["data-layout-role"] = region.layoutRole
+    attributes["data-role-rank"] = region.roleRank
+    if (region.subtype) {
+      attributes["data-subtype"] = region.subtype
+    }
+  }
+
+  const selectedTarget = state.selectedTarget?.regionId === snapshot.focus.region ? state.selectedTarget : null
+  if (selectedTarget) {
+    attributes["data-selection-category"] = selectedTarget.category
+    attributes["data-selection-primitive"] = selectedTarget.primitive
+    attributes["data-selection-label"] = selectedTarget.label
+  }
+
+  if (node.kind === "content") {
+    attributes["data-content-type"] = node.type
+    if (typeof node.level === "number") {
+      attributes["data-heading-level"] = String(node.level)
+    }
+    for (const [key, value] of Object.entries(node.attributes ?? {})) {
+      if (!value) {
+        continue
+      }
+      if (key === "role") {
+        attributes.role = value
+        continue
+      }
+      if (key === "title") {
+        attributes.title = value
+        continue
+      }
+      if (key.startsWith("data-") || key.startsWith("aria-")) {
+        attributes[key] = value
+      }
+    }
+  }
+
+  if (node.kind === "comment") {
+    if (node.author) {
+      attributes["data-author"] = node.author
+    }
+    if (node.timestamp) {
+      attributes["data-timestamp"] = node.timestamp
+    }
+    attributes["data-depth"] = String(node.depth)
+  }
+
+  if (node.kind === "interactive") {
+    attributes["data-control-type"] = node.controlType
+    if (node.role) {
+      attributes.role = node.role
+    }
+    if (node.label) {
+      attributes.title = node.label
+    }
+    if (node.action) {
+      attributes["data-action"] = node.action
+    }
+    if (node.state) {
+      attributes["data-state"] = node.state
+    }
+    if (node.options && node.options.length > 0) {
+      attributes["data-options"] = node.options.join(" | ")
+    }
+  }
+
+  return Object.keys(attributes).length > 0 ? attributes : undefined
+}
+
+function getExpectedNodeId(targetRef: Record<string, unknown>): string | null {
+  return asNonEmptyString(targetRef.nodeId) ?? asNonEmptyString(targetRef.entityId)
+}
+
+async function buildContextEnrichResult(event: RuntimeEnrichRequestEvent): Promise<ContextEnrichResultPayload> {
+  const capturedAt = new Date().toISOString()
+  const baseResult = {
+    requestKind: event.payload.requestKind,
+    targetRef: event.payload.targetRef,
+    capturedAt
+  } satisfies Pick<ContextEnrichResultPayload, "requestKind" | "targetRef" | "capturedAt">
+
+  const snapshot = state.runtimeSnapshot ?? getSelectedSemanticSnapshot()
+  if (!snapshot) {
+    return {
+      ...baseResult,
+      status: "unsupported",
+      failureReason: "no semantic snapshot is bound to the active turn"
+    }
+  }
+
+  const expectedNodeId = getExpectedNodeId(event.payload.targetRef)
+  if (expectedNodeId && snapshot.focus.nodeId !== expectedNodeId) {
+    return {
+      ...baseResult,
+      status: "unsupported",
+      failureReason: "active semantic snapshot no longer matches the enrich target"
+    }
+  }
+
+  const region = findRegionDumpEntry(state.latestRegionDump?.dump ?? null, snapshot.focus.region)
+  const nodeText = getSemanticNodeText(snapshot.focus.node)
+  const selectedTargetText =
+    state.selectedTarget?.regionId === snapshot.focus.region ? state.selectedTarget.text.trim() : ""
+  const text = selectedTargetText || nodeText
+  const detail: Record<string, unknown> = {
+    captureScope: event.payload.requestKind,
+    pageUrl: snapshot.page.url,
+    pageTitle: snapshot.page.title ?? null,
+    nodeId: snapshot.focus.nodeId,
+    regionId: snapshot.focus.region,
+    text
+  }
+  const bounds = buildEnrichBounds(region)
+  if (bounds) {
+    detail.bounds = bounds
+  }
+  const attributes = buildEnrichAttributes(snapshot, snapshot.focus.node, region)
+  if (attributes) {
+    detail.attributes = attributes
+  }
+
+  if (event.payload.requestKind === "node-detail") {
+    return {
+      ...baseResult,
+      status: "ok",
+      detail
+    }
+  }
+
+  const viewport = await requestViewportCapture()
+  if (!viewport) {
+    return {
+      ...baseResult,
+      status: "failed",
+      failureReason: "viewport capture unavailable for visual enrich request"
+    }
+  }
+
+  detail.imageBase64 = viewport
+  return {
+    ...baseResult,
+    status: "ok",
+    detail
+  }
+}
+
+function createSessionTransport(): SessionWsTransport {
+  return new SessionWsTransport({
+    apiBaseUrl: API_BASE_URL,
+    authClient,
+    handlers: {
+      onPhaseChange(phase) {
+        setPhase(phase)
+      },
+      onSessionReady(event) {
+        state.sessionId = event.payload.sessionId
+        state.clientSessionId = event.payload.clientSessionId
+        state.lastRuntimeError = null
+      },
+      onProgress(event) {
+        state.activeTurnId = event.turnId
+        state.lastRuntimeError = null
+      },
+      onProjection(projection) {
+        void executeProjection(projection)
+      },
+      onTurnDone() {
+        state.activeTurnId = null
+        state.pendingEnrichRequest = null
+        state.lastRuntimeError = null
+        state.runtimeSnapshot = null
+      },
+      onError(error) {
+        state.activeTurnId = null
+        state.pendingEnrichRequest = null
+        state.lastRuntimeError = error
+        state.runtimeSnapshot = null
+        showNotify(error.message, "error")
+      },
+      async onEnrichRequest(event) {
+        state.pendingEnrichRequest = event
+        try {
+          return await buildContextEnrichResult(event)
+        } finally {
+          state.pendingEnrichRequest = null
+        }
+      }
+    }
+  })
 }
 
 async function handleUserIntent(intent: Intent): Promise<void> {
@@ -668,63 +903,50 @@ async function handleUserIntent(intent: Intent): Promise<void> {
     return
   }
 
-  setPhase("conversing")
-
-  if (state.currentAbortController) {
-    state.currentAbortController.abort()
+  const snapshot = getSelectedSemanticSnapshot()
+  if (!snapshot) {
+    showNotify("No semantic snapshot selected for the current tab.", "error")
+    return
   }
 
-  const abortController = new AbortController()
-  state.currentAbortController = abortController
+  state.sessionTransport ??= createSessionTransport()
+  state.runtimeSnapshot = snapshot
+  state.activeTurnId = null
+  state.pendingEnrichRequest = null
+  state.lastRuntimeError = null
 
-  const sensors = await sendToContentScript<SensorData>(state.activeTabId, {
-    type: "COLLECT_SENSORS"
-  })
-
-  const viewport = await captureViewportIfNeeded(intent)
-
-  const snapshot = await assembleStateSnapshot({
-    intent,
-    sensors,
-    contentGraph: state.contentGraph,
-    cachedSemantics: state.cachedSemantics,
-    conversationContext: state.conversationContext,
-    viewport
-  })
-
-  const request =
-    state.conversationContext !== null
-      ? {
-          stateSnapshot: snapshot,
-          conversationContext: state.conversationContext
-        }
-      : {
-          stateSnapshot: snapshot
-        }
-
-  await callEvaluate({
-    apiBaseUrl: API_BASE_URL,
-    request,
-    signal: abortController.signal,
-    onProjection(projection) {
-      void executeProjection(projection)
-    },
-    onDone(payload) {
-      state.conversationContext = payload.conversationContext
-      setPhase("ready")
-    },
-    onError(payload) {
-      showNotify(payload.message, "error")
-      setPhase("ready")
+  try {
+    await state.sessionTransport.sendIntent({
+      intent,
+      activeTabId: state.activeTabId,
+      snapshot
+    })
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "failed to send intent to the session runtime"
+    state.activeTurnId = null
+    state.pendingEnrichRequest = null
+    state.runtimeSnapshot = null
+    state.lastRuntimeError = {
+      code: "GENERATION_FAILED",
+      message
     }
-  })
+    setPhase("error")
+    showNotify(message, "error")
+  }
+}
+
+async function connectVoiceSession(token: string): Promise<void> {
+  const liveSession = await connectGeminiLive(token)
+  liveSession.onFunctionCall = handleUserIntent
+  state.geminiLiveSession?.close()
+  state.geminiLiveSession = liveSession
 }
 
 async function initializeVoiceSession(): Promise<void> {
   const tokenManager = new TokenManager(
-    requestToken,
+    () => authClient.issueToken(),
     async (token) => {
-      state.geminiLiveSession = await connectGeminiLive(token)
+      await connectVoiceSession(token)
     },
     (error) => {
       handleVoiceUnavailable(error)
@@ -732,8 +954,7 @@ async function initializeVoiceSession(): Promise<void> {
   )
 
   const token = await tokenManager.initialize()
-  state.geminiLiveSession = await connectGeminiLive(token)
-  state.geminiLiveSession.onFunctionCall = handleUserIntent
+  await connectVoiceSession(token)
 }
 
 function registerRuntimeListeners(): void {
@@ -797,6 +1018,7 @@ async function hydrateActiveTabState(): Promise<void> {
 
 async function initialize(): Promise<void> {
   setPhase("initializing")
+  state.sessionTransport = createSessionTransport()
   bindSemanticSnapshotActions({
     onCapture: () => {
       void requestSemanticSnapshot()
@@ -830,6 +1052,10 @@ async function initialize(): Promise<void> {
   registerRuntimeListeners()
   await hydrateActiveTabState()
   await initializeAudio()
+  window.addEventListener("beforeunload", () => {
+    void state.sessionTransport?.close()
+    state.geminiLiveSession?.close()
+  })
 
   try {
     await initializeVoiceSession()

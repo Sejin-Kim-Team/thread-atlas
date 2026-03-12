@@ -1,4 +1,3 @@
-import { DEFAULT_API_BASE_URL, type TokenResponse } from "@threadatlas/shared"
 import type { SidePanelToServiceWorkerMessage } from "@threadatlas/shared/runtime"
 import {
   createSemanticSnapshotCoordinator,
@@ -8,7 +7,6 @@ import {
 } from "./semantic-snapshot"
 
 const knownArticleUrls = new Map<string, string>()
-const API_BASE_URL = DEFAULT_API_BASE_URL
 
 const semanticSnapshotCoordinator = createSemanticSnapshotCoordinator({
   async getActiveTab() {
@@ -112,16 +110,6 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
   }
 })
 
-async function requestToken(): Promise<TokenResponse> {
-  const response = await fetch(`${API_BASE_URL}/api/token`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ userId: "user_sungwoo" })
-  })
-
-  return (await response.json()) as TokenResponse
-}
-
 chrome.runtime.onMessage.addListener((msg: SidePanelToServiceWorkerMessage, sender, sendResponse) => {
   switch (msg.type) {
     case "CAPTURE_VIEWPORT": {
@@ -142,16 +130,6 @@ chrome.runtime.onMessage.addListener((msg: SidePanelToServiceWorkerMessage, send
       chrome.tabs.create({ url: msg.payload.url, active: msg.payload.active }, (tab) => {
         sendResponse({ tabId: tab.id })
       })
-      return true
-    }
-
-    case "REQUEST_TOKEN": {
-      void requestToken()
-        .then((token) => sendResponse(token))
-        .catch((error: unknown) => {
-          const message = error instanceof Error ? error.message : "request token failed"
-          sendResponse({ token: "", expiresAt: 0, error: message })
-        })
       return true
     }
 

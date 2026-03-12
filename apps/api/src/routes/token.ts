@@ -1,4 +1,5 @@
 import { Router, type RequestHandler } from "express"
+import type { TokenGrantType, TokenRequest, TokenResponse } from "@threadatlas/shared"
 import { issueAuthSession } from "../auth/auth-sessions-repository"
 import {
   GoogleIdTokenUnauthorizedError,
@@ -32,7 +33,7 @@ function isBootstrapKeyAuthorized(value: unknown, configuredBootstrapKey: string
 interface TokenRequestBody {
   grantType?: unknown
   bootstrapSubject?: unknown
-  profile?: {
+  profile?: Extract<TokenRequest, { grantType: "dev-bootstrap" }>["profile"] & {
     displayName?: unknown
     primaryEmail?: unknown
     avatarUrl?: unknown
@@ -97,7 +98,7 @@ async function issueSessionResponse(
   req: Parameters<RequestHandler>[0],
   res: Parameters<RequestHandler>[1],
   user: UserPayload,
-  grantType: "dev-bootstrap" | "google-id-token"
+  grantType: TokenGrantType
 ): Promise<void> {
   const issueInput: {
     userId: string
@@ -118,11 +119,12 @@ async function issueSessionResponse(
     userId: user.id,
     clientKind: issueInput.clientKind
   })
-  res.status(200).json({
+  const response: TokenResponse = {
     token: issued.token,
     expiresAt: issued.expiresAt,
     user
-  })
+  }
+  res.status(200).json(response)
 }
 
 const handleToken: RequestHandler = async (req, res) => {

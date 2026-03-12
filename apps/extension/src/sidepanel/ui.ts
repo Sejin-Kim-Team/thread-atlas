@@ -9,12 +9,23 @@ import type {
 import type { ContextProjectionFormat, ContextTaskProfile } from "@threadatlas/shared/projection-policy"
 import type { SemanticSelectionTarget } from "@threadatlas/shared/runtime"
 
-export type Phase = "initializing" | "ready" | "conversing" | "dormant" | "error"
+export type Phase =
+  | "initializing"
+  | "ready"
+  | "opening-session"
+  | "sending-intent"
+  | "waiting-enrich"
+  | "resuming-turn"
+  | "dormant"
+  | "error"
 
 const PHASE_COLORS: Record<Phase, string> = {
   initializing: "#eab308",
   ready: "#16a34a",
-  conversing: "#2563eb",
+  "opening-session": "#0ea5e9",
+  "sending-intent": "#2563eb",
+  "waiting-enrich": "#f59e0b",
+  "resuming-turn": "#0f766e",
   dormant: "#64748b",
   error: "#dc2626"
 }
@@ -22,7 +33,10 @@ const PHASE_COLORS: Record<Phase, string> = {
 const PHASE_LABELS: Record<Phase, string> = {
   initializing: "analyzing",
   ready: "ready",
-  conversing: "conversing",
+  "opening-session": "opening session",
+  "sending-intent": "sending intent",
+  "waiting-enrich": "waiting enrich",
+  "resuming-turn": "resuming turn",
   dormant: "dormant",
   error: "error"
 }
