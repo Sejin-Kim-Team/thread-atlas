@@ -49,7 +49,7 @@ describe("site enhancers", () => {
     const skeleton = session.getSkeleton()
     expect(skeleton?.regions.find((region) => region.primitive === "authored-block")).toMatchObject({
       category: "content.article",
-      displayLabel: "Documentation article"
+      displayLabel: "Documentation overview"
     })
     expect(
       skeleton?.regions.find(
@@ -70,9 +70,9 @@ describe("site enhancers", () => {
       primitive: "navigation-cluster",
       category: "navigation.menu",
       nodeKind: "content",
-      nodeId: sidebar?.getAttribute("data-semantic-node-id"),
-      rootNodeId: sidebar?.getAttribute("data-semantic-node-id"),
-      scopeRootId: sidebar?.getAttribute("data-semantic-scope-root-id"),
+      nodeId: sidebar?.getAttribute("data-semantic-node-id") ?? null,
+      rootNodeId: sidebar?.getAttribute("data-semantic-node-id") ?? null,
+      scopeRootId: sidebar?.getAttribute("data-semantic-scope-root-id") ?? null,
       label: "Menu",
       displayLabel: "Menu",
       text: sidebar?.textContent ?? ""
@@ -98,7 +98,7 @@ describe("site enhancers", () => {
     ).toBeTruthy()
     expect(
       skeleton?.regions.find(
-        (region) => region.primitive === "interactive-block" && region.subtype === "search" && region.displayLabel === "Search query"
+        (region) => region.primitive === "interactive-block" && region.subtype === "search" && region.displayLabel === "Docs search"
       )
     ).toBeTruthy()
     expect(
@@ -116,9 +116,9 @@ describe("site enhancers", () => {
       subtype: "grid",
       category: "content.post",
       nodeKind: "content",
-      nodeId: resultCard?.getAttribute("data-semantic-node-id"),
-      rootNodeId: resultCard?.getAttribute("data-semantic-node-id"),
-      scopeRootId: resultCard?.getAttribute("data-semantic-scope-root-id"),
+      nodeId: resultCard?.getAttribute("data-semantic-node-id") ?? null,
+      rootNodeId: resultCard?.getAttribute("data-semantic-node-id") ?? null,
+      scopeRootId: resultCard?.getAttribute("data-semantic-scope-root-id") ?? null,
       label: "Result card",
       displayLabel: "Result card",
       text: resultCard?.textContent ?? ""
@@ -135,9 +135,9 @@ describe("site enhancers", () => {
       subtype: "filter",
       category: "interactive.filter",
       nodeKind: "interactive",
-      nodeId: filterPanel?.getAttribute("data-semantic-node-id"),
-      rootNodeId: filterPanel?.getAttribute("data-semantic-node-id"),
-      scopeRootId: filterPanel?.getAttribute("data-semantic-scope-root-id"),
+      nodeId: filterPanel?.getAttribute("data-semantic-node-id") ?? null,
+      rootNodeId: filterPanel?.getAttribute("data-semantic-node-id") ?? null,
+      scopeRootId: filterPanel?.getAttribute("data-semantic-scope-root-id") ?? null,
       label: "Filter controls",
       displayLabel: "Filter controls",
       text: filterPanel?.textContent ?? ""

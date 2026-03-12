@@ -1,4 +1,5 @@
 import type {
+  ContextEnrichResultPayload as SharedContextEnrichResultPayload,
   ContextUpdatePayload,
   RuntimeEnvelope,
   RuntimeErrorPayload,
@@ -8,6 +9,7 @@ import type {
   SnapshotPushPayload,
   UserIntentPayload
 } from "./types"
+import { present, respond, type Projection } from "@threadatlas/shared"
 import { createLogger } from "../../runtime/logger"
 import { normalizeEnrichEvidence } from "../visual/enrich-result"
 import type {
@@ -194,15 +196,9 @@ const ENRICH_RULE_DICTIONARY: Record<
 
 ensureBilingualRuleDictionary(ENRICH_RULE_DICTIONARY)
 
-interface ContextEnrichResultPayload {
-  requestKind: EnrichRequestKind
-  targetRef: Record<string, unknown>
-  status: "ok" | "failed" | "unsupported"
-  capturedAt: string
-  detail?: Record<string, unknown>
+type ParsedContextEnrichResultPayload = SharedContextEnrichResultPayload & {
   imageBase64?: string
   mimeType?: "image/png" | "image/jpeg"
-  failureReason?: string
 }
 
 interface RuntimeManagerOptions {
@@ -437,7 +433,7 @@ function parseUserIntentPayload(payload: unknown): UserIntentPayload | null {
   }
 }
 
-function parseContextEnrichResultPayload(payload: unknown): ContextEnrichResultPayload | null {
+function parseContextEnrichResultPayload(payload: unknown): ParsedContextEnrichResultPayload | null {
   if (!isObject(payload)) {
     return null
   }
@@ -458,10 +454,10 @@ function parseContextEnrichResultPayload(payload: unknown): ContextEnrichResultP
     return null
   }
 
-  const parsed: ContextEnrichResultPayload = {
-    requestKind: requestKind as ContextEnrichResultPayload["requestKind"],
+  const parsed: ParsedContextEnrichResultPayload = {
+    requestKind: requestKind as ParsedContextEnrichResultPayload["requestKind"],
     targetRef,
-    status: status as ContextEnrichResultPayload["status"],
+    status: status as ParsedContextEnrichResultPayload["status"],
     capturedAt
   }
 
@@ -1522,6 +1518,29 @@ export class RuntimeManager {
     }
   }
 
+  private makeProjectionEvent(
+    sessionId: string,
+    turnId: string,
+    projection: Projection,
+    legacyBody?: Record<string, unknown>
+  ): Record<string, unknown> {
+    const payload: Record<string, unknown> = {
+      ...projection
+    }
+    if (legacyBody) {
+      payload.kind = projection.type
+      payload.body = legacyBody
+    }
+
+    return {
+      type: "projection",
+      turnId,
+      sessionId,
+      timestamp: makeTimestamp(),
+      payload
+    }
+  }
+
   private toEventBatch(
     requestId: string | undefined,
     sessionId: string,
@@ -1648,21 +1667,19 @@ export class RuntimeManager {
     }
     events.push(this.makeProgressEvent(session.sessionId, turnId, "response-planning"))
 
-    events.push({
-      type: "projection",
-      turnId,
-      sessionId: session.sessionId,
-      timestamp: makeTimestamp(),
-      payload: {
-        kind: "present",
-        body: {
+    events.push(
+      this.makeProjectionEvent(
+        session.sessionId,
+        turnId,
+        respond(generation.answerText, "answer"),
+        {
           type: "answer",
           text: generation.answerText,
           responseMode: "answer",
           provenanceSummary
         }
-      }
-    })
+      )
+    )
 
     const usedMemoryRecordIds: string[] = []
     try {
@@ -1702,22 +1719,34 @@ export class RuntimeManager {
           navigation.openMode = selectedRecall.openMode
         }
 
-        events.push({
-          type: "projection",
-          turnId,
-          sessionId: session.sessionId,
-          timestamp: makeTimestamp(),
-          payload: {
-            kind: "present",
-            body: {
+        events.push(
+          this.makeProjectionEvent(
+            session.sessionId,
+            turnId,
+            present(
+              "sidebar",
+              {
+                title: "Related memory",
+                items: [
+                  {
+                    source: selectedRecall.kind,
+                    summary: selectedRecall.summary,
+                    url: selectedRecall.canonicalUrl,
+                    relevance: selectedRecall.similarityScore.toFixed(2)
+                  }
+                ]
+              },
+              true
+            ),
+            {
               type: "recall-card",
               summary: selectedRecall.summary,
               kind: selectedRecall.kind,
               similarityScore: selectedRecall.similarityScore,
               navigation
             }
-          }
-        })
+          )
+        )
         usedMemoryRecordIds.push(selectedRecall.recordId)
         logger.info("runtime-recall-attached", {
           userId: session.ownerUserId,
@@ -1738,7 +1767,8 @@ export class RuntimeManager {
     }
 
     const turnDonePayload: Record<string, unknown> = {
-      referencedTabIds: [primaryTabId]
+      referencedTabIds: [primaryTabId],
+      provenanceSummary
     }
     if (usedMemoryRecordIds.length > 0) {
       turnDonePayload.usedMemoryRecordIds = usedMemoryRecordIds

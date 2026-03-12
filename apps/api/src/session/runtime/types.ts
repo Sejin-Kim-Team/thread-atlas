@@ -1,18 +1,27 @@
-import type { SemanticSnapshot } from "@threadatlas/shared"
+import type {
+  ContextEnrichRequestPayload,
+  ContextEnrichResultPayload,
+  ContextUpdatePayload,
+  EnrichRequestKind,
+  RuntimeEnvelope,
+  RuntimeErrorPayload,
+  SessionOpenPayload,
+  SnapshotLike,
+  SnapshotPushPayload,
+  UserIntentPayload
+} from "@threadatlas/shared/runtime"
 
-type DeepPartial<T> = T extends readonly (infer Item)[]
-  ? Array<DeepPartial<Item>>
-  : T extends object
-    ? { [K in keyof T]?: DeepPartial<T[K]> }
-    : T
-
-export interface RuntimeEnvelope {
-  type: string
-  timestamp: string
-  payload: unknown
-  requestId?: string
-  sessionId?: string
-  turnId?: string
+export type {
+  ContextEnrichRequestPayload,
+  ContextEnrichResultPayload,
+  ContextUpdatePayload,
+  EnrichRequestKind,
+  RuntimeEnvelope,
+  RuntimeErrorPayload,
+  SessionOpenPayload,
+  SnapshotLike,
+  SnapshotPushPayload,
+  UserIntentPayload
 }
 
 export interface RuntimeSession {
@@ -27,43 +36,6 @@ export interface RuntimeSession {
   activeTurn?: RuntimeActiveTurn
 }
 
-export type SnapshotLike = DeepPartial<SemanticSnapshot> & {
-  visualSignals?: {
-    uiSuspicious?: boolean
-    anomalyScore?: number
-  }
-}
-
-export interface SessionOpenPayload {
-  clientSessionId: string
-}
-
-export interface ContextUpdatePayload {
-  tabId: number
-  isPrimary?: boolean
-}
-
-export interface SnapshotPushPayload {
-  tabId: number
-  snapshot: SnapshotLike
-}
-
-export interface UserIntentPayload {
-  text: string
-  primaryTabId: number
-  boundSnapshotCapturedAt: string
-}
-
-export interface RuntimeErrorPayload {
-  code:
-    | "INVALID_EVENT"
-    | "INVALID_SNAPSHOT"
-    | "UNAUTHORIZED"
-    | "MODEL_CONFIG_MISSING"
-    | "GENERATION_FAILED"
-  message: string
-}
-
 export interface RuntimeActiveTurn {
   turnId: string
   intentText: string
@@ -75,7 +47,7 @@ export interface RuntimeActiveTurn {
   enrichTimeoutAtMs: number
   latestSnapshot: SnapshotLike
   pendingEnrichRequest?: {
-    requestKind: "node-screenshot" | "visible-region" | "node-detail"
+    requestKind: EnrichRequestKind
     targetRef: Record<string, unknown>
   }
 }

@@ -86,7 +86,6 @@ export type ServiceWorkerToSidePanelMessage =
 
 export type SidePanelToServiceWorkerMessage =
   | { type: "CAPTURE_VIEWPORT" }
-  | { type: "REQUEST_TOKEN" }
   | { type: "REGISTER_ARTICLE_URL"; payload: { url: string; threadId: string } }
   | { type: "OPEN_TAB"; payload: { url: string; active: boolean } }
   | { type: "REQUEST_SEMANTIC_SNAPSHOT"; payload?: { tabId?: number; source?: CaptureSource } }

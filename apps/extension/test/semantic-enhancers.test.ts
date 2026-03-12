@@ -306,20 +306,21 @@ describe("semantic enhancers", () => {
       skeleton,
       (region) => region.primitive === "interactive-block" && region.subtype === "search"
     )
+    const searchSelection = {
+      regionId: searchRef.id,
+      primitive: searchRef.primitive,
+      category: searchRef.category,
+      nodeKind: "interactive" as const,
+      nodeId: "interactive-block-1-cluster",
+      rootNodeId: null,
+      scopeRootId: null,
+      label: searchRef.displayLabel ?? "Search",
+      displayLabel: searchRef.displayLabel ?? "Search",
+      text: "Search docs",
+      ...(searchRef.subtype ? { subtype: searchRef.subtype } : {})
+    }
     const refinedSearchSelection = extractor.refineSelectionTarget(
-      {
-        regionId: searchRef.id,
-        primitive: searchRef.primitive,
-        subtype: searchRef.subtype,
-        category: searchRef.category,
-        nodeKind: "interactive",
-        nodeId: "interactive-block-1-cluster",
-        rootNodeId: null,
-        scopeRootId: null,
-        label: searchRef.displayLabel ?? "Search",
-        displayLabel: searchRef.displayLabel ?? "Search",
-        text: "Search docs"
-      },
+      searchSelection,
       document
     )
     expect(refinedSearchSelection).toMatchObject({
