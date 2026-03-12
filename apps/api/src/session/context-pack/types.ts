@@ -5,6 +5,7 @@ import type {
   SemanticSnapshot,
   ContextPack
 } from "@threadatlas/shared"
+import type { VisualDerivedSummary } from "../visual/types"
 
 export type AnalyzeMode = "seed" | "memory-candidate" | "visual-summary"
 
@@ -20,12 +21,6 @@ export interface SummaryCandidate {
   summary: string
   rootNodeIds: string[]
   confidence: number
-}
-
-export interface VisualDerivedSummary {
-  kind: "chart-summary" | "diagram-summary" | "ui-visual-summary"
-  summaryText: string
-  extractedLabels: string[]
 }
 
 export interface AnalyzeRequestBody {

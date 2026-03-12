@@ -255,7 +255,7 @@ export function attachSessionWebSocketServer(
             const timeoutMs =
               payload && typeof payload.timeoutMs === "number" && Number.isFinite(payload.timeoutMs)
                 ? payload.timeoutMs
-                : 3000
+                : 5000
             const requestKind = payload && typeof payload.requestKind === "string" ? payload.requestKind : null
             const targetRef = payload && isRecord(payload.targetRef) ? payload.targetRef : null
 

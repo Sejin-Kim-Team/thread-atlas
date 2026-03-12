@@ -368,6 +368,12 @@ Long-term RAG는 다음을 기준으로 검색한다.
 - `entities`
 - `visual.summaryText`
 - `visual.extractedLabels`
+- `visual.extractedText`
+- `visual.chart.chartType`
+- `visual.chart.trend`
+- `visual.chart.comparedSeries`
+- `visual.diagram.*`
+- `visual.uiVisual.*`
 
 ## 8.2 Recall Output Rule
 
@@ -440,7 +446,7 @@ export function deriveMemoryRecordKind(
 
 export function buildVisualDerivedSummary(
   input: {
-    visualKind: VisualSummaryKind
+    kind: VisualSummaryKind
     summaryText: string
     extractedLabels: string[]
     extractedText?: string[]
@@ -482,6 +488,8 @@ export function retrieveMemoryCandidates(
 
 - `buildMemoryRecord`는 허용되지 않은 kind면 `null`
 - visual summary는 optional이며, visual-only로는 record를 만들지 않는다
+- `buildVisualDerivedSummary`는 빈 optional 배열/객체 필드를 제거한 canonical summary를 반환해야 한다
+- retrieval text는 `visual.summaryText`뿐 아니라 `extractedLabels`, `extractedText`, chart/diagram/ui 부가 필드를 함께 포함해 vector recall에 반영해야 한다
 - helper는 pure function 원칙을 따른다
 - retrieval helper는 owner 없는 호출을 허용하지 않는다
 

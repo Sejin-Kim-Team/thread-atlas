@@ -1,6 +1,7 @@
 import express from "express"
 import request from "supertest"
 import { beforeEach, describe, expect, it, vi } from "vitest"
+import { DEFAULT_JSON_BODY_LIMIT } from "../../src/http/json-body-limit"
 import { createWsSessionEventsRouter } from "../../src/routes/ws-session-events"
 import { RuntimeManager } from "../../src/session/runtime/manager"
 import {
@@ -24,6 +25,22 @@ const { geminiGenerateTextMock } = vi.hoisted(() => ({
   })
 }))
 
+const { geminiGenerateStructuredVisualSummaryMock } = vi.hoisted(() => ({
+  geminiGenerateStructuredVisualSummaryMock: vi.fn(async () => ({
+    visualSummary: {
+      kind: "ui-visual-summary",
+      summaryText: "The visible UI region highlights a comparison area with two prominent controls.",
+      extractedLabels: ["Compare", "Refresh"],
+      extractedText: ["Comparison area", "Refresh"],
+      uiVisual: {
+        visibleControls: ["Compare", "Refresh"],
+        visibleSections: ["Comparison area"]
+      }
+    },
+    answerSupplement: "The key visible area is the comparison block and its surrounding controls."
+  }))
+}))
+
 vi.mock("../../src/auth/principal", () => ({
   resolvePrincipalFromAuthorizationHeader: vi.fn(async (authorization: unknown) => {
     if (authorization === "Bearer test-token") {
@@ -42,7 +59,8 @@ vi.mock("../../src/auth/principal", () => ({
 vi.mock("../../src/services/gemini", () => ({
   createGeminiClient: () => ({
     // 보안 계약 테스트는 모델 출력 형식을 제어해 분기만 검증한다.
-    generateText: geminiGenerateTextMock
+    generateText: geminiGenerateTextMock,
+    generateStructuredVisualSummary: geminiGenerateStructuredVisualSummaryMock
   }),
   isModelConfigError: () => false
 }))
@@ -61,7 +79,7 @@ interface SessionSetup {
 function createTestClient(mode?: TriggerMode): TestClient {
   const runtime = new RuntimeManager(mode ? { enrichTriggerMode: mode } : undefined)
   const app = express()
-  app.use(express.json({ limit: "2mb" }))
+  app.use(express.json({ limit: DEFAULT_JSON_BODY_LIMIT }))
   app.use("/ws/session/events", createWsSessionEventsRouter(runtime))
   return request(app)
 }
@@ -148,6 +166,7 @@ describe("ws enrich security P1 contract (red)", () => {
     process.env.GOOGLE_CLOUD_PROJECT = process.env.GOOGLE_CLOUD_PROJECT ?? "threadatlas"
     process.env.GOOGLE_CLOUD_LOCATION = process.env.GOOGLE_CLOUD_LOCATION ?? "us-central1"
     geminiGenerateTextMock.mockReset()
+    geminiGenerateStructuredVisualSummaryMock.mockReset()
     geminiGenerateTextMock.mockImplementation(async (prompt: string) => {
       if (prompt.includes("ENRICH_TRIGGER_ASSIST")) {
         return JSON.stringify({
@@ -158,6 +177,19 @@ describe("ws enrich security P1 contract (red)", () => {
       }
       return "GENAI_ENRICH_SECURITY_TEST_ANSWER"
     })
+    geminiGenerateStructuredVisualSummaryMock.mockImplementation(async () => ({
+      visualSummary: {
+        kind: "ui-visual-summary",
+        summaryText: "The visible UI region highlights a comparison area with two prominent controls.",
+        extractedLabels: ["Compare", "Refresh"],
+        extractedText: ["Comparison area", "Refresh"],
+        uiVisual: {
+          visibleControls: ["Compare", "Refresh"],
+          visibleSections: ["Comparison area"]
+        }
+      },
+      answerSupplement: "The key visible area is the comparison block and its surrounding controls."
+    }))
   })
 
   it("accepts node-screenshot requestKind from LLM assist decision", async () => {
@@ -444,6 +476,207 @@ describe("ws enrich security P1 contract (red)", () => {
     expect(prompt).not.toContain("IGNORE ALL PREVIOUS INSTRUCTIONS")
     expect(prompt).not.toContain(rawText)
     expect(prompt).not.toContain("onclick")
+  })
+
+  it("accepts image-only enrich result and carries visual summary into answer generation", async () => {
+    const generationPrompts: string[] = []
+    geminiGenerateTextMock.mockImplementation(async (prompt: string) => {
+      if (prompt.includes("ENRICH_TRIGGER_ASSIST")) {
+        return JSON.stringify({
+          decision: "enrich",
+          requestKind: "visible-region",
+          reason: "assist says enrichment is needed"
+        })
+      }
+      generationPrompts.push(prompt)
+      return "GENAI_IMAGE_ONLY_ANSWER"
+    })
+
+    const setup = await prepareSession({ mode: "rule" })
+    const intent = await postIntent(
+      setup,
+      "이 화면에서 중요한 영역을 자세히 설명해줘.",
+      "req-security-image-only-intent"
+    )
+    const events = intent.body.events as Array<Record<string, unknown>>
+    const enrichRequest = findEvent(events, "context.enrich.request")
+    const turnId = enrichRequest?.turnId as string | undefined
+    const requestPayload = enrichRequest?.payload as Record<string, unknown> | undefined
+
+    const enrichResult = await postWsEventWithAuth(
+      setup.client,
+      createEnvelope(
+        "context.enrich.result",
+        {
+          requestKind: requestPayload?.requestKind,
+          targetRef: requestPayload?.targetRef,
+          status: "ok",
+          capturedAt: "2026-03-08T11:40:06.250Z",
+          mimeType: "image/png",
+          imageBase64: Buffer.from("fake-png-image").toString("base64")
+        },
+        {
+          requestId: "req-security-image-only-result",
+          sessionId: setup.sessionId,
+          turnId
+        }
+      ),
+      setup.token
+    )
+
+    expect(enrichResult.status).toBe(200)
+    expect(geminiGenerateStructuredVisualSummaryMock).toHaveBeenCalledTimes(1)
+    const prompt = generationPrompts[generationPrompts.length - 1] ?? ""
+    expect(prompt).toContain("Visual summary")
+    expect(prompt).toContain("comparison area")
+  })
+
+  it("accepts legacy nested image enrich payloads from extension sender path", async () => {
+    geminiGenerateTextMock.mockResolvedValue("GENAI_NESTED_IMAGE_ANSWER")
+
+    const setup = await prepareSession({ mode: "rule" })
+    const intent = await postIntent(
+      setup,
+      "이 화면에서 중요한 영역을 자세히 설명해줘.",
+      "req-security-nested-image-intent"
+    )
+    const events = intent.body.events as Array<Record<string, unknown>>
+    const enrichRequest = findEvent(events, "context.enrich.request")
+    const turnId = enrichRequest?.turnId as string | undefined
+    const requestPayload = enrichRequest?.payload as Record<string, unknown> | undefined
+
+    const nestedImageBase64 = Buffer.from("fake-jpeg-image").toString("base64")
+    const enrichResult = await postWsEventWithAuth(
+      setup.client,
+      createEnvelope(
+        "context.enrich.result",
+        {
+          requestKind: requestPayload?.requestKind,
+          targetRef: requestPayload?.targetRef,
+          status: "ok",
+          capturedAt: "2026-03-08T11:40:16.250Z",
+          detail: {
+            imageBase64: nestedImageBase64,
+            text: "Legacy extension payload image"
+          }
+        },
+        {
+          requestId: "req-security-nested-image-result",
+          sessionId: setup.sessionId,
+          turnId
+        }
+      ),
+      setup.token
+    )
+
+    expect(enrichResult.status).toBe(200)
+    expect(geminiGenerateStructuredVisualSummaryMock).toHaveBeenCalled()
+    const latestCall =
+      geminiGenerateStructuredVisualSummaryMock.mock.calls[
+        geminiGenerateStructuredVisualSummaryMock.mock.calls.length - 1
+      ]?.[0]
+    expect(latestCall?.image).toEqual({
+      mimeType: "image/jpeg",
+      imageBytes: nestedImageBase64
+    })
+  })
+
+  it("rejects ok enrich result when both detail and image are missing", async () => {
+    const setup = await prepareSession({ mode: "rule" })
+    const intent = await postIntent(setup, "이 차트 영역을 더 자세히 확인해서 설명해줘.", "req-security-missing-evidence-intent")
+    const events = intent.body.events as Array<Record<string, unknown>>
+    const enrichRequest = findEvent(events, "context.enrich.request")
+    const turnId = enrichRequest?.turnId as string | undefined
+    const requestPayload = enrichRequest?.payload as Record<string, unknown> | undefined
+
+    const missingEvidence = await postWsEventWithAuth(
+      setup.client,
+      createEnvelope(
+        "context.enrich.result",
+        {
+          requestKind: requestPayload?.requestKind,
+          targetRef: requestPayload?.targetRef,
+          status: "ok",
+          capturedAt: "2026-03-08T11:40:06.750Z"
+        },
+        {
+          requestId: "req-security-missing-evidence-result",
+          sessionId: setup.sessionId,
+          turnId
+        }
+      ),
+      setup.token
+    )
+
+    expect(missingEvidence.status).toBe(400)
+    expect(missingEvidence.body.payload.code).toBe("INVALID_EVENT")
+  })
+
+  it("rejects image enrich result with unsupported mimeType", async () => {
+    const setup = await prepareSession({ mode: "rule" })
+    const intent = await postIntent(setup, "이 차트 영역을 더 자세히 확인해서 설명해줘.", "req-security-bad-mime-intent")
+    const events = intent.body.events as Array<Record<string, unknown>>
+    const enrichRequest = findEvent(events, "context.enrich.request")
+    const turnId = enrichRequest?.turnId as string | undefined
+    const requestPayload = enrichRequest?.payload as Record<string, unknown> | undefined
+
+    const badMime = await postWsEventWithAuth(
+      setup.client,
+      createEnvelope(
+        "context.enrich.result",
+        {
+          requestKind: requestPayload?.requestKind,
+          targetRef: requestPayload?.targetRef,
+          status: "ok",
+          capturedAt: "2026-03-08T11:40:06.900Z",
+          mimeType: "image/webp",
+          imageBase64: Buffer.from("fake-webp-image").toString("base64")
+        },
+        {
+          requestId: "req-security-bad-mime-result",
+          sessionId: setup.sessionId,
+          turnId
+        }
+      ),
+      setup.token
+    )
+
+    expect(badMime.status).toBe(400)
+    expect(badMime.body.payload.code).toBe("INVALID_EVENT")
+  })
+
+  it("rejects oversized image enrich payloads through runtime validation", async () => {
+    const setup = await prepareSession({ mode: "rule" })
+    const intent = await postIntent(setup, "이 차트 영역을 더 자세히 확인해서 설명해줘.", "req-security-oversized-image-intent")
+    const events = intent.body.events as Array<Record<string, unknown>>
+    const enrichRequest = findEvent(events, "context.enrich.request")
+    const turnId = enrichRequest?.turnId as string | undefined
+    const requestPayload = enrichRequest?.payload as Record<string, unknown> | undefined
+
+    const oversizedImage = Buffer.alloc(2 * 1024 * 1024 + 1, 3).toString("base64")
+    const oversizedResult = await postWsEventWithAuth(
+      setup.client,
+      createEnvelope(
+        "context.enrich.result",
+        {
+          requestKind: requestPayload?.requestKind,
+          targetRef: requestPayload?.targetRef,
+          status: "ok",
+          capturedAt: "2026-03-08T11:40:06.920Z",
+          mimeType: "image/png",
+          imageBase64: oversizedImage
+        },
+        {
+          requestId: "req-security-oversized-image-result",
+          sessionId: setup.sessionId,
+          turnId
+        }
+      ),
+      setup.token
+    )
+
+    expect(oversizedResult.status).toBe(400)
+    expect(oversizedResult.body.payload.code).toBe("INVALID_EVENT")
   })
 
   it("does not consume enrich timeout budget while waiting for assist decision", async () => {

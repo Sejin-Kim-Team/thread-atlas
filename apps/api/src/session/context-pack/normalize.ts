@@ -3,9 +3,10 @@ import type {
   ContextPack,
   NormalizedMode,
   SemanticSnapshot,
-  SummaryCandidate,
-  VisualDerivedSummary
+  SummaryCandidate
 } from "./types"
+import { buildVisualSummariesFromSnapshot } from "../visual/summary"
+import type { VisualDerivedSummary } from "../visual/types"
 
 function inferNormalizedMode(snapshot: SemanticSnapshot): NormalizedMode {
   if (snapshot.focus.node.kind === "comment") {
@@ -53,20 +54,6 @@ function buildSummaryCandidates(
   ]
 }
 
-function buildVisualSummaries(snapshot: SemanticSnapshot): VisualDerivedSummary[] {
-  const extractedLabels =
-    snapshot.focus.node.kind === "interactive" && snapshot.focus.node.label
-      ? [snapshot.focus.node.label]
-      : []
-  return [
-    {
-      kind: "ui-visual-summary",
-      summaryText: `Visual context around ${snapshot.focus.region}`,
-      extractedLabels
-    }
-  ]
-}
-
 export function normalizeForAnalyze(
   snapshot: SemanticSnapshot,
   pack: ContextPack,
@@ -78,7 +65,7 @@ export function normalizeForAnalyze(
 } {
   const normalizedMode = inferNormalizedMode(snapshot)
   const summaryCandidates = buildSummaryCandidates(snapshot, pack, normalizedMode)
-  const visualSummaries = mode === "visual-summary" ? buildVisualSummaries(snapshot) : []
+  const visualSummaries = mode === "visual-summary" ? buildVisualSummariesFromSnapshot(snapshot) : []
 
   return {
     normalizedMode,

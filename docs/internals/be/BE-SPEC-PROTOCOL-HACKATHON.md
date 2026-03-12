@@ -227,7 +227,7 @@ export interface WsEnvelope<TType extends string, TPayload> {
 - enrich timeout 시 current-page evidence만으로 제한 답변 또는 clarify로 후퇴한다
 - semantic node id와 FE entity id가 항상 동일하다고 가정하지 않는다
 - 따라서 BE는 필요 시 semantic node 대신 `page-entity` target을 요청할 수 있다
-- `timeoutMs`가 request payload에 없으면 기본값 `3000ms`를 사용한다
+- `timeoutMs`가 request payload에 없으면 기본값 `5000ms`를 사용한다
 - timeout 타이머는 enrich request emit 시 arm 해야 한다
 - timeout 타이머 해제는 runtime 유효성 검증 성공 이후에만 허용한다
 - invalid `context.enrich.result`는 타이머를 해제하거나 fallback 경로를 건너뛰게 만들면 안 된다

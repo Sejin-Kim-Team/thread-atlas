@@ -71,6 +71,13 @@ describe("POST /api/analyze (hackathon contract)", () => {
     expect(response.body.mode).toBe("visual-summary")
     expect(typeof response.body.analysisId).toBe("string")
     expect(Array.isArray(response.body.visualSummaries)).toBe(true)
+    const firstSummary = response.body.visualSummaries[0]
+    expect(["chart-summary", "diagram-summary", "ui-visual-summary"]).toContain(firstSummary.kind)
+    expect(typeof firstSummary.summaryText).toBe("string")
+    expect(Array.isArray(firstSummary.extractedLabels)).toBe(true)
+    if (firstSummary.extractedText !== undefined) {
+      expect(Array.isArray(firstSummary.extractedText)).toBe(true)
+    }
   })
 
   it("returns INVALID_SNAPSHOT when snapshot is missing", async () => {

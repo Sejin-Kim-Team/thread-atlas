@@ -170,6 +170,9 @@ export type AnalyzeResponse =
 - `visual-summary`는 `visualSummaries`를 반드시 반환하고 `summaryCandidates`는 optional이다
 - `summaryCandidates`는 memory write 후보군이지, 자동 저장 결과가 아니다
 - `visualSummaries`는 현재 snapshot에서 도출된 visual-derived summary다
+- `visual-summary`의 각 summary는 최소 `kind`, `summaryText`, `extractedLabels`를 포함해야 하며 `extractedText`는 optional이다
+- backend는 focus/page 문맥을 기준으로 `chart-summary | diagram-summary | ui-visual-summary` 중 하나를 결정해 canonical visual summary를 반환해야 한다
+- visual kind keyword inference는 standalone term 기준으로 동작해야 하며 `toolbar`/`sidebar` 같은 substring 오탐으로 `chart-summary`를 만들면 안 된다
 - response는 raw snapshot을 다시 에코하지 않는다
 - analyze는 public contract 차원에서 session cache 동작을 노출하지 않는다
 

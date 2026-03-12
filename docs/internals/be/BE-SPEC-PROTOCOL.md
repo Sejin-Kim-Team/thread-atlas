@@ -274,6 +274,12 @@ export interface ContextEnrichResultPayload {
 
 - `context.enrich.result`는 현재 active turn에만 귀속된다
 - `imageBase64` 또는 `detail` 중 최소 하나는 포함해야 한다
+- `status=ok`에서 `imageBase64`를 보낼 때는 `mimeType`을 함께 보내야 하며 허용 타입은 `image/png | image/jpeg`만이다
+- `imageBase64`는 data URL prefix 없는 raw base64 string이어야 하며, decode 결과는 2MB 이하여야 한다
+- transport body limit은 위 2MB decoded image를 base64 JSON payload로 실제 수용할 수 있도록 구성해야 한다
+- backend는 `detail.text/htmlSnippet/attributes/bounds`만 allowlist 정규화해 프롬프트에 포함해야 한다
+- `htmlSnippet`에는 script payload를 그대로 포함하지 않는다
+- raw image bytes는 turn 처리 중 일시적으로만 사용하고 장기 저장하지 않는다
 - enrich result는 primary snapshot을 대체하지 않고 보강한다
 - 실패 시에는 `status`와 `failureReason`을 함께 보내는 것이 권장된다
 
@@ -368,6 +374,7 @@ export interface ContextEnrichRequestPayload {
 - request는 current primary tab 또는 그 page/entity를 대상으로만 보낼 수 있다
 - request는 현재 active turn에만 유효하다
 - 해커톤 기본값은 `visibility = "status-only"`다
+- `timeoutMs`가 생략되면 backend 기본값 `5000ms`를 사용한다
 - request는 FE가 deterministic하게 처리 가능한 구조화 필드만 사용해야 한다
 - request 필드는 backend가 판단한 capture target 명세이며, 실제 캡처 방법은 FE가 결정한다
 - FE가 처리할 수 없으면 실패 상태 또는 대응 error를 반환하는 것이 권장된다
