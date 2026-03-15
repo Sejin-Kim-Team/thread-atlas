@@ -62,13 +62,17 @@ describe("sidepanel conversation ui", () => {
   it("binds text submission and voice controls", () => {
     const onComposerInput = vi.fn()
     const onSubmitPrompt = vi.fn()
-    const onToggleMic = vi.fn()
+    const onStartMicPress = vi.fn()
+    const onEndMicPress = vi.fn()
+    const onCancelMicPress = vi.fn()
     const onToggleVoiceOutput = vi.fn()
 
     bindConversationActions({
       onComposerInput,
       onSubmitPrompt,
-      onToggleMic,
+      onStartMicPress,
+      onEndMicPress,
+      onCancelMicPress,
       onToggleVoiceOutput
     })
 
@@ -77,14 +81,31 @@ describe("sidepanel conversation ui", () => {
     composer.dispatchEvent(new Event("input"))
     composer.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }))
     composer.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", shiftKey: true, bubbles: true }))
-    ;(document.getElementById("conversation-mic-button") as HTMLButtonElement).click()
+    const makePointerEvent = (type: string) => {
+      const event = new Event(type, { bubbles: true })
+      Object.defineProperty(event, "pointerId", {
+        value: 1
+      })
+      return event
+    }
+    ;(document.getElementById("conversation-mic-button") as HTMLButtonElement).dispatchEvent(
+      makePointerEvent("pointerdown")
+    )
+    ;(document.getElementById("conversation-mic-button") as HTMLButtonElement).dispatchEvent(
+      makePointerEvent("pointerup")
+    )
+    ;(document.getElementById("conversation-mic-button") as HTMLButtonElement).dispatchEvent(
+      makePointerEvent("pointercancel")
+    )
     ;(document.getElementById("conversation-voice-output-button") as HTMLButtonElement).click()
     ;(document.getElementById("conversation-send-button") as HTMLButtonElement).click()
 
     expect(onComposerInput).toHaveBeenCalledWith("Summarize this page")
     expect(onSubmitPrompt).toHaveBeenCalledTimes(2)
     expect(onSubmitPrompt).toHaveBeenCalledWith("Summarize this page")
-    expect(onToggleMic).toHaveBeenCalledTimes(1)
+    expect(onStartMicPress).toHaveBeenCalledTimes(1)
+    expect(onEndMicPress).toHaveBeenCalledTimes(1)
+    expect(onCancelMicPress).toHaveBeenCalledTimes(1)
     expect(onToggleVoiceOutput).toHaveBeenCalledTimes(1)
   })
 

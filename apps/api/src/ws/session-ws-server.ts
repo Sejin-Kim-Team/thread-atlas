@@ -2,21 +2,18 @@ import type { IncomingMessage } from "node:http"
 import type { Socket } from "node:net"
 import { WebSocketServer } from "ws"
 import type { RawData, WebSocket } from "ws"
-import { resolveAuthSession } from "../auth/auth-sessions-repository"
 import { createLogger } from "../runtime/logger"
 import { RuntimeManager } from "../session/runtime/manager"
+import {
+  authenticateUpgradeRequest,
+  type AuthenticatedUpgradeRequest,
+  parseRequestUrl,
+  rejectUpgrade
+} from "./ws-upgrade-auth"
 
 interface SocketContext {
   principalUserId: string
   sessionId: string | null
-}
-
-interface UpgradeAuthContext {
-  principalUserId: string
-}
-
-interface AuthenticatedUpgradeRequest extends IncomingMessage {
-  authContext?: UpgradeAuthContext
 }
 
 interface PendingEnrichBinding {
@@ -85,92 +82,6 @@ function parseEnvelope(raw: RawData): Record<string, unknown> | null {
     return isRecord(parsed) ? parsed : null
   } catch {
     return null
-  }
-}
-
-function parseRequestUrl(req: IncomingMessage): URL | null {
-  const requestUrl = req.url ?? ""
-  try {
-    return new URL(requestUrl, "http://localhost")
-  } catch {
-    return null
-  }
-}
-
-function parseAllowedOrigins(): string[] {
-  const raw = process.env.WS_ALLOWED_ORIGINS
-  if (!raw) {
-    return []
-  }
-  return raw
-    .split(",")
-    .map((origin) => origin.trim())
-    .filter((origin) => origin.length > 0)
-}
-
-function rejectUpgrade(socket: Socket, statusCode: 400 | 401 | 403 | 404 | 500, reason: string): void {
-  const statusTextByCode: Record<number, string> = {
-    400: "Bad Request",
-    401: "Unauthorized",
-    403: "Forbidden",
-    404: "Not Found",
-    500: "Internal Server Error"
-  }
-  // 보안 경계: handshake 단계에서 실패하면 WebSocket 연결을 성립시키지 않고 즉시 종료한다.
-  socket.write(
-    `HTTP/1.1 ${statusCode} ${statusTextByCode[statusCode]}\r\nConnection: close\r\n\r\n${reason}`
-  )
-  socket.destroy()
-}
-
-async function authenticateUpgradeRequest(
-  req: IncomingMessage
-): Promise<{ ok: true; context: UpgradeAuthContext } | { ok: false; code: 400 | 401 | 403 | 404; reason: string }> {
-  const parsedUrl = parseRequestUrl(req)
-  if (!parsedUrl) {
-    return {
-      ok: false,
-      code: 400,
-      reason: "invalid request url"
-    }
-  }
-
-  if (parsedUrl.pathname !== "/ws/session") {
-    return {
-      ok: false,
-      code: 404,
-      reason: "invalid websocket path"
-    }
-  }
-
-  const allowedOrigins = parseAllowedOrigins()
-  const requestOrigin = req.headers.origin
-  // 확장프로그램 런타임 호환: Origin 헤더가 없는 경우는 허용한다.
-  if (allowedOrigins.length > 0 && typeof requestOrigin === "string") {
-    if (!allowedOrigins.includes(requestOrigin)) {
-      return {
-        ok: false,
-        code: 403,
-        reason: "origin not allowed"
-      }
-    }
-  }
-
-  const token = parsedUrl.searchParams.get("token") ?? ""
-  const auth = await resolveAuthSession(token)
-  if (!auth.ok) {
-    return {
-      ok: false,
-      code: 401,
-      reason: "unauthorized"
-    }
-  }
-
-  return {
-    ok: true,
-    context: {
-      principalUserId: auth.userId
-    }
   }
 }
 
@@ -460,7 +371,17 @@ export function attachSessionWebSocketServer(
 
   server.on("upgrade", async (req: IncomingMessage, socket: Socket, head: Buffer) => {
     try {
-      const authResult = await authenticateUpgradeRequest(req)
+      const parsedUrl = parseRequestUrl(req)
+      if (!parsedUrl) {
+        rejectUpgrade(socket, 400, "invalid request url")
+        return
+      }
+
+      if (parsedUrl.pathname !== "/ws/session") {
+        return
+      }
+
+      const authResult = await authenticateUpgradeRequest(req, "/ws/session")
       if (!authResult.ok) {
         logger.warn("ws-upgrade-rejected", {
           code: authResult.code,

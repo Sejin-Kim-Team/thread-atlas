@@ -19,21 +19,23 @@ import {
 import type {
   AnyRuntimeMessage,
   ContextEnrichResultPayload,
+  LiveServerEnvelope,
+  LiveToolResultPayload,
   RuntimeErrorPayload,
   ServerEnvelope,
-  SemanticSelectionTarget,
+  SemanticSelectionTarget
 } from "@threadatlas/shared/runtime"
 import type { RegionDump } from "../content/semantic/core/observability"
 import { isSemanticCaptureSupportedUrl } from "../common/semantic-url"
 import { routeProjection } from "./projection-router"
 import { ContentGraphManager } from "./content-graph"
-import { createAudioOutputProvider } from "./audio"
 import { createAuthClient } from "./auth-client"
 import { createChromeLocalStorage, loadExtensionConfig } from "../common/extension-config"
-import { ContentSpeechInputProvider } from "./content-speech-input"
+import { LiveAudioInputCapture } from "./live-audio-input"
+import { LiveAudioOutputPlayer } from "./live-audio-output"
 import { SessionWsTransport } from "./session-ws-transport"
-import { createSpeechController, type SpeechController } from "./speech-controller"
 import type { SpeechInputState, TurnOrigin } from "./speech-types"
+import { VoiceSessionTransport } from "./voice-session-transport"
 import {
   bindAuthActions,
   bindConversationActions,
@@ -84,7 +86,9 @@ interface SidePanelState {
   phase: Phase
   apiBaseUrl: string
   sessionTransport: SessionWsTransport | null
-  speechController: SpeechController | null
+  voiceTransport: VoiceSessionTransport | null
+  liveAudioInput: LiveAudioInputCapture | null
+  liveAudioOutput: LiveAudioOutputPlayer | null
   contentGraph: ContentGraphManager
   activeTabId: number | null
   latestSemanticSnapshot: SemanticSnapshotState | null
@@ -116,6 +120,8 @@ interface SidePanelState {
   authBusy: boolean
   currentTurnOrigin: TurnOrigin | null
   pendingTurnOrigin: TurnOrigin | null
+  voiceAssistantMessageId: string | null
+  voiceUserMessageId: string | null
 }
 
 const TTS_ENABLED_STORAGE_KEY = "THREADATLAS_TTS_ENABLED"
@@ -130,7 +136,9 @@ const state: SidePanelState = {
   phase: "initializing",
   apiBaseUrl: "",
   sessionTransport: null,
-  speechController: null,
+  voiceTransport: null,
+  liveAudioInput: null,
+  liveAudioOutput: null,
   contentGraph: new ContentGraphManager(),
   activeTabId: null,
   latestSemanticSnapshot: null,
@@ -161,7 +169,9 @@ const state: SidePanelState = {
   authError: null,
   authBusy: false,
   currentTurnOrigin: null,
-  pendingTurnOrigin: null
+  pendingTurnOrigin: null,
+  voiceAssistantMessageId: null,
+  voiceUserMessageId: null
 }
 
 type RegionDumpEntry = RegionDump["regions"][number]
@@ -200,7 +210,7 @@ function applyAuthState(next: ExtensionAuthState): void {
   if (shouldResetRuntime) {
     void state.sessionTransport?.close()
     state.sessionTransport = null
-    void state.speechController?.interruptAll()
+    void interruptVoiceSession("auth-state-reset")
     state.sessionId = null
     state.clientSessionId = null
     state.activeTurnId = null
@@ -236,7 +246,7 @@ function shouldShowSpeechError(): boolean {
 }
 
 function resetSpeechInputState(): void {
-  state.speechInputState = state.speechController?.inputSupported ? "idle" : "unsupported"
+  state.speechInputState = state.liveAudioInput?.supported ? "idle" : "unsupported"
   state.speechInputDetail = null
 }
 
@@ -256,6 +266,88 @@ function setSpeechDraft(args: { baseDraft: string; interimDraft: string; compose
 function clearTurnOrigin(): void {
   state.currentTurnOrigin = null
   state.pendingTurnOrigin = null
+}
+
+function stopLiveAudioOutput(): void {
+  state.liveAudioOutput?.stop()
+}
+
+async function stopVoiceInputCapture(flush = false): Promise<void> {
+  if (!state.liveAudioInput) {
+    return
+  }
+  try {
+    await state.liveAudioInput.stop(flush)
+  } catch {
+    // Local cleanup should continue even if audio teardown races.
+  }
+}
+
+async function interruptVoiceSession(reason = "interrupted"): Promise<void> {
+  try {
+    state.voiceTransport?.interrupt(reason)
+  } catch {
+    // Ignore interrupt races; close still resets the local transport.
+  }
+  state.voiceTransport?.close()
+  state.voiceTransport = null
+  await stopVoiceInputCapture(false)
+  stopLiveAudioOutput()
+  state.voiceAssistantMessageId = null
+  state.voiceUserMessageId = null
+  resetSpeechInputState()
+}
+
+function upsertVoiceUserTranscript(text: string, final: boolean): void {
+  const normalized = text.trim()
+  if (!normalized && !final) {
+    return
+  }
+
+  const messageId =
+    state.voiceUserMessageId ??
+    `voice-user-${globalThis.crypto?.randomUUID?.() ?? Date.now().toString(16)}`
+  state.voiceUserMessageId = messageId
+  if (!normalized && final) {
+    removeConversationMessage(messageId)
+    state.voiceUserMessageId = null
+    return
+  }
+  upsertConversationMessage({
+    id: messageId,
+    role: "user",
+    text: normalized,
+    pending: !final
+  })
+  if (final) {
+    state.voiceUserMessageId = null
+  }
+}
+
+function upsertVoiceAssistantTranscript(text: string, final: boolean): void {
+  const normalized = text.trim()
+  if (!normalized && !final) {
+    return
+  }
+
+  const messageId =
+    state.voiceAssistantMessageId ??
+    `voice-assistant-${globalThis.crypto?.randomUUID?.() ?? Date.now().toString(16)}`
+  state.voiceAssistantMessageId = messageId
+  if (!normalized && final) {
+    removeConversationMessage(messageId)
+    state.voiceAssistantMessageId = null
+    return
+  }
+  upsertConversationMessage({
+    id: messageId,
+    role: "assistant",
+    text: normalized,
+    pending: !final
+  })
+  if (final) {
+    state.voiceAssistantMessageId = null
+  }
 }
 
 function hasActiveRuntimeTurn(): boolean {
@@ -283,8 +375,8 @@ function getConversationStatus(): {
   voiceOutputLabel: string
   voiceOutputDisabled: boolean
 } {
-  const inputSupported = state.speechController?.inputSupported ?? false
-  const outputSupported = state.speechController?.outputSupported ?? false
+  const inputSupported = state.liveAudioInput?.supported ?? false
+  const outputSupported = state.liveAudioOutput?.supported ?? false
 
   if (state.activeTabId === null) {
     return {
@@ -562,7 +654,36 @@ function renderConversationState(): void {
 }
 
 function appendConversationMessage(message: TranscriptMessage): void {
-  state.conversationMessages = [...state.conversationMessages, message]
+  state.conversationMessages = [
+    ...state.conversationMessages,
+    {
+      ...message,
+      id: message.id ?? globalThis.crypto?.randomUUID?.() ?? `msg-${Date.now()}`
+    }
+  ]
+  renderConversationState()
+}
+
+function upsertConversationMessage(message: TranscriptMessage & { id: string }): void {
+  const existingIndex = state.conversationMessages.findIndex((item) => item.id === message.id)
+  if (existingIndex === -1) {
+    state.conversationMessages = [...state.conversationMessages, message]
+  } else {
+    const next = [...state.conversationMessages]
+    next[existingIndex] = {
+      ...next[existingIndex],
+      ...message
+    }
+    state.conversationMessages = next
+  }
+  renderConversationState()
+}
+
+function removeConversationMessage(id: string | null): void {
+  if (!id) {
+    return
+  }
+  state.conversationMessages = state.conversationMessages.filter((item) => item.id !== id)
   renderConversationState()
 }
 
@@ -571,6 +692,8 @@ function resetConversationSurface(): void {
   setComposerDraft("")
   resetSpeechInputState()
   clearTurnOrigin()
+  state.voiceAssistantMessageId = null
+  state.voiceUserMessageId = null
   clearSuggestChips()
   clearPresent()
   renderConversationState()
@@ -1045,9 +1168,62 @@ function selectSemanticContextFormat(format: ContextProjectionFormat): void {
   renderSemanticSnapshotState()
 }
 
-async function toggleSpeechInput(): Promise<void> {
-  const controller = state.speechController
-  if (!controller || !controller.inputSupported) {
+async function handleLiveToolCall(
+  event: Extract<LiveServerEnvelope, { type: "live.tool.call" }>
+): Promise<LiveToolResultPayload | null> {
+  if (event.payload.name === "request_context_enrich") {
+    const enrichEvent: RuntimeEnrichRequestEvent = {
+      type: "context.enrich.request",
+      timestamp: event.timestamp,
+      sessionId: event.liveSessionId,
+      turnId: event.toolCallId,
+      payload: event.payload.args as unknown as RuntimeEnrichRequestEvent["payload"]
+    }
+
+    try {
+      const payload = await buildContextEnrichResult(enrichEvent)
+      return {
+        name: event.payload.name,
+        ok: true,
+        result: {
+          payload
+        }
+      }
+    } catch (error) {
+      return {
+        name: event.payload.name,
+        ok: false,
+        error: error instanceof Error ? error.message : "enrich handling failed"
+      }
+    }
+  }
+
+  if (event.payload.name === "focus_node") {
+    const projection = event.payload.args.projection as Projection | undefined
+    if (projection) {
+      await applyProjectionSideEffects(projection)
+    }
+    return null
+  }
+
+  if (event.payload.name === "present_content") {
+    const projection = event.payload.args.projection as Projection | undefined
+    if (projection) {
+      await applyProjectionSideEffects(projection)
+    }
+    return null
+  }
+
+  return {
+    name: event.payload.name,
+    ok: false,
+    error: "unsupported live frontend tool"
+  }
+}
+
+async function startVoiceCapture(): Promise<void> {
+  const input = state.liveAudioInput
+  if (!input?.supported) {
     showNotify("Voice input is unavailable in this browser.", "info")
     return
   }
@@ -1072,29 +1248,125 @@ async function toggleSpeechInput(): Promise<void> {
     return
   }
 
-  if (isSpeechListening()) {
-    await controller.stopInput()
-    return
-  }
-
-  if (isSpeechProcessing()) {
+  if (isSpeechListening() || isSpeechProcessing()) {
     return
   }
 
   state.lastRuntimeError = null
-  await controller.startInput(state.composerText)
+  clearSuggestChips()
+  clearPresent()
+  setComposerDraft("")
+  state.pendingTurnOrigin = "voice"
+  state.currentTurnOrigin = null
+  await state.sessionTransport?.interrupt("superseded-by-voice-turn")
+  await interruptVoiceSession("restart-voice-turn")
+
+  const snapshot = getConversationSnapshot()
+  if (!snapshot || state.activeTabId === null) {
+    return
+  }
+
+  const transport = new VoiceSessionTransport({
+    apiBaseUrl: state.apiBaseUrl,
+    authClient,
+    handlers: {
+      onReady() {
+        state.lastRuntimeError = null
+      },
+      onInputTranscript(text, final) {
+        state.currentTurnOrigin = "voice"
+        upsertVoiceUserTranscript(text, final)
+      },
+      onOutputTranscript(text, final) {
+        state.currentTurnOrigin = "voice"
+        upsertVoiceAssistantTranscript(text, final)
+      },
+      onAudioChunk(chunkBase64) {
+        if (!state.ttsEnabled) {
+          return
+        }
+        void state.liveAudioOutput?.playChunk(chunkBase64)
+      },
+      async onToolCall(event) {
+        return await handleLiveToolCall(event)
+      },
+      onTurnDone() {
+        state.lastRuntimeError = null
+        state.currentTurnOrigin = null
+        state.pendingTurnOrigin = null
+        state.voiceTransport?.close()
+        state.voiceTransport = null
+        resetSpeechInputState()
+        stopLiveAudioOutput()
+        renderConversationState()
+      },
+      onError(error) {
+        state.lastRuntimeError = {
+          code: error.code === "MODEL_CONFIG_MISSING" ? "MODEL_CONFIG_MISSING" : "GENERATION_FAILED",
+          message: error.message
+        }
+        state.speechInputState = "error"
+        state.speechInputDetail = error.message
+        stopLiveAudioOutput()
+        showNotify(error.message, "error")
+        renderConversationState()
+      }
+    }
+  })
+  state.voiceTransport = transport
+
+  try {
+    await transport.open({
+      activeTabId: state.activeTabId,
+      snapshot,
+      language: window.navigator.language
+    })
+    await input.start()
+    state.speechInputState = "listening"
+    state.speechInputDetail = null
+    renderConversationState()
+  } catch (error) {
+    state.voiceTransport?.close()
+    state.voiceTransport = null
+    state.speechInputState = "error"
+    state.speechInputDetail =
+      error instanceof Error ? error.message : "Voice capture could not be started."
+    showNotify(state.speechInputDetail, "error")
+    renderConversationState()
+  }
+}
+
+async function finishVoiceCapture(): Promise<void> {
+  if (!isSpeechListening()) {
+    return
+  }
+
+  state.speechInputState = "processing"
+  state.speechInputDetail = null
+  renderConversationState()
+  await stopVoiceInputCapture(true)
+  state.voiceTransport?.commitAudio()
+}
+
+async function cancelVoiceCapture(): Promise<void> {
+  if (!isSpeechListening() && !isSpeechProcessing()) {
+    return
+  }
+  await interruptVoiceSession("cancelled")
+  renderConversationState()
 }
 
 function toggleVoiceOutput(): void {
-  const controller = state.speechController
-  if (!controller?.outputSupported) {
+  if (!state.liveAudioOutput?.supported) {
     showNotify("Voice output is unavailable in this browser.", "info")
     return
   }
 
   state.ttsEnabled = !state.ttsEnabled
   persistTtsEnabled()
-  controller.setOutputEnabled(state.ttsEnabled)
+  if (!state.ttsEnabled) {
+    stopLiveAudioOutput()
+  }
   renderConversationState()
 }
 
@@ -1106,27 +1378,10 @@ function splitSuggestOptions(text: string): string[] {
     .slice(0, 4)
 }
 
-async function executeProjection(projection: Projection): Promise<void> {
+async function applyProjectionSideEffects(projection: Projection): Promise<void> {
   routeProjection(projection, {
-    respond(payload) {
-      appendConversationMessage({
-        role: "assistant",
-        text: payload.text
-      })
-
-      if (payload.mode === "suggest") {
-        const options = splitSuggestOptions(payload.text)
-        showSuggestChips(options, (choice) => {
-          void submitTextPrompt(choice, "text")
-        })
-        return
-      }
-
-      clearSuggestChips()
-      if (payload.mode === "answer") {
-        const origin = state.currentTurnOrigin ?? state.pendingTurnOrigin
-        void state.speechController?.speakAnswer(payload.text, origin)
-      }
+    respond() {
+      // Text and live transcript rendering are handled at their respective transport layers.
     },
     focus(payload) {
       if (state.activeTabId === null) {
@@ -1150,6 +1405,54 @@ async function executeProjection(projection: Projection): Promise<void> {
     },
     copy(payload) {
       void navigator.clipboard.writeText(payload.text)
+    }
+  })
+}
+
+async function executeProjection(projection: Projection): Promise<void> {
+  routeProjection(projection, {
+    respond(payload) {
+      appendConversationMessage({
+        role: "assistant",
+        text: payload.text
+      })
+
+      if (payload.mode === "suggest") {
+        const options = splitSuggestOptions(payload.text)
+        showSuggestChips(options, (choice) => {
+          void submitTextPrompt(choice, "text")
+        })
+        return
+      }
+
+      clearSuggestChips()
+    },
+    focus(projection) {
+      void applyProjectionSideEffects(projection)
+    },
+    navigate(payload) {
+      void applyProjectionSideEffects({
+        type: "navigate",
+        payload
+      })
+    },
+    present(payload) {
+      void applyProjectionSideEffects({
+        type: "present",
+        payload
+      })
+    },
+    notify(payload) {
+      void applyProjectionSideEffects({
+        type: "notify",
+        payload
+      })
+    },
+    copy(payload) {
+      void applyProjectionSideEffects({
+        type: "copy",
+        payload
+      })
     }
   })
 }
@@ -1392,7 +1695,7 @@ function createSessionTransport(): SessionWsTransport {
         state.lastRuntimeError = error
         state.runtimeSnapshot = null
         clearTurnOrigin()
-        state.speechController?.cancelOutput()
+        stopLiveAudioOutput()
         showNotify(error.message, "error")
       },
       async onEnrichRequest(event) {
@@ -1440,7 +1743,7 @@ async function handleUserIntent(intent: Intent): Promise<void> {
   state.lastRuntimeError = null
   clearSuggestChips()
   clearPresent()
-  state.speechController?.cancelOutput()
+  await interruptVoiceSession("superseded-by-text-turn")
 
   try {
     await state.sessionTransport.sendIntent({
@@ -1489,8 +1792,7 @@ async function submitTextPrompt(prompt: string, origin: TurnOrigin = "text"): Pr
     return
   }
 
-  await state.speechController?.cancelInput({ restoreBaseDraft: false })
-  state.speechController?.cancelOutput()
+  await interruptVoiceSession("superseded-by-text-turn")
   setComposerDraft("")
   state.lastRuntimeError = null
   state.pendingTurnOrigin = origin
@@ -1514,8 +1816,7 @@ function registerRuntimeListeners(): void {
           void state.sessionTransport?.interrupt("active-tab-changed")
         }
         if (tabChanged) {
-          void state.speechController?.interruptAll()
-          state.speechController?.cancelOutput()
+          void interruptVoiceSession("active-tab-changed")
         }
 
         state.activeTabId = message.payload.tabId
@@ -1618,27 +1919,10 @@ async function initialize(): Promise<void> {
   setPhase("initializing")
   const config = await loadExtensionConfig(createChromeLocalStorage())
   state.apiBaseUrl = config.apiBaseUrl
-  state.speechController = createSpeechController({
-    inputProvider: new ContentSpeechInputProvider({
-      getActiveTabId: () => state.activeTabId,
-      getLanguage: () => window.navigator.language,
-      sendToContentScript: async (tabId, message) => sendToContentScript(tabId, message)
-    }),
-    outputProvider: createAudioOutputProvider(),
-    outputEnabled: state.ttsEnabled,
-    onInputStateChange: (speechState, detail) => {
-      state.speechInputState = speechState
-      state.speechInputDetail = detail ?? null
-      renderConversationState()
-    },
-    onDraftChange: (draft) => {
-      setSpeechDraft(draft)
-    },
-    onFinalTranscript: async (text) => {
-      await submitTextPrompt(text, "voice")
-    },
-    onOutputError: (message) => {
-      showNotify(message, "error")
+  state.liveAudioOutput = new LiveAudioOutputPlayer()
+  state.liveAudioInput = new LiveAudioInputCapture({
+    onChunkBase64: (chunkBase64) => {
+      state.voiceTransport?.appendAudioChunk(chunkBase64)
     }
   })
   resetSpeechInputState()
@@ -1661,8 +1945,14 @@ async function initialize(): Promise<void> {
     onSubmitPrompt: (prompt) => {
       void submitTextPrompt(prompt, "text")
     },
-    onToggleMic: () => {
-      void toggleSpeechInput()
+    onStartMicPress: () => {
+      void startVoiceCapture()
+    },
+    onEndMicPress: () => {
+      void finishVoiceCapture()
+    },
+    onCancelMicPress: () => {
+      void cancelVoiceCapture()
     },
     onToggleVoiceOutput: () => {
       toggleVoiceOutput()
@@ -1704,7 +1994,8 @@ async function initialize(): Promise<void> {
   await Promise.all([hydrateActiveTabState(), hydrateAuthState()])
   window.addEventListener("beforeunload", () => {
     void state.sessionTransport?.close()
-    state.speechController?.dispose()
+    void interruptVoiceSession("beforeunload")
+    void state.liveAudioOutput?.dispose()
   })
 }
 

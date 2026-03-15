@@ -71,8 +71,10 @@ export interface SemanticDebugInfo {
 }
 
 export interface ConversationMessage {
+  id?: string
   role: "user" | "assistant"
   text: string
+  pending?: boolean
 }
 
 function getAuthDisplayName(user: TokenUser | null): string {
@@ -534,7 +536,9 @@ export function showSuggestChips(
 export function bindConversationActions(args: {
   onComposerInput: (value: string) => void
   onSubmitPrompt: (prompt: string) => void
-  onToggleMic: () => void
+  onStartMicPress: () => void
+  onEndMicPress: () => void
+  onCancelMicPress: () => void
   onToggleVoiceOutput: () => void
 }): void {
   const composer = document.getElementById("conversation-input") as HTMLTextAreaElement | null
@@ -559,8 +563,25 @@ export function bindConversationActions(args: {
   sendButton.addEventListener("click", () => {
     args.onSubmitPrompt(composer.value)
   })
-  micButton.addEventListener("click", () => {
-    args.onToggleMic()
+  micButton.addEventListener("pointerdown", (event) => {
+    event.preventDefault()
+    if (typeof micButton.setPointerCapture === "function") {
+      micButton.setPointerCapture(event.pointerId)
+    }
+    args.onStartMicPress()
+  })
+  micButton.addEventListener("pointerup", (event) => {
+    event.preventDefault()
+    if (typeof micButton.releasePointerCapture === "function" && micButton.hasPointerCapture(event.pointerId)) {
+      micButton.releasePointerCapture(event.pointerId)
+    }
+    args.onEndMicPress()
+  })
+  micButton.addEventListener("pointercancel", () => {
+    args.onCancelMicPress()
+  })
+  micButton.addEventListener("lostpointercapture", () => {
+    args.onCancelMicPress()
   })
   voiceOutputButton.addEventListener("click", () => {
     args.onToggleVoiceOutput()
@@ -666,6 +687,9 @@ export function renderConversation(args: {
     for (const message of args.messages) {
       const item = document.createElement("div")
       item.className = `conversation-message conversation-${message.role}`
+      if (message.pending) {
+        item.classList.add("conversation-pending")
+      }
 
       const label = document.createElement("div")
       label.className = "conversation-role"

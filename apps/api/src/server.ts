@@ -10,6 +10,7 @@ import tokenRouter from "./routes/token"
 import { createLogger } from "./runtime/logger"
 import { createWsSessionEventsRouter } from "./routes/ws-session-events"
 import { RuntimeManager } from "./session/runtime/manager"
+import { attachLiveWebSocketServer } from "./ws/live-ws-server"
 import { attachSessionWebSocketServer } from "./ws/session-ws-server"
 
 type RuntimeBoundExpress = Express & {
@@ -91,5 +92,6 @@ export function createHttpServer(app: Express = createServer()): HttpServer {
   // HTTP 앱과 WS transport를 분리해 supertest 경로가 실제 listen에 의존하지 않도록 한다.
   const server = createHttpNodeServer(app)
   attachSessionWebSocketServer(server, runtime)
+  attachLiveWebSocketServer(server, runtime)
   return server
 }

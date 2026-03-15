@@ -24,6 +24,7 @@ function copyStatic() {
   cpSync(join(root, "manifest.json"), join(root, "dist/manifest.json"))
   cpSync(join(root, "sidepanel.html"), join(root, "dist/sidepanel.html"))
   cpSync(join(root, "popup.html"), join(root, "dist/popup.html"))
+  cpSync(join(root, "src/sidepanel/audio-input-worklet.js"), join(root, "dist/audio-input-worklet.js"))
 
   const stylesSrc = join(root, "src/styles")
   const stylesDest = join(root, "dist/styles")
