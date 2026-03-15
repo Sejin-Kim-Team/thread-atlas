@@ -12,6 +12,7 @@ export interface ConversationControllerHandlers extends RuntimeTransportHandlers
 
 interface ConversationAudioOutput {
   readonly supported: boolean
+  onLevel?: (level: number) => void
   playChunk(chunkBase64: string): Promise<void>
   stop(): void
   dispose(): Promise<void>

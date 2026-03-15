@@ -4,6 +4,7 @@ import type {
   SidePanelToContentMessage
 } from "@threadatlas/shared/runtime"
 import type { SpeechInputState } from "./speech-types"
+import { measurePcm16Base64Level } from "./audio-level"
 
 interface RuntimeMessageSenderLike {
   tab?: {
@@ -26,6 +27,7 @@ export interface ContentAudioInputProvider {
   stop(): Promise<void>
   cancel(): Promise<void>
   dispose(): void
+  onLevel?: ((level: number) => void) | undefined
   onChunkBase64?: ((chunkBase64: string) => void) | undefined
   onError?: ((error: Error) => void) | undefined
   onStateChange?: ((state: SpeechInputState, detail?: string) => void) | undefined
@@ -33,6 +35,7 @@ export interface ContentAudioInputProvider {
 
 export class PageAudioInputProvider implements ContentAudioInputProvider {
   readonly supported: boolean
+  onLevel?: (level: number) => void
   onChunkBase64?: (chunkBase64: string) => void
   onError?: (error: Error) => void
   onStateChange?: (state: SpeechInputState, detail?: string) => void
@@ -149,6 +152,7 @@ export class PageAudioInputProvider implements ContentAudioInputProvider {
 
     if (!sessionId || tabId === null) {
       if (this.supported && this.state !== "unsupported") {
+        this.onLevel?.(0)
         this.emitState("idle")
       }
       return
@@ -166,6 +170,7 @@ export class PageAudioInputProvider implements ContentAudioInputProvider {
     }
 
     if (this.supported) {
+      this.onLevel?.(0)
       this.emitState("idle")
     }
   }
@@ -215,6 +220,7 @@ export class PageAudioInputProvider implements ContentAudioInputProvider {
         if (message.payload.sessionId !== this.currentSessionId) {
           return
         }
+        this.onLevel?.(measurePcm16Base64Level(message.payload.chunkBase64))
         this.onChunkBase64?.(message.payload.chunkBase64)
         return
       default:
@@ -233,6 +239,7 @@ export class PageAudioInputProvider implements ContentAudioInputProvider {
     this.clearStopPromise()
     this.currentSessionId = null
     this.currentTabId = null
+    this.onLevel?.(0)
     this.emitState("error", message)
     this.onError?.(error)
   }

@@ -8,63 +8,82 @@
       body {
         margin: 0;
         width: 320px;
-        padding: 12px;
+        padding: 16px;
+        color: #18212f;
+        background: linear-gradient(180deg, #fcfaf5 0%, #f5efe4 100%);
         font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-        color: #0f172a;
-        background: #ffffff;
+      }
+
+      .eyebrow {
+        margin: 0 0 8px;
+        color: #5f6c80;
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
       }
 
       .title {
         margin: 0 0 10px;
-        font-size: 14px;
-        font-weight: 700;
+        font-size: 24px;
+        line-height: 1.1;
       }
 
-      .toolbar {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 8px;
-        margin-bottom: 10px;
+      .copy {
+        margin: 0 0 14px;
+        color: #5f6c80;
+        font-size: 13px;
+        line-height: 1.45;
+      }
+
+      .stack {
+        display: grid;
+        gap: 10px;
       }
 
       .button {
-        border: 1px solid #cbd5e1;
-        border-radius: 8px;
-        background: #f8fafc;
-        padding: 6px 10px;
-        font-size: 12px;
+        width: 100%;
+        border: 1px solid rgba(15, 23, 42, 0.1);
+        border-radius: 14px;
+        background: rgba(255, 255, 255, 0.88);
+        color: #18212f;
+        padding: 11px 14px;
+        font: inherit;
+        font-size: 13px;
+        font-weight: 700;
         cursor: pointer;
       }
 
-      .status {
-        margin-bottom: 8px;
-        font-size: 12px;
-        color: #475569;
+      .button-primary {
+        background: #3f66d6;
+        border-color: #3f66d6;
+        color: #ffffff;
       }
 
-      .summary {
-        margin: 0;
-        padding: 10px;
-        border: 1px solid #e2e8f0;
-        border-radius: 8px;
-        background: #f8fafc;
-        font-size: 11px;
-        line-height: 1.45;
-        white-space: pre-wrap;
-        word-break: break-word;
+      .status {
+        margin-top: 12px;
+        color: #5f6c80;
+        font-size: 12px;
+      }
+
+      .hidden {
+        display: none !important;
       }
     </style>
   </head>
   <body>
-    <h1 class="title">ThreadAtlas</h1>
-    <div class="toolbar">
-      <button id="popup-capture-button" class="button" type="button">Capture Snapshot</button>
-      <button id="popup-copy-button" class="button" type="button">Copy JSON</button>
-      <button id="popup-open-sidepanel-button" class="button" type="button">Open Sidepanel</button>
-      <button id="popup-selection-button" class="button" type="button">Selection Off</button>
+    <div class="eyebrow">ThreadAtlas</div>
+    <h1 class="title">Talk with the page you are reading</h1>
+    <p id="popup-status" class="copy">Open the assistant sidepanel to ask by voice or text.</p>
+    <div class="stack">
+      <button id="popup-open-sidepanel-button" class="button button-primary" type="button">
+        Open Assistant
+      </button>
+      <button id="popup-open-console-button" class="button hidden" type="button">
+        Open Internal Console
+      </button>
     </div>
-    <div id="popup-status" class="status">No semantic snapshot captured yet.</div>
-    <pre id="popup-summary" class="summary"></pre>
+    <div id="popup-summary" class="status"></div>
     <script src="popup.js"></script>
   </body>
 </html>

@@ -1,6 +1,7 @@
 import type { AnyRuntimeMessage, SidePanelToServiceWorkerMessage } from "@threadatlas/shared/runtime"
 import type { ExtensionAuthState } from "@threadatlas/shared"
 import type {
+  PageTextSelectionChangedPayload,
   SemanticSelectionStateResponse,
   SemanticSnapshotCaptureResponse
 } from "@threadatlas/shared/runtime"
@@ -18,6 +19,21 @@ type ContentScriptBridgeResponse =
   | SemanticSnapshotCaptureResponse
   | SemanticSelectionStateResponse
   | { dump: RegionDump | null }
+
+function isPageTextSelectionChangedMessage(
+  message: unknown
+): message is { type: "PAGE_TEXT_SELECTION_CHANGED"; payload: PageTextSelectionChangedPayload } {
+  if (typeof message !== "object" || message === null) {
+    return false
+  }
+  const candidate = message as { type?: unknown; payload?: Partial<PageTextSelectionChangedPayload> }
+  return (
+    candidate.type === "PAGE_TEXT_SELECTION_CHANGED" &&
+    typeof candidate.payload?.hasSelection === "boolean" &&
+    typeof candidate.payload?.textPreview === "string" &&
+    typeof candidate.payload?.timestamp === "number"
+  )
+}
 
 function safeBroadcastRuntimeMessage(message: unknown): void {
   chrome.runtime.sendMessage(message, () => {
@@ -160,6 +176,18 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
 
 chrome.runtime.onMessage.addListener((msg: AnyRuntimeMessage, sender, sendResponse) => {
   if (sender.tab?.id != null) {
+    if (isPageTextSelectionChangedMessage(msg)) {
+      safeBroadcastRuntimeMessage({
+        type: "PAGE_TEXT_SELECTION_CHANGED",
+        payload: {
+          ...msg.payload,
+          tabId: sender.tab.id
+        }
+      })
+      sendResponse({ ok: true })
+      return true
+    }
+
     switch (msg.type) {
       case "PAGE_AUDIO_CAPTURE_READY": {
         safeBroadcastRuntimeMessage({

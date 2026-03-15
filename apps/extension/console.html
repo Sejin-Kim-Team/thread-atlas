@@ -1,0 +1,501 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ThreadAtlas Internal Console</title>
+    <style>
+      body {
+        margin: 0;
+        font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;
+        color: #0f172a;
+      }
+
+      .header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 10px 12px;
+        border-bottom: 1px solid #e2e8f0;
+      }
+
+      .status-dot {
+        width: 10px;
+        height: 10px;
+        border-radius: 999px;
+        background: #64748b;
+      }
+
+      .status-label {
+        margin-left: 8px;
+        font-size: 12px;
+        color: #334155;
+      }
+
+      .section {
+        padding: 12px;
+      }
+
+      .section-title {
+        margin: 0 0 8px;
+        font-size: 13px;
+        font-weight: 600;
+      }
+
+      .toolbar {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-bottom: 8px;
+      }
+
+      .button {
+        border: 1px solid #cbd5e1;
+        background: #f8fafc;
+        border-radius: 8px;
+        font-size: 12px;
+        padding: 6px 10px;
+        cursor: pointer;
+      }
+
+      .button:disabled {
+        cursor: default;
+        opacity: 0.6;
+      }
+
+      .snapshot-status {
+        margin-bottom: 8px;
+        color: #475569;
+        font-size: 12px;
+      }
+
+      .snapshot-json {
+        margin: 0;
+        padding: 10px;
+        border: 1px solid #e2e8f0;
+        border-radius: 8px;
+        background: #f8fafc;
+        font-size: 11px;
+        line-height: 1.45;
+        white-space: pre-wrap;
+        word-break: break-word;
+        max-height: 280px;
+        overflow: auto;
+      }
+
+      .snapshot-card {
+        border: 1px solid #e2e8f0;
+        border-radius: 10px;
+        background: #ffffff;
+        padding: 10px;
+      }
+
+      .snapshot-grid {
+        display: grid;
+        gap: 10px;
+      }
+
+      .snapshot-label {
+        margin: 0 0 4px;
+        color: #64748b;
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+      }
+
+      .snapshot-value {
+        margin: 0;
+        color: #0f172a;
+        font-size: 12px;
+        line-height: 1.5;
+      }
+
+      .snapshot-list {
+        display: grid;
+        gap: 8px;
+      }
+
+      .history-list {
+        display: grid;
+        gap: 6px;
+      }
+
+      .history-item {
+        width: 100%;
+        text-align: left;
+        border: 1px solid #cbd5e1;
+        background: #ffffff;
+        border-radius: 8px;
+        padding: 8px;
+        cursor: pointer;
+        font-size: 12px;
+      }
+
+      .history-item.active {
+        border-color: #2563eb;
+        background: #eff6ff;
+      }
+
+      .toolbar-select {
+        border: 1px solid #cbd5e1;
+        background: #ffffff;
+        border-radius: 8px;
+        font-size: 12px;
+        padding: 6px 10px;
+      }
+
+      .tab-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-bottom: 8px;
+      }
+
+      .tab-button.active {
+        border-color: #2563eb;
+        background: #eff6ff;
+      }
+
+      .hidden {
+        display: none;
+      }
+
+      .toast {
+        position: fixed;
+        bottom: 8px;
+        left: 8px;
+        right: 8px;
+        background: #0f172a;
+        color: white;
+        border-radius: 8px;
+        padding: 8px 10px;
+        font-size: 12px;
+        display: none;
+      }
+
+      .chips {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+
+      .chip {
+        border: 1px solid #cbd5e1;
+        background: #f8fafc;
+        border-radius: 999px;
+        font-size: 12px;
+        padding: 6px 10px;
+        cursor: pointer;
+      }
+
+      .conversation-transcript {
+        display: grid;
+        gap: 10px;
+        margin-bottom: 10px;
+      }
+
+      .conversation-message {
+        border: 1px solid #e2e8f0;
+        border-radius: 10px;
+        padding: 10px;
+        background: #ffffff;
+      }
+
+      .conversation-pending {
+        opacity: 0.82;
+      }
+
+      .conversation-user {
+        background: #eff6ff;
+        border-color: #bfdbfe;
+      }
+
+      .conversation-assistant {
+        background: #f8fafc;
+      }
+
+      .conversation-role {
+        margin-bottom: 4px;
+        color: #475569;
+        font-size: 11px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+      }
+
+      .conversation-text {
+        color: #0f172a;
+        font-size: 13px;
+        line-height: 1.55;
+        white-space: pre-wrap;
+      }
+
+      .conversation-empty {
+        border: 1px dashed #cbd5e1;
+        border-radius: 10px;
+        padding: 12px;
+        color: #64748b;
+        font-size: 12px;
+        background: #f8fafc;
+      }
+
+      .conversation-composer {
+        display: grid;
+        gap: 8px;
+      }
+
+      .conversation-toolbar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        margin-bottom: 10px;
+      }
+
+      .conversation-toolbar-group {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+
+      .conversation-input {
+        width: 100%;
+        box-sizing: border-box;
+        resize: vertical;
+        min-height: 88px;
+        border: 1px solid #cbd5e1;
+        border-radius: 10px;
+        padding: 10px 12px;
+        font: inherit;
+        font-size: 13px;
+        line-height: 1.5;
+        color: #0f172a;
+        background: #ffffff;
+      }
+
+      .conversation-input[readonly] {
+        background: #f8fafc;
+      }
+
+      .conversation-input:disabled {
+        background: #f8fafc;
+        color: #94a3b8;
+      }
+
+      .button.active-toggle {
+        border-color: #2563eb;
+        background: #eff6ff;
+      }
+
+      .auth-card {
+        border: 1px solid #e2e8f0;
+        border-radius: 12px;
+        padding: 12px;
+        background: #f8fafc;
+      }
+
+      .auth-copy {
+        margin: 0 0 10px;
+        color: #475569;
+        font-size: 12px;
+        line-height: 1.5;
+      }
+
+      .auth-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+      }
+
+      .auth-user {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        min-width: 0;
+      }
+
+      .auth-avatar {
+        width: 36px;
+        height: 36px;
+        border-radius: 999px;
+        border: 1px solid #cbd5e1;
+        background: #ffffff;
+        object-fit: cover;
+      }
+
+      .auth-avatar-fallback {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 12px;
+        font-weight: 700;
+        color: #334155;
+      }
+
+      .auth-user-copy {
+        min-width: 0;
+      }
+
+      .auth-user-name,
+      .auth-user-email {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .auth-user-name {
+        font-size: 13px;
+        font-weight: 600;
+        color: #0f172a;
+      }
+
+      .auth-user-email {
+        margin-top: 2px;
+        font-size: 12px;
+        color: #64748b;
+      }
+
+      .auth-actions {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+      }
+
+      .button.secondary {
+        background: #ffffff;
+      }
+
+      .hidden-inline {
+        display: none !important;
+      }
+    </style>
+  </head>
+  <body>
+    <header class="header">
+      <div>ThreadAtlas</div>
+      <div style="display: flex; align-items: center">
+        <div id="status-dot" class="status-dot"></div>
+        <div id="status-label" class="status-label">initializing</div>
+      </div>
+    </header>
+    <section class="section">
+      <h2 class="section-title">Account</h2>
+      <div class="auth-card">
+        <div id="auth-copy" class="auth-copy">
+          Sign in with Google to ask questions about the current page.
+        </div>
+        <div class="auth-row">
+          <div id="auth-user" class="auth-user hidden-inline">
+            <img id="auth-avatar" class="auth-avatar hidden-inline" alt="" />
+            <div id="auth-avatar-fallback" class="auth-avatar auth-avatar-fallback hidden-inline">TA</div>
+            <div class="auth-user-copy">
+              <div id="auth-user-name" class="auth-user-name"></div>
+              <div id="auth-user-email" class="auth-user-email"></div>
+            </div>
+          </div>
+          <div class="auth-actions">
+            <button id="auth-sign-in-button" class="button" type="button">Continue with Google</button>
+            <button id="auth-sign-out-button" class="button secondary hidden-inline" type="button">
+              Sign out
+            </button>
+          </div>
+        </div>
+      </div>
+    </section>
+    <section class="section">
+      <h2 class="section-title">Conversation</h2>
+      <div id="conversation-status" class="snapshot-status">Capture a semantic snapshot to start.</div>
+      <div id="conversation-transcript" class="conversation-transcript"></div>
+      <div class="conversation-toolbar">
+        <div class="conversation-toolbar-group">
+          <button id="conversation-mic-button" class="button" type="button">Mic</button>
+        </div>
+        <div class="conversation-toolbar-group">
+          <button id="conversation-voice-output-button" class="button active-toggle" type="button">Voice Output On</button>
+        </div>
+      </div>
+      <div class="conversation-composer">
+        <textarea
+          id="conversation-input"
+          class="conversation-input"
+          rows="4"
+          placeholder="Ask about the current snapshot..."
+        ></textarea>
+        <button id="conversation-send-button" class="button" type="button">Send</button>
+      </div>
+    </section>
+    <section class="section">
+      <div id="present-root"></div>
+    </section>
+    <section class="section">
+      <h2 class="section-title">Semantic Snapshot</h2>
+      <div class="toolbar">
+        <button id="semantic-capture-button" class="button" type="button">Capture Snapshot</button>
+        <button id="semantic-copy-button" class="button" type="button">Copy JSON</button>
+        <button id="semantic-selection-button" class="button" type="button">Selection Off</button>
+        <button id="semantic-raw-toggle-button" class="button" type="button">Show Raw JSON</button>
+      </div>
+      <div id="semantic-snapshot-status" class="snapshot-status">No semantic snapshot captured yet.</div>
+      <div class="snapshot-grid">
+        <div class="snapshot-card">
+          <div class="snapshot-label">Page</div>
+          <div id="semantic-page-summary" class="snapshot-list"></div>
+        </div>
+        <div class="snapshot-card">
+          <div class="snapshot-label">Focus</div>
+          <div id="semantic-focus-detail" class="snapshot-list"></div>
+        </div>
+        <div class="snapshot-card">
+          <div class="snapshot-label">Context</div>
+          <div id="semantic-context-groups" class="snapshot-list"></div>
+        </div>
+        <div class="snapshot-card">
+          <div class="snapshot-label">History</div>
+          <div id="semantic-history-list" class="history-list"></div>
+        </div>
+        <div class="snapshot-card">
+          <div class="snapshot-label">Debug</div>
+          <div id="semantic-debug-status" class="snapshot-status">No region dump loaded.</div>
+          <div id="semantic-debug-detail" class="snapshot-list"></div>
+        </div>
+      </div>
+      <pre id="semantic-snapshot-json" class="snapshot-json hidden"></pre>
+    </section>
+    <section class="section">
+      <h2 class="section-title">Semantic Selection</h2>
+      <div class="toolbar">
+        <button id="semantic-selection-clear-button" class="button" type="button">Clear Selection</button>
+      </div>
+      <div id="semantic-selection-status" class="snapshot-status">Selection mode is off.</div>
+      <div class="snapshot-card">
+        <div class="snapshot-label">Selected Node</div>
+        <div id="semantic-selection-detail" class="snapshot-list"></div>
+      </div>
+    </section>
+    <section class="section">
+      <h2 class="section-title">LLM Context</h2>
+      <div class="toolbar">
+        <select id="semantic-context-profile" class="toolbar-select">
+          <option value="branch-summary">branch-summary</option>
+          <option value="reply-assist">reply-assist</option>
+          <option value="claim-extraction">claim-extraction</option>
+        </select>
+        <button id="semantic-context-copy-button" class="button" type="button">Copy LLM Context</button>
+      </div>
+      <div class="tab-row">
+        <button id="semantic-context-pack-tab" class="button tab-button active" type="button">Context Pack</button>
+        <button id="semantic-context-compact-tab" class="button tab-button" type="button">Compact JSON</button>
+        <button id="semantic-context-linear-tab" class="button tab-button" type="button">Linear Text</button>
+      </div>
+      <div id="semantic-context-status" class="snapshot-status">No semantic snapshot selected.</div>
+      <div id="semantic-context-restrictions" class="snapshot-list"></div>
+      <pre id="semantic-context-preview" class="snapshot-json"></pre>
+    </section>
+    <section class="section">
+      <div id="suggest-root" class="chips"></div>
+    </section>
+    <div id="notify-root" class="toast"></div>
+    <script src="console.js"></script>
+  </body>
+</html>

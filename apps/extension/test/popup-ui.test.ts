@@ -1,91 +1,49 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
-import {
-  bindPopupActions,
-  renderPopupSelectionState,
-  renderPopupSnapshotState
-} from "../src/popup/index"
+import { bindPopupActions, renderPopupState } from "../src/popup/index"
 
 describe("popup ui", () => {
   beforeEach(() => {
     document.body.innerHTML = `
-      <button id="popup-capture-button" type="button">Capture Snapshot</button>
-      <button id="popup-copy-button" type="button">Copy JSON</button>
-      <button id="popup-open-sidepanel-button" type="button">Open Sidepanel</button>
-      <button id="popup-selection-button" type="button">Selection Off</button>
-      <div id="popup-status"></div>
-      <pre id="popup-summary"></pre>
+      <p id="popup-status"></p>
+      <div id="popup-summary"></div>
+      <button id="popup-open-sidepanel-button" type="button">Open Assistant</button>
+      <button id="popup-open-console-button" class="hidden" type="button">Open Internal Console</button>
     `
   })
 
-  it("renders snapshot summary and selection state", () => {
-    const onCapture = vi.fn()
-    const onCopy = vi.fn()
+  it("renders consumer popup copy and dev-only console launcher", () => {
+    renderPopupState({
+      showInternalConsole: false,
+      status: "Open the assistant sidepanel to ask by voice or text.",
+      summary: "Current-page assistant is ready."
+    })
+
+    expect(document.getElementById("popup-status")?.textContent).toContain("assistant sidepanel")
+    expect(document.getElementById("popup-summary")?.textContent).toContain("Current-page assistant")
+    expect(document.getElementById("popup-open-console-button")?.classList.contains("hidden")).toBe(true)
+
+    renderPopupState({
+      showInternalConsole: true,
+      status: "Open the assistant sidepanel to ask by voice or text.",
+      summary: "Internal preview mode is available on this build."
+    })
+
+    expect(document.getElementById("popup-open-console-button")?.classList.contains("hidden")).toBe(false)
+  })
+
+  it("binds assistant and internal console actions", () => {
     const onOpenSidepanel = vi.fn()
-    const onToggleSelection = vi.fn()
+    const onOpenInternalConsole = vi.fn()
 
     bindPopupActions({
-      onCapture,
-      onCopy,
       onOpenSidepanel,
-      onToggleSelection
+      onOpenInternalConsole
     })
 
-    document.getElementById("popup-capture-button")?.dispatchEvent(new MouseEvent("click"))
-    document.getElementById("popup-copy-button")?.dispatchEvent(new MouseEvent("click"))
-    document.getElementById("popup-open-sidepanel-button")?.dispatchEvent(new MouseEvent("click"))
-    document.getElementById("popup-selection-button")?.dispatchEvent(new MouseEvent("click"))
+    ;(document.getElementById("popup-open-sidepanel-button") as HTMLButtonElement).click()
+    ;(document.getElementById("popup-open-console-button") as HTMLButtonElement).click()
 
-    renderPopupSnapshotState({
-      tabId: 7,
-      snapshot: {
-        page: {
-          id: "article-example.com",
-          url: "https://example.com",
-          title: "Example",
-          kind: "article"
-        },
-        focus: {
-          nodeId: "article-node-1",
-          node: {
-            kind: "content",
-            id: "article-node-1",
-            type: "heading",
-            text: "Example"
-          },
-          region: "article-body"
-        },
-        context: [],
-        meta: {
-          capturedAt: "2026-03-06T00:00:00.000Z",
-          skeletonVersion: 1,
-          extractorId: "generic-article"
-        }
-      },
-      error: null
-    })
-    renderPopupSelectionState({
-      tabId: 7,
-      enabled: true,
-      selectedTarget: {
-        regionId: "article-body",
-        primitive: "authored-block",
-        category: "content.article",
-        nodeKind: "content",
-        nodeId: "article-node-1",
-        rootNodeId: "article-node-1",
-        scopeRootId: "article-node-1",
-        label: "Article Node",
-        displayLabel: "Article section",
-        text: "Example"
-      }
-    })
-
-    expect(onCapture).toHaveBeenCalledTimes(1)
-    expect(onCopy).toHaveBeenCalledTimes(1)
     expect(onOpenSidepanel).toHaveBeenCalledTimes(1)
-    expect(onToggleSelection).toHaveBeenCalledTimes(1)
-    expect(document.getElementById("popup-status")?.textContent).toContain("Latest")
-    expect(document.getElementById("popup-summary")?.textContent).toContain("\"article-body\"")
-    expect(document.getElementById("popup-selection-button")?.textContent).toContain("On")
+    expect(onOpenInternalConsole).toHaveBeenCalledTimes(1)
   })
 })

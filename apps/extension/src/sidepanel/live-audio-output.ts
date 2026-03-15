@@ -1,25 +1,8 @@
-function base64ToBytes(base64: string): Uint8Array {
-  const binary = atob(base64)
-  const bytes = new Uint8Array(binary.length)
-  for (let index = 0; index < binary.length; index += 1) {
-    bytes[index] = binary.charCodeAt(index)
-  }
-  return bytes
-}
-
-function pcm16ToFloat32(bytes: Uint8Array): Float32Array {
-  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
-  const sampleCount = Math.floor(bytes.byteLength / 2)
-  const output = new Float32Array(sampleCount)
-  for (let index = 0; index < sampleCount; index += 1) {
-    const sample = view.getInt16(index * 2, true)
-    output[index] = sample / 0x8000
-  }
-  return output
-}
+import { decodePcm16Base64ToFloat32, measurePcm16Base64Level } from "./audio-level"
 
 export class LiveAudioOutputPlayer {
   readonly supported: boolean
+  onLevel?: (level: number) => void
   private audioContext: AudioContext | null = null
   private activeSources = new Set<AudioBufferSourceNode>()
   private nextPlaybackTime = 0
@@ -36,9 +19,10 @@ export class LiveAudioOutputPlayer {
     const context = this.ensureContext()
     await context.resume()
 
-    const float32 = pcm16ToFloat32(base64ToBytes(chunkBase64))
+    const float32 = decodePcm16Base64ToFloat32(chunkBase64)
+    this.onLevel?.(measurePcm16Base64Level(chunkBase64))
     const audioBuffer = context.createBuffer(1, float32.length, 24000)
-    audioBuffer.copyToChannel(new Float32Array(float32), 0)
+    audioBuffer.copyToChannel(Float32Array.from(float32), 0)
 
     const source = context.createBufferSource()
     source.buffer = audioBuffer
@@ -54,6 +38,7 @@ export class LiveAudioOutputPlayer {
   }
 
   stop(): void {
+    this.onLevel?.(0)
     for (const source of this.activeSources) {
       try {
         source.stop()

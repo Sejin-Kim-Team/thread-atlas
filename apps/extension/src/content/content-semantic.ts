@@ -1,5 +1,6 @@
 import type {
   AudioCaptureControlResponse,
+  PageTextSelectionChangedPayload,
   SemanticSelectionStateResponse,
   SemanticSnapshotCaptureResponse,
   SidePanelToContentMessage,
@@ -10,6 +11,7 @@ import { BrowserCapture } from "./capture/BrowserCapture"
 import { RegionHighlighter } from "./overlay/RegionHighlighter"
 import { SnapshotIndicator } from "./overlay/SnapshotIndicator"
 import { SemanticCaptureSession } from "./semantic/session"
+import { PageTextSelectionBridge } from "./page-text-selection"
 import type { RegionDump } from "./semantic/core/observability"
 
 interface SemanticRegionDumpResponse {
@@ -37,14 +39,244 @@ declare global {
     __threadatlasSemanticCaptureInitialized__?: boolean
     __threadatlasSemanticCaptureSession__?: SemanticCaptureSession
     __threadatlasSemanticTriggerManager__?: TriggerManager
+    __threadatlasPageTextSelectionBridge__?: PageTextSelectionBridge
     __threadatlasPageAudioBridgeReady__?: boolean
     __threadatlasPageAudioBridgeFailed__?: boolean
+  }
+}
+
+const SELECTION_SCOPE_STYLE_ID = "threadatlas-selection-scope-style"
+const SELECTION_SCOPE_ROOT_CLASS = "threadatlas-selection-scope-root"
+const SELECTION_SCOPE_FOCUS_CLASS = "threadatlas-selection-scope-focus"
+
+let selectionScopeRootElement: Element | null = null
+let selectionScopeFocusElement: Element | null = null
+
+function nearestSemanticElement(node: Node | null): Element | null {
+  if (!node) {
+    return null
+  }
+  const element = node instanceof Element ? node : node.parentElement
+  return element?.closest("[data-semantic-node-id]") ?? element?.closest("[data-semantic-region]") ?? null
+}
+
+function buildSemanticAncestorChain(element: Element | null): Element[] {
+  const chain: Element[] = []
+  let current: Element | null = element
+  while (current) {
+    const semanticElement = current.closest("[data-semantic-node-id],[data-semantic-region]")
+    if (!semanticElement || chain.includes(semanticElement)) {
+      break
+    }
+    chain.push(semanticElement)
+    current = semanticElement.parentElement
+  }
+  return chain
+}
+
+function resolveSelectionCaptureElement(selection: Selection | null): Element | null {
+  if (!selection || selection.isCollapsed || selection.rangeCount === 0) {
+    return null
+  }
+
+  const range = selection.getRangeAt(0)
+  const anchorElement = nearestSemanticElement(selection.anchorNode)
+  const focusElement = nearestSemanticElement(selection.focusNode)
+  if (anchorElement && focusElement) {
+    if (anchorElement === focusElement) {
+      return anchorElement
+    }
+
+    const focusChain = new Set(buildSemanticAncestorChain(focusElement))
+    for (const candidate of buildSemanticAncestorChain(anchorElement)) {
+      if (focusChain.has(candidate)) {
+        return candidate
+      }
+    }
+  }
+
+  return (
+    nearestSemanticElement(range.commonAncestorContainer) ??
+    anchorElement ??
+    focusElement ??
+    null
+  )
+}
+
+function capturePageTextSelectionSnapshot(session: SemanticCaptureSession): SemanticSnapshotCaptureResponse {
+  const selection = window.getSelection()
+  const selectedElement = resolveSelectionCaptureElement(selection)
+  if (!selection || selection.isCollapsed || !selectedElement) {
+    return {
+      snapshot: null,
+      error: "No usable page selection could be resolved."
+    }
+  }
+
+  return session.captureSnapshot({
+    source: "sidepanel",
+    activeElement: selectedElement,
+    selection: null,
+    triggerTarget: selectedElement,
+    selectedElement,
+    lastHoveredElement: selectedElement
+  })
+}
+
+function ensureSelectionScopeStyles(document: Document): void {
+  if (document.getElementById(SELECTION_SCOPE_STYLE_ID)) {
+    return
+  }
+  const style = document.createElement("style")
+  style.id = SELECTION_SCOPE_STYLE_ID
+  style.textContent = `
+    .${SELECTION_SCOPE_ROOT_CLASS},
+    .${SELECTION_SCOPE_FOCUS_CLASS} {
+      transition:
+        box-shadow 160ms ease,
+        background-color 160ms ease,
+        outline-color 160ms ease;
+      scroll-margin-top: 96px;
+    }
+
+    .${SELECTION_SCOPE_ROOT_CLASS} {
+      outline: 1px solid rgba(90, 114, 238, 0.24);
+      background-color: rgba(90, 114, 238, 0.06);
+      box-shadow: 0 0 0 6px rgba(90, 114, 238, 0.08);
+      border-radius: 10px;
+    }
+
+    .${SELECTION_SCOPE_FOCUS_CLASS} {
+      outline: 2px solid rgba(90, 114, 238, 0.9);
+      background-color: rgba(90, 114, 238, 0.12);
+      box-shadow: 0 0 0 8px rgba(90, 114, 238, 0.12);
+      border-radius: 12px;
+    }
+  `
+  document.head.appendChild(style)
+}
+
+function clearSelectionScopeHighlight(): void {
+  selectionScopeRootElement?.classList.remove(SELECTION_SCOPE_ROOT_CLASS)
+  selectionScopeFocusElement?.classList.remove(SELECTION_SCOPE_FOCUS_CLASS)
+  selectionScopeRootElement = null
+  selectionScopeFocusElement = null
+}
+
+function findSemanticElement(document: Document, regionId: string, nodeId: string | null | undefined): Element | null {
+  if (!nodeId) {
+    return document.querySelector(`[data-semantic-region="${regionId}"]`)
+  }
+  return (
+    document.querySelector(`[data-semantic-region="${regionId}"][data-semantic-node-id="${nodeId}"]`) ??
+    document.querySelector(`[data-semantic-node-id="${nodeId}"]`)
+  )
+}
+
+function applySelectionScopeHighlight(payload: {
+  regionId: string
+  focusNodeId: string
+  rootNodeId?: string | null
+}): void {
+  clearSelectionScopeHighlight()
+  ensureSelectionScopeStyles(document)
+
+  const rootElement = findSemanticElement(document, payload.regionId, payload.rootNodeId)
+  const focusElement = findSemanticElement(document, payload.regionId, payload.focusNodeId)
+
+  if (rootElement) {
+    rootElement.classList.add(SELECTION_SCOPE_ROOT_CLASS)
+    selectionScopeRootElement = rootElement
+  }
+  if (focusElement) {
+    focusElement.classList.add(SELECTION_SCOPE_FOCUS_CLASS)
+    selectionScopeFocusElement = focusElement
   }
 }
 
 let pageAudioBridgeReadyPromise: Promise<void> | null = null
 let resolvePageAudioBridgeReady: (() => void) | null = null
 let rejectPageAudioBridgeReady: ((error: Error) => void) | null = null
+
+function isClearPageTextSelectionMessage(
+  message: ServiceWorkerToContentMessage | SidePanelToContentMessage
+): message is Extract<SidePanelToContentMessage, { type: "CLEAR_PAGE_TEXT_SELECTION" }> {
+  return message.type === "CLEAR_PAGE_TEXT_SELECTION"
+}
+
+function isCapturePageTextSelectionSnapshotMessage(
+  message: unknown
+): message is Extract<SidePanelToContentMessage, { type: "CAPTURE_PAGE_TEXT_SELECTION_SNAPSHOT" }> {
+  if (typeof message !== "object" || message === null) {
+    return false
+  }
+  return (message as { type?: unknown }).type === "CAPTURE_PAGE_TEXT_SELECTION_SNAPSHOT"
+}
+
+function isApplyPageSelectionScopeHighlightMessage(
+  message: unknown
+): message is Extract<SidePanelToContentMessage, { type: "APPLY_PAGE_SELECTION_SCOPE_HIGHLIGHT" }> {
+  return toApplyPageSelectionScopeHighlightPayload(message) !== null
+}
+
+function isClearPageSelectionScopeHighlightMessage(
+  message: unknown
+): message is Extract<SidePanelToContentMessage, { type: "CLEAR_PAGE_SELECTION_SCOPE_HIGHLIGHT" }> {
+  if (typeof message !== "object" || message === null) {
+    return false
+  }
+  return (message as { type?: unknown }).type === "CLEAR_PAGE_SELECTION_SCOPE_HIGHLIGHT"
+}
+
+function toApplyPageSelectionScopeHighlightPayload(message: unknown): {
+  regionId: string
+  focusNodeId: string
+  rootNodeId?: string | null
+} | null {
+  if (typeof message !== "object" || message === null) {
+    return null
+  }
+  const candidate = message as {
+    type?: unknown
+    payload?: { regionId?: unknown; focusNodeId?: unknown; rootNodeId?: unknown }
+  }
+  if (
+    candidate.type !== "APPLY_PAGE_SELECTION_SCOPE_HIGHLIGHT" ||
+    typeof candidate.payload?.regionId !== "string" ||
+    typeof candidate.payload?.focusNodeId !== "string" ||
+    (candidate.payload?.rootNodeId !== undefined &&
+      candidate.payload?.rootNodeId !== null &&
+      typeof candidate.payload?.rootNodeId !== "string")
+  ) {
+    return null
+  }
+  return {
+    regionId: candidate.payload.regionId,
+    focusNodeId: candidate.payload.focusNodeId,
+    ...(candidate.payload.rootNodeId !== undefined
+      ? { rootNodeId: candidate.payload.rootNodeId as string | null }
+      : {})
+  }
+}
+
+function toPageTextSelectionPayload(payload: unknown): PageTextSelectionChangedPayload | null {
+  if (typeof payload !== "object" || payload === null) {
+    return null
+  }
+  const candidate = payload as Partial<PageTextSelectionChangedPayload>
+  if (
+    typeof candidate.hasSelection !== "boolean" ||
+    typeof candidate.textPreview !== "string" ||
+    typeof candidate.timestamp !== "number"
+  ) {
+    return null
+  }
+  return {
+    hasSelection: candidate.hasSelection,
+    textPreview: candidate.textPreview,
+    timestamp: candidate.timestamp
+  }
+}
 
 async function hydrateSelectionMode(triggerManager: TriggerManager): Promise<void> {
   try {
@@ -69,6 +301,20 @@ function initializeSemanticCapture(): void {
   const browserCapture = new BrowserCapture(document, window)
   const regionHighlighter = new RegionHighlighter(document, window)
   const snapshotIndicator = new SnapshotIndicator(document, window)
+  const pageTextSelectionBridge = new PageTextSelectionBridge(
+    document,
+    window,
+    (payload) => {
+      const normalizedPayload = toPageTextSelectionPayload(payload)
+      if (!normalizedPayload) {
+        return
+      }
+      void chrome.runtime.sendMessage({
+        type: "PAGE_TEXT_SELECTION_CHANGED",
+        payload: normalizedPayload
+      })
+    }
+  )
   const triggerManager = new TriggerManager(
     session,
     browserCapture,
@@ -89,9 +335,11 @@ function initializeSemanticCapture(): void {
 
   session.initialize()
   browserCapture.initialize()
+  pageTextSelectionBridge.initialize()
   ensurePageAudioBridge()
   window.__threadatlasSemanticCaptureSession__ = session
   window.__threadatlasSemanticTriggerManager__ = triggerManager
+  window.__threadatlasPageTextSelectionBridge__ = pageTextSelectionBridge
   window.__threadatlasSemanticCaptureInitialized__ = true
   void hydrateSelectionMode(triggerManager)
 
@@ -107,6 +355,11 @@ function initializeSemanticCapture(): void {
           | AudioCaptureControlResponse
       ) => void
     ) => {
+      if (isCapturePageTextSelectionSnapshotMessage(message)) {
+        sendResponse(capturePageTextSelectionSnapshot(session))
+        return true
+      }
+
       if (message.type === "CAPTURE_SEMANTIC_SNAPSHOT") {
         void triggerManager.captureSnapshot(message.payload.source).then(sendResponse)
         return true
@@ -131,6 +384,25 @@ function initializeSemanticCapture(): void {
 
       if (message.type === "CLEAR_SEMANTIC_SELECTION") {
         sendResponse(triggerManager.clearSelection())
+        return true
+      }
+
+      if (isClearPageTextSelectionMessage(message)) {
+        pageTextSelectionBridge.clearSelection()
+        sendResponse({ ok: true })
+        return true
+      }
+
+      const selectionScopeHighlightPayload = toApplyPageSelectionScopeHighlightPayload(message)
+      if (selectionScopeHighlightPayload) {
+        applySelectionScopeHighlight(selectionScopeHighlightPayload)
+        sendResponse({ ok: true })
+        return true
+      }
+
+      if (isClearPageSelectionScopeHighlightMessage(message)) {
+        clearSelectionScopeHighlight()
+        sendResponse({ ok: true })
         return true
       }
 

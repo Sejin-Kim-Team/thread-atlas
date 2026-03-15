@@ -51,6 +51,13 @@ export interface AudioCaptureControlResponse {
   error?: string
 }
 
+export interface PageTextSelectionChangedPayload {
+  tabId?: number | null
+  hasSelection: boolean
+  textPreview: string
+  timestamp: number
+}
+
 export interface SemanticSnapshotHistoryResponse {
   tabId: number | null
   snapshots: SemanticSnapshot[]
@@ -60,6 +67,13 @@ export type SidePanelToContentMessage =
   | { type: "COLLECT_SENSORS" }
   | { type: "GET_THREAD_DOC" }
   | { type: "EXECUTE_PROJECTION"; projection: Projection }
+  | { type: "CAPTURE_PAGE_TEXT_SELECTION_SNAPSHOT" }
+  | {
+      type: "APPLY_PAGE_SELECTION_SCOPE_HIGHLIGHT"
+      payload: { regionId: string; focusNodeId: string; rootNodeId?: string | null }
+    }
+  | { type: "CLEAR_PAGE_SELECTION_SCOPE_HIGHLIGHT" }
+  | { type: "CLEAR_PAGE_TEXT_SELECTION" }
   | { type: "START_PAGE_AUDIO_CAPTURE"; payload: { sessionId: string } }
   | { type: "STOP_PAGE_AUDIO_CAPTURE"; payload: { sessionId: string } }
   | { type: "CANCEL_PAGE_AUDIO_CAPTURE"; payload: { sessionId: string } }
@@ -97,6 +111,10 @@ export type ServiceWorkerToSidePanelMessage =
         sessionId: string
         chunkBase64: string
       }
+    }
+  | {
+      type: "PAGE_TEXT_SELECTION_CHANGED"
+      payload: PageTextSelectionChangedPayload
     }
   | {
       type: "SEMANTIC_SNAPSHOT_READY"

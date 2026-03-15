@@ -10,7 +10,8 @@ const compiledGoogleOAuthClientId =
   process.env.THREADATLAS_GOOGLE_OAUTH_CLIENT_ID ?? process.env.GOOGLE_OAUTH_CLIENT_ID ?? ""
 
 const entries = [
-  { entryPoints: ["src/sidepanel/index.ts"], outfile: "dist/sidepanel.js" },
+  { entryPoints: ["src/sidepanel-user/index.ts"], outfile: "dist/sidepanel.js" },
+  { entryPoints: ["src/sidepanel/index.ts"], outfile: "dist/console.js" },
   { entryPoints: ["src/popup/index.ts"], outfile: "dist/popup.js" },
   { entryPoints: ["src/background/service-worker.ts"], outfile: "dist/service-worker.js" },
   { entryPoints: ["src/content/content-semantic.ts"], outfile: "dist/content-semantic.js" },
@@ -23,6 +24,7 @@ function copyStatic() {
   mkdirSync(distDir, { recursive: true })
   cpSync(join(root, "manifest.json"), join(root, "dist/manifest.json"))
   cpSync(join(root, "sidepanel.html"), join(root, "dist/sidepanel.html"))
+  cpSync(join(root, "console.html"), join(root, "dist/console.html"))
   cpSync(join(root, "popup.html"), join(root, "dist/popup.html"))
   cpSync(join(root, "src/sidepanel/audio-input-worklet.js"), join(root, "dist/audio-input-worklet.js"))
 
