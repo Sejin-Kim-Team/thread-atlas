@@ -1,7 +1,6 @@
-export async function initializeAudio(): Promise<void> {
-  return
-}
+import { ChromeSpeechOutputProvider } from "./chrome-speech-output"
+import type { SpeechOutputProvider } from "./speech-types"
 
-export async function stopAudio(): Promise<void> {
-  return
+export function createAudioOutputProvider(): SpeechOutputProvider {
+  return new ChromeSpeechOutputProvider()
 }

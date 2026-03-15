@@ -145,4 +145,33 @@ describe("POST /api/token", () => {
       code: "INVALID_EVENT"
     })
   })
+
+  it("revokes an issued app session token and makes it unusable for bearer auth", async () => {
+    const app = createServer()
+    const issued = await request(app)
+      .post("/api/token")
+      .set("X-Bootstrap-Key", BOOTSTRAP_KEY)
+      .send({
+        grantType: "dev-bootstrap",
+        bootstrapSubject: "google-sub-10009"
+      })
+
+    expect(issued.status).toBe(200)
+
+    const revokeResponse = await request(app)
+      .post("/api/token/revoke")
+      .set("Authorization", `Bearer ${issued.body.token as string}`)
+
+    expect(revokeResponse.status).toBe(204)
+
+    const denied = await request(app)
+      .post("/api/analyze")
+      .set("Authorization", `Bearer ${issued.body.token as string}`)
+      .send({})
+
+    expect(denied.status).toBe(401)
+    expect(denied.body).toMatchObject({
+      code: "UNAUTHORIZED"
+    })
+  })
 })

@@ -2,6 +2,7 @@ import type { AuthClient } from "./auth-client"
 import type {
   ContextEnrichResultPayload,
   RuntimeEnvelope,
+  RuntimeErrorPayload,
   ServerEnvelope
 } from "@threadatlas/shared/runtime"
 import type { ConversationIntentInput, ConversationTransport, ConversationTransportHandlers } from "./conversation-transport"
@@ -17,6 +18,7 @@ interface WebSocketLike {
 }
 
 type WebSocketFactory = (url: string) => WebSocketLike
+type TokenIssuer = Pick<AuthClient, "issueToken">
 
 function makeTimestamp(): string {
   return new Date().toISOString()
@@ -44,8 +46,52 @@ function isServerEnvelope(value: unknown): value is ServerEnvelope {
   return typeof value === "object" && value !== null && "type" in value && "timestamp" in value
 }
 
+function isRuntimeErrorPayload(value: unknown): value is RuntimeErrorPayload {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "code" in value &&
+    typeof (value as { code?: unknown }).code === "string" &&
+    "message" in value &&
+    typeof (value as { message?: unknown }).message === "string"
+  )
+}
+
+function isLegacyErrorEnvelope(
+  value: unknown
+): value is Extract<ServerEnvelope, { type: "error" }> & { timestamp?: string } {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    (value as { type?: unknown }).type === "error" &&
+    isRuntimeErrorPayload((value as { payload?: unknown }).payload)
+  )
+}
+
 function isEventBatch(value: unknown): value is { events: unknown[] } {
   return typeof value === "object" && value !== null && "type" in value && (value as { type?: unknown }).type === "event.batch" && Array.isArray((value as { events?: unknown[] }).events)
+}
+
+function normalizeServerEnvelope(value: unknown): ServerEnvelope | null {
+  if (isServerEnvelope(value)) {
+    return value
+  }
+
+  if (isLegacyErrorEnvelope(value)) {
+    return {
+      type: "error",
+      timestamp:
+        typeof value.timestamp === "string" && value.timestamp.length > 0
+          ? value.timestamp
+          : makeTimestamp(),
+      ...(typeof value.sessionId === "string" ? { sessionId: value.sessionId } : {}),
+      ...(typeof value.turnId === "string" ? { turnId: value.turnId } : {}),
+      ...(typeof value.requestId === "string" ? { requestId: value.requestId } : {}),
+      payload: value.payload
+    }
+  }
+
+  return null
 }
 
 export class SessionWsTransport implements ConversationTransport {
@@ -60,7 +106,7 @@ export class SessionWsTransport implements ConversationTransport {
   constructor(
     private readonly args: {
       apiBaseUrl: string
-      authClient: AuthClient
+      authClient: TokenIssuer
       handlers: ConversationTransportHandlers
       webSocketFactory?: WebSocketFactory
     }
@@ -212,15 +258,17 @@ export class SessionWsTransport implements ConversationTransport {
     const parsed = JSON.parse(message) as unknown
     if (isEventBatch(parsed)) {
       for (const event of parsed.events) {
-        if (isServerEnvelope(event)) {
-          void this.handleServerEnvelope(event)
+        const normalized = normalizeServerEnvelope(event)
+        if (normalized) {
+          void this.handleServerEnvelope(normalized)
         }
       }
       return
     }
 
-    if (isServerEnvelope(parsed)) {
-      void this.handleServerEnvelope(parsed)
+    const normalized = normalizeServerEnvelope(parsed)
+    if (normalized) {
+      void this.handleServerEnvelope(normalized)
     }
   }
 

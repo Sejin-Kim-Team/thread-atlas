@@ -130,8 +130,9 @@ function createRuntimeMock(state: RuntimeMockState): RuntimeManager {
             timestamp,
             sessionId: "sess-ws-timeout",
             payload: {
-              protocolVersion: 1,
-              sessionId: "sess-ws-timeout"
+              sessionId: "sess-ws-timeout",
+              clientSessionId: "mock-client-session",
+              reused: false
             }
           }
         }

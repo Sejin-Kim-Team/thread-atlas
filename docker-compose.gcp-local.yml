@@ -1,0 +1,6 @@
+services:
+  api:
+    environment:
+      GOOGLE_APPLICATION_CREDENTIALS: /var/secrets/google/adc.json
+    volumes:
+      - ${GOOGLE_APPLICATION_CREDENTIALS_HOST:?Set GOOGLE_APPLICATION_CREDENTIALS_HOST to your ADC file path}:/var/secrets/google/adc.json:ro

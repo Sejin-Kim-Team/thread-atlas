@@ -24,18 +24,30 @@ interface PendingEnrichBinding {
   targetRef: Record<string, unknown>
 }
 
+function makeSocketErrorBody(args: {
+  code: "UNAUTHORIZED" | "INVALID_EVENT"
+  message: string
+  requestId?: string
+  sessionId?: string
+  turnId?: string
+}): Record<string, unknown> {
+  return {
+    type: "error",
+    timestamp: new Date().toISOString(),
+    ...(args.requestId ? { requestId: args.requestId } : {}),
+    ...(args.sessionId ? { sessionId: args.sessionId } : {}),
+    ...(args.turnId ? { turnId: args.turnId } : {}),
+    payload: {
+      code: args.code,
+      message: args.message
+    }
+  }
+}
+
 const logger = createLogger("ws/session")
 
 function sendUnauthorized(ws: WebSocket, message: string): void {
-  ws.send(
-    JSON.stringify({
-      type: "error",
-      payload: {
-        code: "UNAUTHORIZED",
-        message
-      }
-    })
-  )
+  ws.send(JSON.stringify(makeSocketErrorBody({ code: "UNAUTHORIZED", message })))
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -317,13 +329,14 @@ export function attachSessionWebSocketServer(
                     turnId: eventTurnId
                   })
                   ws.send(
-                    JSON.stringify({
-                      type: "error",
-                      payload: {
+                    JSON.stringify(
+                      makeSocketErrorBody({
                         code: "INVALID_EVENT",
-                        message: "enrich timeout fallback handling failed"
-                      }
-                    })
+                        message: "enrich timeout fallback handling failed",
+                        turnId: eventTurnId,
+                        ...(context.sessionId ? { sessionId: context.sessionId } : {})
+                      })
+                    )
                   )
                 })
                 .finally(() => {
@@ -353,13 +366,13 @@ export function attachSessionWebSocketServer(
           sessionId: context.sessionId
         })
         ws.send(
-          JSON.stringify({
-            type: "error",
-            payload: {
+          JSON.stringify(
+            makeSocketErrorBody({
               code: "INVALID_EVENT",
-              message: "invalid envelope"
-            }
-          })
+              message: "invalid envelope",
+              ...(context.sessionId ? { sessionId: context.sessionId } : {})
+            })
+          )
         )
         return
       }
@@ -421,13 +434,13 @@ export function attachSessionWebSocketServer(
             error
           })
           ws.send(
-            JSON.stringify({
-              type: "error",
-              payload: {
+            JSON.stringify(
+              makeSocketErrorBody({
                 code: "INVALID_EVENT",
-                message: "ws message handling failed"
-              }
-            })
+                message: "ws message handling failed",
+                ...(context.sessionId ? { sessionId: context.sessionId } : {})
+              })
+            )
           )
         })
         .finally(() => {

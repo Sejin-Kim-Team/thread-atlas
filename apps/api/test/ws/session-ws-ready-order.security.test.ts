@@ -120,8 +120,9 @@ function createRuntimeMock(): RuntimeManager {
             timestamp,
             sessionId: "sess-ws-ready-order",
             payload: {
-              protocolVersion: 1,
-              sessionId: "sess-ws-ready-order"
+              sessionId: "sess-ws-ready-order",
+              clientSessionId: "mock-client-session",
+              reused: false
             }
           }
         }

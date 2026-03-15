@@ -206,21 +206,20 @@ function registerListeners(): void {
       switch (msg.type) {
         case "COLLECT_SENSORS":
           sendResponse(collectSensors())
-          break
+          return true
         case "GET_THREAD_DOC":
           sendResponse({
             threadDoc: parseThreadDoc(),
             articleUrl: extractArticleUrl()
           })
-          break
+          return true
         case "EXECUTE_PROJECTION":
           executeProjection(msg.projection)
           sendResponse({ ok: true })
-          break
+          return true
         default:
-          sendResponse({ ok: false })
+          return false
       }
-      return true
     })
   }
 }

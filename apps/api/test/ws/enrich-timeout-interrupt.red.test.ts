@@ -207,8 +207,9 @@ class TimeoutRuntimeStub implements RuntimeLike {
           sessionId: this.sessionId,
           timestamp: "2026-03-08T13:00:00.000Z",
           payload: {
-            protocolVersion: 1,
-            sessionId: this.sessionId
+            sessionId: this.sessionId,
+            clientSessionId: "mock-client-session",
+            reused: false
           }
         }
       }

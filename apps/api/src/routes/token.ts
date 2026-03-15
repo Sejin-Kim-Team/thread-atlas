@@ -1,6 +1,6 @@
 import { Router, type RequestHandler } from "express"
 import type { TokenGrantType, TokenRequest, TokenResponse } from "@threadatlas/shared"
-import { issueAuthSession } from "../auth/auth-sessions-repository"
+import { issueAuthSession, resolveAuthSession, revokeAuthSession } from "../auth/auth-sessions-repository"
 import {
   GoogleIdTokenUnauthorizedError,
   GoogleIdTokenVerifierUnavailableError,
@@ -23,6 +23,17 @@ function normalizeText(value: unknown): string | null {
 
 function getConfiguredBootstrapKey(): string | null {
   return normalizeText(process.env.AUTH_BOOTSTRAP_KEY)
+}
+
+function readBearerToken(headerValue: unknown): string | null {
+  if (typeof headerValue !== "string") {
+    return null
+  }
+  const [scheme, token] = headerValue.split(" ")
+  if (scheme !== "Bearer") {
+    return null
+  }
+  return normalizeText(token)
 }
 
 function isBootstrapKeyAuthorized(value: unknown, configuredBootstrapKey: string): boolean {
@@ -304,6 +315,32 @@ const handleToken: RequestHandler = async (req, res) => {
   }
 }
 
+const handleRevokeToken: RequestHandler = async (req, res) => {
+  const token = readBearerToken(req.header("authorization"))
+  if (!token) {
+    res.status(204).end()
+    return
+  }
+
+  try {
+    const resolved = await resolveAuthSession(token)
+    if (resolved.ok) {
+      await revokeAuthSession(resolved.sessionId)
+      logger.info("token-revoked", {
+        sessionId: resolved.sessionId,
+        userId: resolved.userId
+      })
+    }
+  } catch (error) {
+    logger.warn("token-revoke-failed", {
+      error
+    })
+  }
+
+  res.status(204).end()
+}
+
 router.post("/", handleToken)
+router.post("/revoke", handleRevokeToken)
 
 export default router

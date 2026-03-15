@@ -20,7 +20,17 @@ import type {
 
 type RuntimeResult =
   | { status: 200; body: Record<string, unknown> }
-  | { status: 400 | 401; body: { type: "error"; payload: RuntimeErrorPayload } }
+  | {
+      status: 400 | 401
+      body: {
+        type: "error"
+        timestamp: string
+        payload: RuntimeErrorPayload
+        requestId?: string
+        sessionId?: string
+        turnId?: string
+      }
+    }
 
 interface RuntimeHandleContext {
   principalUserId: string
@@ -225,69 +235,116 @@ function asFiniteNumber(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null
 }
 
-function invalidEvent(message: string): RuntimeResult {
+function makeRuntimeErrorResult(
+  status: 400 | 401,
+  payload: RuntimeErrorPayload,
+  context?: {
+    requestId?: string
+    sessionId?: string
+    turnId?: string
+  }
+): RuntimeResult {
   return {
-    status: 400,
+    status,
     body: {
       type: "error",
-      payload: {
-        code: "INVALID_EVENT",
-        message
-      }
+      timestamp: makeTimestamp(),
+      ...(context?.requestId ? { requestId: context.requestId } : {}),
+      ...(context?.sessionId ? { sessionId: context.sessionId } : {}),
+      ...(context?.turnId ? { turnId: context.turnId } : {}),
+      payload
     }
   }
 }
 
-function invalidSnapshot(message: string): RuntimeResult {
-  return {
-    status: 400,
-    body: {
-      type: "error",
-      payload: {
-        code: "INVALID_SNAPSHOT",
-        message
-      }
-    }
+function invalidEvent(
+  message: string,
+  context?: {
+    requestId?: string
+    sessionId?: string
+    turnId?: string
   }
+): RuntimeResult {
+  return makeRuntimeErrorResult(
+    400,
+    {
+      code: "INVALID_EVENT",
+      message
+    },
+    context
+  )
 }
 
-function unauthorized(message: string): RuntimeResult {
-  return {
-    status: 401,
-    body: {
-      type: "error",
-      payload: {
-        code: "UNAUTHORIZED",
-        message
-      }
-    }
+function invalidSnapshot(
+  message: string,
+  context?: {
+    requestId?: string
+    sessionId?: string
+    turnId?: string
   }
+): RuntimeResult {
+  return makeRuntimeErrorResult(
+    400,
+    {
+      code: "INVALID_SNAPSHOT",
+      message
+    },
+    context
+  )
 }
 
-function modelConfigMissing(message: string): RuntimeResult {
-  return {
-    status: 400,
-    body: {
-      type: "error",
-      payload: {
-        code: "MODEL_CONFIG_MISSING",
-        message
-      }
-    }
+function unauthorized(
+  message: string,
+  context?: {
+    requestId?: string
+    sessionId?: string
+    turnId?: string
   }
+): RuntimeResult {
+  return makeRuntimeErrorResult(
+    401,
+    {
+      code: "UNAUTHORIZED",
+      message
+    },
+    context
+  )
 }
 
-function generationFailed(message: string): RuntimeResult {
-  return {
-    status: 400,
-    body: {
-      type: "error",
-      payload: {
-        code: "GENERATION_FAILED",
-        message
-      }
-    }
+function modelConfigMissing(
+  message: string,
+  context?: {
+    requestId?: string
+    sessionId?: string
+    turnId?: string
   }
+): RuntimeResult {
+  return makeRuntimeErrorResult(
+    400,
+    {
+      code: "MODEL_CONFIG_MISSING",
+      message
+    },
+    context
+  )
+}
+
+function generationFailed(
+  message: string,
+  context?: {
+    requestId?: string
+    sessionId?: string
+    turnId?: string
+  }
+): RuntimeResult {
+  return makeRuntimeErrorResult(
+    400,
+    {
+      code: "GENERATION_FAILED",
+      message
+    },
+    context
+  )
 }
 
 function interruptedTurnBatch(
@@ -932,14 +989,22 @@ export class RuntimeManager {
 
     const sessionId = envelope.sessionId
     if (!sessionId) {
-      return invalidEvent("sessionId is required")
+      return invalidEvent("sessionId is required", {
+        requestId: envelope.requestId
+      })
     }
     const session = this.sessions.get(sessionId)
     if (!session) {
-      return invalidEvent("session not found")
+      return invalidEvent("session not found", {
+        requestId: envelope.requestId,
+        sessionId
+      })
     }
     if (session.ownerUserId !== context.principalUserId) {
-      return unauthorized("session owner mismatch")
+      return unauthorized("session owner mismatch", {
+        requestId: envelope.requestId,
+        sessionId
+      })
     }
     session.lastSeenAtMs = Date.now()
 
@@ -969,13 +1034,18 @@ export class RuntimeManager {
       }
     }
 
-    return invalidEvent("unsupported event type")
+    return invalidEvent("unsupported event type", {
+      requestId: envelope.requestId,
+      sessionId
+    })
   }
 
   private handleSessionOpen(envelope: RuntimeEnvelope, principalUserId: string): RuntimeResult {
     const parsed = parseSessionOpenPayload(envelope.payload)
     if (!parsed) {
-      return invalidEvent("invalid session.open payload")
+      return invalidEvent("invalid session.open payload", {
+        requestId: envelope.requestId
+      })
     }
 
     const existingOwner = this.ownerByClientSessionId.get(parsed.clientSessionId)
@@ -985,7 +1055,9 @@ export class RuntimeManager {
         principalUserId,
         clientSessionId: parsed.clientSessionId
       })
-      return unauthorized("clientSessionId is owned by another principal")
+      return unauthorized("clientSessionId is owned by another principal", {
+        requestId: envelope.requestId
+      })
     }
 
     const ownerSessionKey = `${principalUserId}:${parsed.clientSessionId}`
@@ -1023,8 +1095,9 @@ export class RuntimeManager {
         sessionId,
         timestamp: makeTimestamp(),
         payload: {
-          protocolVersion: 1,
-          sessionId
+          sessionId,
+          clientSessionId: parsed.clientSessionId,
+          reused: Boolean(existing)
         }
       }
     }
@@ -1033,7 +1106,10 @@ export class RuntimeManager {
   private handleContextUpdate(envelope: RuntimeEnvelope, session: RuntimeSession): RuntimeResult {
     const parsed = parseContextUpdatePayload(envelope.payload)
     if (!parsed) {
-      return invalidEvent("invalid context.update payload")
+      return invalidEvent("invalid context.update payload", {
+        requestId: envelope.requestId,
+        sessionId: session.sessionId
+      })
     }
 
     const shouldSetPrimary = parsed.isPrimary ?? true
@@ -1064,24 +1140,39 @@ export class RuntimeManager {
   private handleSnapshotPush(envelope: RuntimeEnvelope, session: RuntimeSession): RuntimeResult {
     const parsed = parseSnapshotPushPayload(envelope.payload)
     if (!parsed) {
-      return invalidSnapshot("invalid snapshot.push payload")
+      return invalidSnapshot("invalid snapshot.push payload", {
+        requestId: envelope.requestId,
+        sessionId: session.sessionId
+      })
     }
 
     if (session.primaryTabId === null) {
-      return invalidSnapshot("primary tab is not set")
+      return invalidSnapshot("primary tab is not set", {
+        requestId: envelope.requestId,
+        sessionId: session.sessionId
+      })
     }
 
     if (parsed.tabId !== session.primaryTabId) {
       // 현재 페이지 계약: 기준 탭과 다른 스냅샷은 수용하지 않는다.
-      return invalidSnapshot("snapshot.push tabId must match primary tab")
+      return invalidSnapshot("snapshot.push tabId must match primary tab", {
+        requestId: envelope.requestId,
+        sessionId: session.sessionId
+      })
     }
 
     if (hasFocusIdMismatch(parsed.snapshot)) {
-      return invalidSnapshot("focus node mismatch")
+      return invalidSnapshot("focus node mismatch", {
+        requestId: envelope.requestId,
+        sessionId: session.sessionId
+      })
     }
 
     if (!asString(parsed.snapshot.meta?.capturedAt)) {
-      return invalidSnapshot("snapshot.meta.capturedAt is required")
+      return invalidSnapshot("snapshot.meta.capturedAt is required", {
+        requestId: envelope.requestId,
+        sessionId: session.sessionId
+      })
     }
 
     session.latestSnapshotByTab.set(parsed.tabId, parsed.snapshot)
@@ -1113,21 +1204,33 @@ export class RuntimeManager {
   ): Promise<RuntimeResult> {
     const parsed = parseUserIntentPayload(envelope.payload)
     if (!parsed) {
-      return invalidEvent("invalid user.intent payload")
+      return invalidEvent("invalid user.intent payload", {
+        requestId: envelope.requestId,
+        sessionId: session.sessionId
+      })
     }
 
     if (session.primaryTabId === null || session.primaryTabId !== parsed.primaryTabId) {
-      return invalidSnapshot("primary tab mismatch")
+      return invalidSnapshot("primary tab mismatch", {
+        requestId: envelope.requestId,
+        sessionId: session.sessionId
+      })
     }
 
     const latest = session.latestSnapshotByTab.get(parsed.primaryTabId)
     if (!latest) {
-      return invalidSnapshot("latest snapshot not found")
+      return invalidSnapshot("latest snapshot not found", {
+        requestId: envelope.requestId,
+        sessionId: session.sessionId
+      })
     }
 
     const capturedAt = asString(latest.meta?.capturedAt)
     if (!capturedAt || capturedAt !== parsed.boundSnapshotCapturedAt) {
-      return invalidSnapshot("bound snapshot mismatch")
+      return invalidSnapshot("bound snapshot mismatch", {
+        requestId: envelope.requestId,
+        sessionId: session.sessionId
+      })
     }
 
     // 선점 중단 정책: 새 요청이 오면 기존 턴을 중단하고 교체한다.
@@ -1158,11 +1261,19 @@ export class RuntimeManager {
       enrichTriggerMode: this.enrichTriggerMode
     })
 
-    const enrichDecision = await this.decideEnrichTrigger(parsed.text, latest)
+    const enrichDecision = await this.decideEnrichTrigger(parsed.text, latest, {
+      requestId: envelope.requestId,
+      sessionId: session.sessionId,
+      turnId
+    })
 
     const activeTurn = session.activeTurn
     if (!activeTurn || session.activeTurnId !== turnId || activeTurn.turnId !== turnId) {
-      return invalidEvent("active turn mismatch after enrich decision")
+      return invalidEvent("active turn mismatch after enrich decision", {
+        requestId: envelope.requestId,
+        sessionId: session.sessionId,
+        turnId
+      })
     }
 
     if (!enrichDecision.ok) {
@@ -1227,40 +1338,75 @@ export class RuntimeManager {
   ): Promise<RuntimeResult> {
     const parsed = parseContextEnrichResultPayload(envelope.payload)
     if (!parsed) {
-      return invalidEvent("invalid context.enrich.result payload")
+      return invalidEvent("invalid context.enrich.result payload", {
+        requestId: envelope.requestId,
+        sessionId: session.sessionId,
+        ...(typeof envelope.turnId === "string" ? { turnId: envelope.turnId } : {})
+      })
     }
     if (isCrossTabTargetRef(parsed.targetRef)) {
-      return invalidEvent("cross-tab enrich result is not allowed in current-page scope")
+      return invalidEvent("cross-tab enrich result is not allowed in current-page scope", {
+        requestId: envelope.requestId,
+        sessionId: session.sessionId,
+        ...(typeof envelope.turnId === "string" ? { turnId: envelope.turnId } : {})
+      })
     }
 
     const turnId = asString(envelope.turnId)
     if (!turnId) {
-      return invalidEvent("turnId is required for context.enrich.result")
+      return invalidEvent("turnId is required for context.enrich.result", {
+        requestId: envelope.requestId,
+        sessionId: session.sessionId
+      })
     }
 
     const activeTurn = session.activeTurn
     if (!activeTurn || session.activeTurnId !== turnId || activeTurn.turnId !== turnId) {
-      return invalidEvent("active turn mismatch for context.enrich.result")
+      return invalidEvent("active turn mismatch for context.enrich.result", {
+        requestId: envelope.requestId,
+        sessionId: session.sessionId,
+        turnId
+      })
     }
 
     if (activeTurn.enrichApplied) {
-      return invalidEvent("enrich already applied for this turn")
+      return invalidEvent("enrich already applied for this turn", {
+        requestId: envelope.requestId,
+        sessionId: session.sessionId,
+        turnId
+      })
     }
 
     if (activeTurn.status !== "waiting-enrich") {
-      return invalidEvent("turn is not waiting-enrich")
+      return invalidEvent("turn is not waiting-enrich", {
+        requestId: envelope.requestId,
+        sessionId: session.sessionId,
+        turnId
+      })
     }
 
     const pendingRequest = activeTurn.pendingEnrichRequest
     if (!pendingRequest) {
-      return invalidEvent("pending enrich request is missing")
+      return invalidEvent("pending enrich request is missing", {
+        requestId: envelope.requestId,
+        sessionId: session.sessionId,
+        turnId
+      })
     }
     if (pendingRequest.requestKind !== parsed.requestKind) {
-      return invalidEvent("requestKind mismatch for context.enrich.result")
+      return invalidEvent("requestKind mismatch for context.enrich.result", {
+        requestId: envelope.requestId,
+        sessionId: session.sessionId,
+        turnId
+      })
     }
     // current-page 격리 경계: pending targetRef와 완전 일치하는 결과만 수용한다.
     if (!isExactTargetRefMatch(pendingRequest.targetRef, parsed.targetRef)) {
-      return invalidEvent("targetRef mismatch for context.enrich.result")
+      return invalidEvent("targetRef mismatch for context.enrich.result", {
+        requestId: envelope.requestId,
+        sessionId: session.sessionId,
+        turnId
+      })
     }
 
     const nowMs = Date.now()
@@ -1346,7 +1492,12 @@ export class RuntimeManager {
 
   private async decideEnrichTrigger(
     intentText: string,
-    snapshot: SnapshotLike
+    snapshot: SnapshotLike,
+    errorContext?: {
+      requestId?: string
+      sessionId?: string
+      turnId?: string
+    }
   ): Promise<{ ok: true; decision: EnrichRuleDecision } | { ok: false; error: RuntimeResult }> {
     const ruleSignals = analyzeEnrichRuleSignals(intentText)
     const ruleDecision = decideByRule(ruleSignals)
@@ -1379,7 +1530,7 @@ export class RuntimeManager {
         }
       }
       // hybrid-simple은 rule miss 시점에 즉시 LLM assist를 호출한다.
-      return this.decideEnrichWithLlmAssist(intentText, snapshot, ruleSignals, suspicious)
+      return this.decideEnrichWithLlmAssist(intentText, snapshot, ruleSignals, suspicious, errorContext)
     }
 
     if (ruleSignals.hardPositive) {
@@ -1406,7 +1557,7 @@ export class RuntimeManager {
         mode: this.enrichTriggerMode,
         suspicious
       })
-      return this.decideEnrichWithLlmAssist(intentText, snapshot, ruleSignals, suspicious)
+      return this.decideEnrichWithLlmAssist(intentText, snapshot, ruleSignals, suspicious, errorContext)
     }
     logger.debug("runtime-enrich-hybrid-complex-fallback-rule", {
       mode: this.enrichTriggerMode,
@@ -1422,7 +1573,12 @@ export class RuntimeManager {
     intentText: string,
     snapshot: SnapshotLike,
     ruleSignals: EnrichRuleSignals,
-    suspicious: boolean
+    suspicious: boolean,
+    errorContext?: {
+      requestId?: string
+      sessionId?: string
+      turnId?: string
+    }
   ): Promise<{ ok: true; decision: EnrichRuleDecision } | { ok: false; error: RuntimeResult }> {
     const assistPrompt = buildEnrichAssistPrompt(
       intentText,
@@ -1431,7 +1587,11 @@ export class RuntimeManager {
       suspicious,
       this.enrichTriggerMode
     )
-    const assistResult = await this.generateTextWithGemini(assistPrompt, "llm assist failed")
+    const assistResult = await this.generateTextWithGemini(
+      assistPrompt,
+      "llm assist failed",
+      errorContext
+    )
     if (!assistResult.ok) {
       return assistResult
     }
@@ -1462,13 +1622,21 @@ export class RuntimeManager {
 
   private async generateTextWithGemini(
     prompt: string,
-    fallbackErrorMessage: string
+    fallbackErrorMessage: string,
+    errorContext?: {
+      requestId?: string
+      sessionId?: string
+      turnId?: string
+    }
   ): Promise<{ ok: true; text: string } | { ok: false; error: RuntimeResult }> {
     if (!process.env.GOOGLE_CLOUD_PROJECT || !process.env.GOOGLE_CLOUD_LOCATION) {
       logger.warn("runtime-generation-config-missing")
       return {
         ok: false,
-        error: modelConfigMissing("GOOGLE_CLOUD_PROJECT and GOOGLE_CLOUD_LOCATION are required")
+        error: modelConfigMissing(
+          "GOOGLE_CLOUD_PROJECT and GOOGLE_CLOUD_LOCATION are required",
+          errorContext
+        )
       }
     }
 
@@ -1487,7 +1655,7 @@ export class RuntimeManager {
           error instanceof Error ? error.message : "model configuration is missing"
         return {
           ok: false,
-          error: modelConfigMissing(message)
+          error: modelConfigMissing(message, errorContext)
         }
       }
       logger.error("runtime-generation-failed", {
@@ -1497,7 +1665,7 @@ export class RuntimeManager {
 
       return {
         ok: false,
-        error: generationFailed(fallbackErrorMessage)
+        error: generationFailed(fallbackErrorMessage, errorContext)
       }
     }
   }
@@ -1616,7 +1784,12 @@ export class RuntimeManager {
   private async generateCurrentPageAnswer(
     intentText: string,
     snapshot: SnapshotLike,
-    enrichEvidence?: NormalizedEnrichEvidence
+    enrichEvidence?: NormalizedEnrichEvidence,
+    errorContext?: {
+      requestId?: string
+      sessionId?: string
+      turnId?: string
+    }
   ): Promise<{ ok: true; answerText: string } | { ok: false; error: RuntimeResult }> {
     const visualSummaryResult = await this.generateVisualSummaryWithGemini(
       intentText,
@@ -1631,7 +1804,8 @@ export class RuntimeManager {
         visualSummaryResult.visualSummary,
         visualSummaryResult.answerSupplement
       ),
-      "generation failed"
+      "generation failed",
+      errorContext
     )
     if (!generation.ok) {
       return generation
@@ -1653,7 +1827,11 @@ export class RuntimeManager {
     progressStages: Array<"intent-routed" | "enrich-received">,
     provenanceSummary: string[]
   ): Promise<RuntimeResult> {
-    const generation = await this.generateCurrentPageAnswer(intentText, snapshot, enrichEvidence)
+    const generation = await this.generateCurrentPageAnswer(intentText, snapshot, enrichEvidence, {
+      sessionId: session.sessionId,
+      turnId,
+      ...(requestId ? { requestId } : {})
+    })
     if (!generation.ok) {
       logger.warn("runtime-turn-generation-rejected", {
         userId: session.ownerUserId,

@@ -1,12 +1,29 @@
 import type { SidePanelToServiceWorkerMessage } from "@threadatlas/shared/runtime"
+import type { ExtensionAuthState } from "@threadatlas/shared"
 import {
   createSemanticSnapshotCoordinator,
   SEMANTIC_SELECTION_COMMAND,
   SEMANTIC_SNAPSHOT_COMMAND,
   SEMANTIC_SNAPSHOT_CONTEXT_MENU_ID
 } from "./semantic-snapshot"
+import { createExtensionAuthManager } from "./auth-manager"
+import { createChromeLocalStorage } from "../common/extension-config"
 
 const knownArticleUrls = new Map<string, string>()
+const authManager = createExtensionAuthManager({
+  storage: createChromeLocalStorage(),
+  broadcastAuthState(state: ExtensionAuthState) {
+    chrome.runtime.sendMessage(
+      {
+        type: "AUTH_STATE_CHANGED",
+        payload: state
+      },
+      () => {
+        void chrome.runtime.lastError
+      }
+    )
+  }
+})
 
 const semanticSnapshotCoordinator = createSemanticSnapshotCoordinator({
   async getActiveTab() {
@@ -142,6 +159,75 @@ chrome.runtime.onMessage.addListener((msg: SidePanelToServiceWorkerMessage, send
         .catch((error: unknown) => {
           const message = error instanceof Error ? error.message : "semantic snapshot request failed"
           sendResponse({ tabId: null, snapshot: null, error: message })
+        })
+      return true
+    }
+
+    case "GET_AUTH_STATE": {
+      void authManager
+        .getState()
+        .then((payload) => sendResponse(payload))
+        .catch((error: unknown) => {
+          sendResponse({
+            status: "error",
+            provider: "google",
+            user: null,
+            session: null,
+            errorMessage: error instanceof Error ? error.message : "failed to read auth state"
+          })
+        })
+      return true
+    }
+
+    case "SIGN_IN_WITH_GOOGLE": {
+      void authManager
+        .signInWithGoogle()
+        .then((payload) => sendResponse(payload))
+        .catch((error: unknown) => {
+          sendResponse({
+            status: "error",
+            provider: "google",
+            user: null,
+            session: null,
+            errorMessage: error instanceof Error ? error.message : "failed to sign in with Google"
+          })
+        })
+      return true
+    }
+
+    case "ENSURE_AUTH_SESSION": {
+      void authManager
+        .ensureAuthSession()
+        .then((payload) => sendResponse(payload))
+        .catch((error: unknown) => {
+          sendResponse({
+            ok: false,
+            state: {
+              status: "error",
+              provider: "google",
+              user: null,
+              session: null,
+              errorMessage:
+                error instanceof Error ? error.message : "failed to ensure an authenticated session"
+            },
+            error: error instanceof Error ? error.message : "failed to ensure an authenticated session"
+          })
+        })
+      return true
+    }
+
+    case "SIGN_OUT": {
+      void authManager
+        .signOut()
+        .then((payload) => sendResponse(payload))
+        .catch((error: unknown) => {
+          sendResponse({
+            status: "error",
+            provider: "google",
+            user: null,
+            session: null,
+            errorMessage: error instanceof Error ? error.message : "failed to sign out"
+          })
         })
       return true
     }

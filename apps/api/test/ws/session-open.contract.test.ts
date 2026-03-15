@@ -11,19 +11,21 @@ import {
 const app = createServer()
 
 describe("ws session.open contract", () => {
-  it("returns session.ready with protocolVersion=1", async () => {
+  it("returns session.ready with canonical session identity payload", async () => {
     const client = request(app)
     const token = await issueAuthToken(client)
+    const clientSessionId = "sidepanel-contract-1"
     const response = await postWsEventWithAuth(
       client,
-      createEnvelope("session.open", createSessionOpenPayload(), { requestId: "req-open-1" }),
+      createEnvelope("session.open", createSessionOpenPayload(clientSessionId), { requestId: "req-open-1" }),
       token
     )
 
     expect(response.status).toBe(200)
     expect(response.body.type).toBe("session.ready")
-    expect(response.body.payload.protocolVersion).toBe(1)
     expect(typeof response.body.payload.sessionId).toBe("string")
+    expect(response.body.payload.clientSessionId).toBe(clientSessionId)
+    expect(response.body.payload.reused).toBe(false)
   })
 
   it("returns INVALID_EVENT when required envelope fields are missing", async () => {
@@ -36,20 +38,22 @@ describe("ws session.open contract", () => {
 
     expect(response.status).toBe(400)
     expect(response.body.type).toBe("error")
+    expect(typeof response.body.timestamp).toBe("string")
     expect(response.body.payload.code).toBe("INVALID_EVENT")
   })
 
   it("keeps reconnect policy deterministic for same clientSessionId", async () => {
     const client = request(app)
     const token = await issueAuthToken(client)
+    const clientSessionId = "sidepanel-contract-reconnect"
     const first = await postWsEventWithAuth(
       client,
-      createEnvelope("session.open", createSessionOpenPayload(), { requestId: "req-open-1" }),
+      createEnvelope("session.open", createSessionOpenPayload(clientSessionId), { requestId: "req-open-1" }),
       token
     )
     const second = await postWsEventWithAuth(
       client,
-      createEnvelope("session.open", createSessionOpenPayload(), { requestId: "req-open-2" }),
+      createEnvelope("session.open", createSessionOpenPayload(clientSessionId), { requestId: "req-open-2" }),
       token
     )
 
@@ -57,5 +61,6 @@ describe("ws session.open contract", () => {
     expect(second.status).toBe(200)
     expect(second.body.type).toBe("session.ready")
     expect(typeof second.body.payload.sessionId).toBe("string")
+    expect(second.body.payload.reused).toBe(true)
   })
 })

@@ -4,9 +4,11 @@ import type {
   ContextRelation,
   InteractiveNode,
   PresentContent,
-  SemanticSnapshot
+  SemanticSnapshot,
+  TokenUser
 } from "@threadatlas/shared"
 import type { ContextProjectionFormat, ContextTaskProfile } from "@threadatlas/shared/projection-policy"
+import type { ExtensionAuthProvider, ExtensionAuthStatus } from "@threadatlas/shared/runtime"
 import type { SemanticSelectionTarget } from "@threadatlas/shared/runtime"
 
 export type Phase =
@@ -66,6 +68,113 @@ export interface SemanticDebugInfo {
   assembledItemCount: string
   signals: string
   note?: string
+}
+
+export interface ConversationMessage {
+  role: "user" | "assistant"
+  text: string
+}
+
+function getAuthDisplayName(user: TokenUser | null): string {
+  return user?.displayName ?? user?.primaryEmail ?? "Signed in"
+}
+
+function getAuthFallbackInitials(user: TokenUser | null): string {
+  const source = getAuthDisplayName(user).trim()
+  if (!source) {
+    return "TA"
+  }
+  const parts = source.split(/\s+/).filter(Boolean)
+  const initials = (parts[0]?.[0] ?? "") + (parts[1]?.[0] ?? "")
+  return (initials || source.slice(0, 2) || "TA").toUpperCase()
+}
+
+export function bindAuthActions(args: {
+  onSignIn: () => void
+  onSignOut: () => void
+}): void {
+  const signInButton = document.getElementById("auth-sign-in-button") as HTMLButtonElement | null
+  const signOutButton = document.getElementById("auth-sign-out-button") as HTMLButtonElement | null
+  signInButton?.addEventListener("click", args.onSignIn)
+  signOutButton?.addEventListener("click", args.onSignOut)
+}
+
+export function renderAuthCard(args: {
+  status: ExtensionAuthStatus
+  provider: ExtensionAuthProvider | null
+  user: TokenUser | null
+  errorMessage: string | null
+}): void {
+  const copy = document.getElementById("auth-copy")
+  const userRoot = document.getElementById("auth-user")
+  const avatar = document.getElementById("auth-avatar") as HTMLImageElement | null
+  const avatarFallback = document.getElementById("auth-avatar-fallback")
+  const userName = document.getElementById("auth-user-name")
+  const userEmail = document.getElementById("auth-user-email")
+  const signInButton = document.getElementById("auth-sign-in-button") as HTMLButtonElement | null
+  const signOutButton = document.getElementById("auth-sign-out-button") as HTMLButtonElement | null
+  if (
+    !copy ||
+    !userRoot ||
+    !avatar ||
+    !avatarFallback ||
+    !userName ||
+    !userEmail ||
+    !signInButton ||
+    !signOutButton
+  ) {
+    return
+  }
+
+  userName.textContent = args.user ? getAuthDisplayName(args.user) : ""
+  userEmail.textContent = args.user?.primaryEmail ?? ""
+  avatarFallback.textContent = getAuthFallbackInitials(args.user)
+  avatar.classList.toggle("hidden-inline", !args.user?.avatarUrl)
+  avatarFallback.classList.toggle("hidden-inline", Boolean(args.user?.avatarUrl))
+  if (args.user?.avatarUrl) {
+    avatar.src = args.user.avatarUrl
+    avatar.alt = `${getAuthDisplayName(args.user)} avatar`
+  } else {
+    avatar.removeAttribute("src")
+    avatar.alt = ""
+  }
+
+  signInButton.disabled = args.status === "signing-in" || args.status === "refreshing"
+  signOutButton.disabled = args.status === "signing-in" || args.status === "refreshing"
+
+  userRoot.classList.toggle("hidden-inline", !(args.status === "signed-in" && args.user))
+  signOutButton.classList.toggle("hidden-inline", args.status !== "signed-in" || !args.user)
+
+  if (args.status === "signed-in" && args.user) {
+    copy.textContent =
+      args.provider === "dev-bootstrap"
+        ? "Internal preview session is active."
+        : "Signed in. You can now ask about the current page."
+    signInButton.classList.add("hidden-inline")
+    signInButton.textContent = "Continue with Google"
+    return
+  }
+
+  signInButton.classList.remove("hidden-inline")
+  if (args.status === "signing-in") {
+    copy.textContent = "Signing in with Google..."
+    signInButton.textContent = "Signing in..."
+    return
+  }
+  if (args.status === "refreshing") {
+    copy.textContent = "Refreshing your ThreadAtlas session..."
+    signInButton.textContent = "Refreshing..."
+    return
+  }
+  if (args.status === "error") {
+    copy.textContent = args.errorMessage ?? "Google sign-in failed. Try again."
+    signInButton.textContent = "Retry Google Sign-In"
+    return
+  }
+
+  copy.textContent =
+    args.errorMessage ?? "Sign in with Google to ask questions about the current page."
+  signInButton.textContent = "Continue with Google"
 }
 
 function setText(id: string, value: string): void {
@@ -369,6 +478,15 @@ export function renderPresent(content: PresentContent): void {
   root.appendChild(list)
 }
 
+export function clearPresent(): void {
+  const root = document.getElementById("present-root")
+  if (!root) {
+    return
+  }
+
+  root.innerHTML = ""
+}
+
 export function showNotify(message: string, _level: "status" | "info" | "success" | "error"): void {
   const root = document.getElementById("notify-root")
   if (!root) {
@@ -383,6 +501,15 @@ export function showNotify(message: string, _level: "status" | "info" | "success
   }, 3000)
 }
 
+export function clearSuggestChips(): void {
+  const root = document.getElementById("suggest-root")
+  if (!root) {
+    return
+  }
+
+  root.innerHTML = ""
+}
+
 export function showSuggestChips(
   options: string[],
   onSelect: (value: string) => void
@@ -392,7 +519,7 @@ export function showSuggestChips(
     return
   }
 
-  root.innerHTML = ""
+  clearSuggestChips()
 
   for (const option of options) {
     const button = document.createElement("button")
@@ -402,6 +529,42 @@ export function showSuggestChips(
     button.addEventListener("click", () => onSelect(option))
     root.appendChild(button)
   }
+}
+
+export function bindConversationActions(args: {
+  onComposerInput: (value: string) => void
+  onSubmitPrompt: (prompt: string) => void
+  onToggleMic: () => void
+  onToggleVoiceOutput: () => void
+}): void {
+  const composer = document.getElementById("conversation-input") as HTMLTextAreaElement | null
+  const sendButton = document.getElementById("conversation-send-button") as HTMLButtonElement | null
+  const micButton = document.getElementById("conversation-mic-button") as HTMLButtonElement | null
+  const voiceOutputButton = document.getElementById("conversation-voice-output-button") as HTMLButtonElement | null
+  if (!composer || !sendButton || !micButton || !voiceOutputButton) {
+    return
+  }
+
+  composer.addEventListener("input", () => {
+    args.onComposerInput(composer.value)
+  })
+  composer.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter" || event.shiftKey) {
+      return
+    }
+
+    event.preventDefault()
+    args.onSubmitPrompt(composer.value)
+  })
+  sendButton.addEventListener("click", () => {
+    args.onSubmitPrompt(composer.value)
+  })
+  micButton.addEventListener("click", () => {
+    args.onToggleMic()
+  })
+  voiceOutputButton.addEventListener("click", () => {
+    args.onToggleVoiceOutput()
+  })
 }
 
 export function bindSemanticSnapshotActions(args: {
@@ -467,6 +630,68 @@ export function setSemanticSnapshotBusy(isBusy: boolean): void {
 
   captureButton.disabled = isBusy
   captureButton.textContent = isBusy ? "Capturing..." : "Capture Snapshot"
+}
+
+export function renderConversation(args: {
+  messages: ConversationMessage[]
+  composerValue: string
+  status: string
+  composerDisabled: boolean
+  composerReadOnly?: boolean
+  submitDisabled: boolean
+  micDisabled?: boolean
+  micLabel?: string
+  voiceOutputEnabled?: boolean
+  voiceOutputDisabled?: boolean
+  voiceOutputLabel?: string
+  placeholder?: string
+}): void {
+  const transcript = document.getElementById("conversation-transcript")
+  const status = document.getElementById("conversation-status")
+  const composer = document.getElementById("conversation-input") as HTMLTextAreaElement | null
+  const sendButton = document.getElementById("conversation-send-button") as HTMLButtonElement | null
+  const micButton = document.getElementById("conversation-mic-button") as HTMLButtonElement | null
+  const voiceOutputButton = document.getElementById("conversation-voice-output-button") as HTMLButtonElement | null
+  if (!transcript || !status || !composer || !sendButton || !micButton || !voiceOutputButton) {
+    return
+  }
+
+  transcript.innerHTML = ""
+  if (args.messages.length === 0) {
+    const empty = document.createElement("div")
+    empty.className = "conversation-empty"
+    empty.textContent = "Capture a semantic snapshot, then ask about the current page."
+    transcript.appendChild(empty)
+  } else {
+    for (const message of args.messages) {
+      const item = document.createElement("div")
+      item.className = `conversation-message conversation-${message.role}`
+
+      const label = document.createElement("div")
+      label.className = "conversation-role"
+      label.textContent = message.role === "user" ? "You" : "ThreadAtlas"
+
+      const body = document.createElement("div")
+      body.className = "conversation-text"
+      body.textContent = message.text
+
+      item.append(label, body)
+      transcript.appendChild(item)
+    }
+  }
+
+  status.textContent = args.status
+  composer.value = args.composerValue
+  composer.disabled = args.composerDisabled
+  composer.readOnly = args.composerReadOnly ?? false
+  composer.placeholder = args.placeholder ?? "Ask about the current snapshot..."
+  sendButton.disabled = args.submitDisabled
+  micButton.disabled = args.micDisabled ?? false
+  micButton.textContent = args.micLabel ?? "Mic"
+  voiceOutputButton.disabled = args.voiceOutputDisabled ?? false
+  voiceOutputButton.textContent = args.voiceOutputLabel ?? (args.voiceOutputEnabled === false ? "Voice Output Off" : "Voice Output On")
+  voiceOutputButton.classList.toggle("active-toggle", args.voiceOutputEnabled !== false)
+  voiceOutputButton.setAttribute("aria-pressed", args.voiceOutputEnabled === false ? "false" : "true")
 }
 
 export function renderSemanticSnapshot(args: {

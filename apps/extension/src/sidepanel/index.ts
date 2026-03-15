@@ -1,6 +1,9 @@
 import {
   buildContextPack,
-  DEFAULT_API_BASE_URL,
+  createUserSpeechIntent,
+  type ExtensionAuthProvider,
+  type ExtensionAuthState,
+  type ExtensionAuthStatus,
   type Intent,
   type Projection,
   type SemanticNode,
@@ -24,12 +27,20 @@ import type { RegionDump } from "../content/semantic/core/observability"
 import { isSemanticCaptureSupportedUrl } from "../common/semantic-url"
 import { routeProjection } from "./projection-router"
 import { ContentGraphManager } from "./content-graph"
-import { connectGeminiLive, type LiveSession } from "./gemini-live"
-import { initializeAudio } from "./audio"
+import { createAudioOutputProvider } from "./audio"
 import { createAuthClient } from "./auth-client"
+import { createChromeLocalStorage, loadExtensionConfig } from "../common/extension-config"
+import { ContentSpeechInputProvider } from "./content-speech-input"
 import { SessionWsTransport } from "./session-ws-transport"
-import { TokenManager } from "./token-manager"
+import { createSpeechController, type SpeechController } from "./speech-controller"
+import type { SpeechInputState, TurnOrigin } from "./speech-types"
 import {
+  bindAuthActions,
+  bindConversationActions,
+  clearPresent,
+  clearSuggestChips,
+  renderAuthCard,
+  renderConversation,
   bindSemanticSnapshotActions,
   renderPresent,
   renderSemanticSnapshot,
@@ -38,6 +49,7 @@ import {
   showNotify,
   showSuggestChips,
   updatePhaseIndicator,
+  type ConversationMessage,
   type DisabledContextProfileReason,
   type SemanticDebugInfo,
   type Phase
@@ -66,10 +78,13 @@ interface SemanticRegionDumpState {
   error: string | null
 }
 
+type TranscriptMessage = ConversationMessage
+
 interface SidePanelState {
   phase: Phase
-  geminiLiveSession: LiveSession | null
+  apiBaseUrl: string
   sessionTransport: SessionWsTransport | null
+  speechController: SpeechController | null
   contentGraph: ContentGraphManager
   activeTabId: number | null
   latestSemanticSnapshot: SemanticSnapshotState | null
@@ -87,15 +102,35 @@ interface SidePanelState {
   runtimeSnapshot: SemanticSnapshot | null
   semanticContextProfile: ContextTaskProfile
   semanticContextFormat: ContextProjectionFormat
+  conversationMessages: TranscriptMessage[]
+  composerText: string
+  speechInputState: SpeechInputState
+  speechInputDetail: string | null
+  speechDraftBase: string
+  speechDraftInterim: string
+  ttsEnabled: boolean
+  authStatus: ExtensionAuthStatus
+  authProvider: ExtensionAuthProvider | null
+  authUser: ExtensionAuthState["user"]
+  authError: string | null
+  authBusy: boolean
+  currentTurnOrigin: TurnOrigin | null
+  pendingTurnOrigin: TurnOrigin | null
 }
 
-const API_BASE_URL = window.localStorage.getItem("THREADATLAS_API_BASE_URL") ?? DEFAULT_API_BASE_URL
-const authClient = createAuthClient({ apiBaseUrl: API_BASE_URL })
+const TTS_ENABLED_STORAGE_KEY = "THREADATLAS_TTS_ENABLED"
+const authClient = createAuthClient()
+
+function readPersistedTtsEnabled(): boolean {
+  const stored = window.localStorage.getItem(TTS_ENABLED_STORAGE_KEY)
+  return stored === null ? true : stored === "true"
+}
 
 const state: SidePanelState = {
   phase: "initializing",
-  geminiLiveSession: null,
+  apiBaseUrl: "",
   sessionTransport: null,
+  speechController: null,
   contentGraph: new ContentGraphManager(),
   activeTabId: null,
   latestSemanticSnapshot: null,
@@ -112,7 +147,21 @@ const state: SidePanelState = {
   lastRuntimeError: null,
   runtimeSnapshot: null,
   semanticContextProfile: "branch-summary",
-  semanticContextFormat: "context-pack-json"
+  semanticContextFormat: "context-pack-json",
+  conversationMessages: [],
+  composerText: "",
+  speechInputState: "unsupported",
+  speechInputDetail: null,
+  speechDraftBase: "",
+  speechDraftInterim: "",
+  ttsEnabled: readPersistedTtsEnabled(),
+  authStatus: "signed-out",
+  authProvider: null,
+  authUser: null,
+  authError: null,
+  authBusy: false,
+  currentTurnOrigin: null,
+  pendingTurnOrigin: null
 }
 
 type RegionDumpEntry = RegionDump["regions"][number]
@@ -122,6 +171,91 @@ const INTERACTIVE_CONTEXT_RESTRICTION = "Interactive semantic snapshots currentl
 function setPhase(phase: Phase): void {
   state.phase = phase
   updatePhaseIndicator(phase)
+  renderConversationState()
+}
+
+function renderAuthState(): void {
+  renderAuthCard({
+    status: state.authStatus,
+    provider: state.authProvider,
+    user: state.authUser,
+    errorMessage: state.authError
+  })
+}
+
+function applyAuthState(next: ExtensionAuthState): void {
+  const previousStatus = state.authStatus
+  state.authStatus = next.status
+  state.authProvider = next.provider
+  state.authUser = next.user
+  state.authError = next.errorMessage ?? null
+  state.authBusy = next.status === "signing-in" || next.status === "refreshing"
+
+  const shouldResetRuntime =
+    previousStatus !== "signed-out" &&
+    previousStatus !== "error" &&
+    next.status !== "signed-in" &&
+    next.status !== "refreshing"
+
+  if (shouldResetRuntime) {
+    void state.sessionTransport?.close()
+    state.sessionTransport = null
+    void state.speechController?.interruptAll()
+    state.sessionId = null
+    state.clientSessionId = null
+    state.activeTurnId = null
+    state.pendingEnrichRequest = null
+    state.lastRuntimeError = null
+    state.runtimeSnapshot = null
+    clearTurnOrigin()
+    resetConversationSurface()
+  }
+
+  renderAuthState()
+  renderConversationState()
+}
+
+function isConversationAuthReady(): boolean {
+  return state.authStatus === "signed-in"
+}
+
+function persistTtsEnabled(): void {
+  window.localStorage.setItem(TTS_ENABLED_STORAGE_KEY, state.ttsEnabled ? "true" : "false")
+}
+
+function isSpeechListening(): boolean {
+  return state.speechInputState === "listening"
+}
+
+function isSpeechProcessing(): boolean {
+  return state.speechInputState === "processing"
+}
+
+function shouldShowSpeechError(): boolean {
+  return state.speechInputState === "error" && Boolean(state.speechInputDetail)
+}
+
+function resetSpeechInputState(): void {
+  state.speechInputState = state.speechController?.inputSupported ? "idle" : "unsupported"
+  state.speechInputDetail = null
+}
+
+function setComposerDraft(value: string): void {
+  state.speechDraftBase = value
+  state.speechDraftInterim = ""
+  state.composerText = value
+}
+
+function setSpeechDraft(args: { baseDraft: string; interimDraft: string; composedDraft: string }): void {
+  state.speechDraftBase = args.baseDraft
+  state.speechDraftInterim = args.interimDraft
+  state.composerText = args.composedDraft
+  renderConversationState()
+}
+
+function clearTurnOrigin(): void {
+  state.currentTurnOrigin = null
+  state.pendingTurnOrigin = null
 }
 
 function hasActiveRuntimeTurn(): boolean {
@@ -133,6 +267,313 @@ function hasActiveRuntimeTurn(): boolean {
     state.phase === "waiting-enrich" ||
     state.phase === "resuming-turn"
   )
+}
+
+function getConversationSnapshot(): SemanticSnapshot | null {
+  return state.runtimeSnapshot ?? getSelectedSemanticSnapshot()
+}
+
+function getConversationStatus(): {
+  status: string
+  placeholder: string
+  composerDisabled: boolean
+  composerReadOnly: boolean
+  micDisabled: boolean
+  micLabel: string
+  voiceOutputLabel: string
+  voiceOutputDisabled: boolean
+} {
+  const inputSupported = state.speechController?.inputSupported ?? false
+  const outputSupported = state.speechController?.outputSupported ?? false
+
+  if (state.activeTabId === null) {
+    return {
+      status: "No active tab context.",
+      placeholder: "Open a supported tab to start asking questions.",
+      composerDisabled: true,
+      composerReadOnly: false,
+      micDisabled: true,
+      micLabel: "Mic",
+      voiceOutputLabel: outputSupported
+        ? state.ttsEnabled
+          ? "Voice Output On"
+          : "Voice Output Off"
+        : "Voice Output Unavailable",
+      voiceOutputDisabled: !outputSupported
+    }
+  }
+
+  if (!getConversationSnapshot()) {
+    return {
+      status: "Capture a semantic snapshot to ask about the current page.",
+      placeholder: "Capture a semantic snapshot first.",
+      composerDisabled: true,
+      composerReadOnly: false,
+      micDisabled: true,
+      micLabel: "Mic",
+      voiceOutputLabel: outputSupported
+        ? state.ttsEnabled
+          ? "Voice Output On"
+          : "Voice Output Off"
+        : "Voice Output Unavailable",
+      voiceOutputDisabled: !outputSupported
+    }
+  }
+
+  if (state.authStatus === "signing-in") {
+    return {
+      status: "Signing in with Google before starting the current-page assistant...",
+      placeholder: "Waiting for Google sign-in...",
+      composerDisabled: true,
+      composerReadOnly: false,
+      micDisabled: true,
+      micLabel: "Mic",
+      voiceOutputLabel: outputSupported
+        ? state.ttsEnabled
+          ? "Voice Output On"
+          : "Voice Output Off"
+        : "Voice Output Unavailable",
+      voiceOutputDisabled: !outputSupported
+    }
+  }
+
+  if (state.authStatus === "refreshing") {
+    return {
+      status: "Refreshing your ThreadAtlas session...",
+      placeholder: "Waiting for session refresh...",
+      composerDisabled: true,
+      composerReadOnly: false,
+      micDisabled: true,
+      micLabel: "Mic",
+      voiceOutputLabel: outputSupported
+        ? state.ttsEnabled
+          ? "Voice Output On"
+          : "Voice Output Off"
+        : "Voice Output Unavailable",
+      voiceOutputDisabled: !outputSupported
+    }
+  }
+
+  if (!isConversationAuthReady()) {
+    return {
+      status: state.authError ?? "Continue with Google to ask about the current page.",
+      placeholder: "Sign in to ask about the current snapshot...",
+      composerDisabled: true,
+      composerReadOnly: false,
+      micDisabled: true,
+      micLabel: "Mic",
+      voiceOutputLabel: outputSupported
+        ? state.ttsEnabled
+          ? "Voice Output On"
+          : "Voice Output Off"
+        : "Voice Output Unavailable",
+      voiceOutputDisabled: !outputSupported
+    }
+  }
+
+  if (state.phase === "opening-session" || state.phase === "sending-intent") {
+    return {
+      status: "Sending your question to the current-page runtime...",
+      placeholder: "Waiting for the current turn to start...",
+      composerDisabled: true,
+      composerReadOnly: false,
+      micDisabled: true,
+      micLabel: "Mic",
+      voiceOutputLabel: outputSupported
+        ? state.ttsEnabled
+          ? "Voice Output On"
+          : "Voice Output Off"
+        : "Voice Output Unavailable",
+      voiceOutputDisabled: !outputSupported
+    }
+  }
+
+  if (state.phase === "waiting-enrich") {
+    return {
+      status: "Gathering more page context before answering...",
+      placeholder: "Waiting for enrich to finish...",
+      composerDisabled: true,
+      composerReadOnly: false,
+      micDisabled: true,
+      micLabel: "Mic",
+      voiceOutputLabel: outputSupported
+        ? state.ttsEnabled
+          ? "Voice Output On"
+          : "Voice Output Off"
+        : "Voice Output Unavailable",
+      voiceOutputDisabled: !outputSupported
+    }
+  }
+
+  if (state.phase === "resuming-turn") {
+    return {
+      status: "Finishing the current answer...",
+      placeholder: "Waiting for the answer to complete...",
+      composerDisabled: true,
+      composerReadOnly: false,
+      micDisabled: true,
+      micLabel: "Mic",
+      voiceOutputLabel: outputSupported
+        ? state.ttsEnabled
+          ? "Voice Output On"
+          : "Voice Output Off"
+        : "Voice Output Unavailable",
+      voiceOutputDisabled: !outputSupported
+    }
+  }
+
+  if (isSpeechListening()) {
+    return {
+      status: "Listening for a single utterance. Tap Stop to send it automatically.",
+      placeholder: "Listening...",
+      composerDisabled: false,
+      composerReadOnly: true,
+      micDisabled: false,
+      micLabel: "Stop",
+      voiceOutputLabel: outputSupported
+        ? state.ttsEnabled
+          ? "Voice Output On"
+          : "Voice Output Off"
+        : "Voice Output Unavailable",
+      voiceOutputDisabled: !outputSupported
+    }
+  }
+
+  if (isSpeechProcessing()) {
+    return {
+      status: "Processing the captured voice input...",
+      placeholder: "Converting your voice input to text...",
+      composerDisabled: false,
+      composerReadOnly: true,
+      micDisabled: true,
+      micLabel: "Processing...",
+      voiceOutputLabel: outputSupported
+        ? state.ttsEnabled
+          ? "Voice Output On"
+          : "Voice Output Off"
+        : "Voice Output Unavailable",
+      voiceOutputDisabled: !outputSupported
+    }
+  }
+
+  if (state.lastRuntimeError) {
+    return {
+      status: `Last runtime error: ${state.lastRuntimeError.message}`,
+      placeholder: "Ask a follow-up about the current snapshot...",
+      composerDisabled: false,
+      composerReadOnly: false,
+      micDisabled: !inputSupported,
+      micLabel: "Mic",
+      voiceOutputLabel: outputSupported
+        ? state.ttsEnabled
+          ? "Voice Output On"
+          : "Voice Output Off"
+        : "Voice Output Unavailable",
+      voiceOutputDisabled: !outputSupported
+    }
+  }
+
+  if (shouldShowSpeechError()) {
+    return {
+      status: `Voice input error: ${state.speechInputDetail}`,
+      placeholder: "Ask about the current snapshot...",
+      composerDisabled: false,
+      composerReadOnly: false,
+      micDisabled: !inputSupported,
+      micLabel: "Retry Mic",
+      voiceOutputLabel: outputSupported
+        ? state.ttsEnabled
+          ? "Voice Output On"
+          : "Voice Output Off"
+        : "Voice Output Unavailable",
+      voiceOutputDisabled: !outputSupported
+    }
+  }
+
+  if (state.phase === "dormant") {
+    return {
+      status: "Semantic capture is not available on this page.",
+      placeholder: "Open a supported page to ask questions.",
+      composerDisabled: true,
+      composerReadOnly: false,
+      micDisabled: true,
+      micLabel: "Mic",
+      voiceOutputLabel: outputSupported
+        ? state.ttsEnabled
+          ? "Voice Output On"
+          : "Voice Output Off"
+        : "Voice Output Unavailable",
+      voiceOutputDisabled: !outputSupported
+    }
+  }
+
+  if (!inputSupported) {
+    return {
+      status: "Ask about the current semantic snapshot. Voice input is unavailable in this browser.",
+      placeholder: "Ask about the current snapshot...",
+      composerDisabled: false,
+      composerReadOnly: false,
+      micDisabled: true,
+      micLabel: "Mic Unavailable",
+      voiceOutputLabel: outputSupported
+        ? state.ttsEnabled
+          ? "Voice Output On"
+          : "Voice Output Off"
+        : "Voice Output Unavailable",
+      voiceOutputDisabled: !outputSupported
+    }
+  }
+
+  return {
+    status: "Ask about the current semantic snapshot.",
+    placeholder: "Ask about the current snapshot...",
+    composerDisabled: false,
+    composerReadOnly: false,
+    micDisabled: false,
+    micLabel: "Mic",
+    voiceOutputLabel: outputSupported
+      ? state.ttsEnabled
+        ? "Voice Output On"
+        : "Voice Output Off"
+      : "Voice Output Unavailable",
+    voiceOutputDisabled: !outputSupported
+  }
+}
+
+function renderConversationState(): void {
+  const availability = getConversationStatus()
+  renderConversation({
+    messages: state.conversationMessages,
+    composerValue: state.composerText,
+    status: availability.status,
+    composerDisabled: availability.composerDisabled,
+    composerReadOnly: availability.composerReadOnly,
+    submitDisabled:
+      availability.composerDisabled ||
+      availability.composerReadOnly ||
+      state.composerText.trim().length === 0,
+    micDisabled: availability.micDisabled,
+    micLabel: availability.micLabel,
+    voiceOutputEnabled: state.ttsEnabled,
+    voiceOutputDisabled: availability.voiceOutputDisabled,
+    voiceOutputLabel: availability.voiceOutputLabel,
+    placeholder: availability.placeholder
+  })
+}
+
+function appendConversationMessage(message: TranscriptMessage): void {
+  state.conversationMessages = [...state.conversationMessages, message]
+  renderConversationState()
+}
+
+function resetConversationSurface(): void {
+  state.conversationMessages = []
+  setComposerDraft("")
+  resetSpeechInputState()
+  clearTurnOrigin()
+  clearSuggestChips()
+  clearPresent()
+  renderConversationState()
 }
 
 function setPhaseForUrl(url: string): void {
@@ -185,12 +626,6 @@ async function requestViewportCapture(): Promise<string | null> {
   } catch {
     return null
   }
-}
-
-function handleVoiceUnavailable(error: unknown): void {
-  const message = error instanceof Error ? error.message : "Voice features unavailable."
-  state.geminiLiveSession = null
-  showNotify(`${message} Semantic snapshots still work.`, "info")
 }
 
 function getSelectedSemanticSnapshot(): SemanticSnapshot | null {
@@ -376,6 +811,7 @@ function renderSemanticSnapshotState(errorOverride?: string | null): void {
     debugStatus: debugState.status,
     debugInfo: debugState.info
   })
+  renderConversationState()
 }
 
 function updateSemanticSnapshot(payload: SemanticSnapshotState): void {
@@ -609,6 +1045,59 @@ function selectSemanticContextFormat(format: ContextProjectionFormat): void {
   renderSemanticSnapshotState()
 }
 
+async function toggleSpeechInput(): Promise<void> {
+  const controller = state.speechController
+  if (!controller || !controller.inputSupported) {
+    showNotify("Voice input is unavailable in this browser.", "info")
+    return
+  }
+
+  if (!isConversationAuthReady()) {
+    showNotify("Sign in with Google before starting voice input.", "info")
+    return
+  }
+
+  if (state.activeTabId === null) {
+    showNotify("No active tab context.", "error")
+    return
+  }
+
+  if (!getConversationSnapshot()) {
+    showNotify("Capture a semantic snapshot before starting voice input.", "info")
+    return
+  }
+
+  if (hasActiveRuntimeTurn()) {
+    showNotify("Wait for the current answer to finish.", "info")
+    return
+  }
+
+  if (isSpeechListening()) {
+    await controller.stopInput()
+    return
+  }
+
+  if (isSpeechProcessing()) {
+    return
+  }
+
+  state.lastRuntimeError = null
+  await controller.startInput(state.composerText)
+}
+
+function toggleVoiceOutput(): void {
+  const controller = state.speechController
+  if (!controller?.outputSupported) {
+    showNotify("Voice output is unavailable in this browser.", "info")
+    return
+  }
+
+  state.ttsEnabled = !state.ttsEnabled
+  persistTtsEnabled()
+  controller.setOutputEnabled(state.ttsEnabled)
+  renderConversationState()
+}
+
 function splitSuggestOptions(text: string): string[] {
   return text
     .split(/[\n,]/)
@@ -620,16 +1109,23 @@ function splitSuggestOptions(text: string): string[] {
 async function executeProjection(projection: Projection): Promise<void> {
   routeProjection(projection, {
     respond(payload) {
-      state.geminiLiveSession?.sendFunctionResult({
-        name: "agentResponse",
-        response: { text: payload.text }
+      appendConversationMessage({
+        role: "assistant",
+        text: payload.text
       })
 
       if (payload.mode === "suggest") {
         const options = splitSuggestOptions(payload.text)
         showSuggestChips(options, (choice) => {
-          state.geminiLiveSession?.sendText(choice)
+          void submitTextPrompt(choice, "text")
         })
+        return
+      }
+
+      clearSuggestChips()
+      if (payload.mode === "answer") {
+        const origin = state.currentTurnOrigin ?? state.pendingTurnOrigin
+        void state.speechController?.speakAnswer(payload.text, origin)
       }
     },
     focus(payload) {
@@ -849,7 +1345,7 @@ async function buildContextEnrichResult(event: RuntimeEnrichRequestEvent): Promi
 
 function createSessionTransport(): SessionWsTransport {
   return new SessionWsTransport({
-    apiBaseUrl: API_BASE_URL,
+    apiBaseUrl: state.apiBaseUrl,
     authClient,
     handlers: {
       onPhaseChange(phase) {
@@ -861,26 +1357,54 @@ function createSessionTransport(): SessionWsTransport {
         state.lastRuntimeError = null
       },
       onProgress(event) {
+        if (!state.runtimeSnapshot) {
+          return
+        }
         state.activeTurnId = event.turnId
         state.lastRuntimeError = null
+        if (state.pendingTurnOrigin) {
+          state.currentTurnOrigin = state.pendingTurnOrigin
+          state.pendingTurnOrigin = null
+        }
       },
       onProjection(projection) {
+        if (!state.runtimeSnapshot) {
+          return
+        }
         void executeProjection(projection)
       },
       onTurnDone() {
+        if (!state.runtimeSnapshot) {
+          return
+        }
         state.activeTurnId = null
         state.pendingEnrichRequest = null
         state.lastRuntimeError = null
         state.runtimeSnapshot = null
+        clearTurnOrigin()
       },
       onError(error) {
+        if (!state.runtimeSnapshot) {
+          return
+        }
         state.activeTurnId = null
         state.pendingEnrichRequest = null
         state.lastRuntimeError = error
         state.runtimeSnapshot = null
+        clearTurnOrigin()
+        state.speechController?.cancelOutput()
         showNotify(error.message, "error")
       },
       async onEnrichRequest(event) {
+        if (!state.runtimeSnapshot) {
+          return {
+            requestKind: event.payload.requestKind,
+            targetRef: event.payload.targetRef,
+            status: "unsupported",
+            capturedAt: new Date().toISOString(),
+            failureReason: "runtime snapshot is no longer active"
+          }
+        }
         state.pendingEnrichRequest = event
         try {
           return await buildContextEnrichResult(event)
@@ -893,8 +1417,8 @@ function createSessionTransport(): SessionWsTransport {
 }
 
 async function handleUserIntent(intent: Intent): Promise<void> {
-  if (!state.geminiLiveSession) {
-    showNotify("Voice mode is unavailable. Semantic snapshots still work.", "error")
+  if (!isConversationAuthReady()) {
+    showNotify("Sign in with Google before asking about the current page.", "info")
     return
   }
 
@@ -914,6 +1438,9 @@ async function handleUserIntent(intent: Intent): Promise<void> {
   state.activeTurnId = null
   state.pendingEnrichRequest = null
   state.lastRuntimeError = null
+  clearSuggestChips()
+  clearPresent()
+  state.speechController?.cancelOutput()
 
   try {
     await state.sessionTransport.sendIntent({
@@ -926,6 +1453,7 @@ async function handleUserIntent(intent: Intent): Promise<void> {
     state.activeTurnId = null
     state.pendingEnrichRequest = null
     state.runtimeSnapshot = null
+    clearTurnOrigin()
     state.lastRuntimeError = {
       code: "GENERATION_FAILED",
       message
@@ -935,33 +1463,77 @@ async function handleUserIntent(intent: Intent): Promise<void> {
   }
 }
 
-async function connectVoiceSession(token: string): Promise<void> {
-  const liveSession = await connectGeminiLive(token)
-  liveSession.onFunctionCall = handleUserIntent
-  state.geminiLiveSession?.close()
-  state.geminiLiveSession = liveSession
-}
+async function submitTextPrompt(prompt: string, origin: TurnOrigin = "text"): Promise<void> {
+  const normalized = prompt.trim()
+  if (!normalized) {
+    return
+  }
 
-async function initializeVoiceSession(): Promise<void> {
-  const tokenManager = new TokenManager(
-    () => authClient.issueToken(),
-    async (token) => {
-      await connectVoiceSession(token)
-    },
-    (error) => {
-      handleVoiceUnavailable(error)
-    }
-  )
+  if (!isConversationAuthReady()) {
+    showNotify("Sign in with Google before asking about the current page.", "info")
+    return
+  }
 
-  const token = await tokenManager.initialize()
-  await connectVoiceSession(token)
+  if (state.activeTabId === null) {
+    showNotify("No active tab context.", "error")
+    return
+  }
+
+  if (!getSelectedSemanticSnapshot()) {
+    showNotify("Capture a semantic snapshot before asking a question.", "error")
+    return
+  }
+
+  if (hasActiveRuntimeTurn()) {
+    showNotify("Wait for the current answer to finish.", "info")
+    return
+  }
+
+  await state.speechController?.cancelInput({ restoreBaseDraft: false })
+  state.speechController?.cancelOutput()
+  setComposerDraft("")
+  state.lastRuntimeError = null
+  state.pendingTurnOrigin = origin
+  state.currentTurnOrigin = null
+  clearSuggestChips()
+  clearPresent()
+  appendConversationMessage({
+    role: "user",
+    text: normalized
+  })
+
+  await handleUserIntent(createUserSpeechIntent(normalized))
 }
 
 function registerRuntimeListeners(): void {
   if (typeof chrome !== "undefined" && chrome.runtime?.onMessage) {
     chrome.runtime.onMessage.addListener((message: AnyRuntimeMessage) => {
       if (message.type === "ACTIVE_TAB_CHANGED") {
+        const tabChanged = state.activeTabId !== message.payload.tabId
+        if (tabChanged && hasActiveRuntimeTurn()) {
+          void state.sessionTransport?.interrupt("active-tab-changed")
+        }
+        if (tabChanged) {
+          void state.speechController?.interruptAll()
+          state.speechController?.cancelOutput()
+        }
+
         state.activeTabId = message.payload.tabId
+        if (tabChanged) {
+          state.activeTurnId = null
+          state.pendingEnrichRequest = null
+          state.lastRuntimeError = null
+          state.runtimeSnapshot = null
+          clearTurnOrigin()
+          state.latestSemanticSnapshot = null
+          state.latestRegionDump = null
+          state.semanticSnapshotHistory = []
+          state.selectedSemanticSnapshotId = null
+          state.selectionEnabled = false
+          state.selectedTarget = null
+          resetConversationSurface()
+          renderSemanticSnapshotState()
+        }
         setPhaseForUrl(message.payload.url)
         void hydrateSemanticSnapshot(message.payload.tabId)
         void hydrateSemanticSnapshotHistory(message.payload.tabId)
@@ -977,6 +1549,10 @@ function registerRuntimeListeners(): void {
           message.payload.structure,
           message.payload.extractedAt
         )
+      }
+
+      if (message.type === "AUTH_STATE_CHANGED") {
+        applyAuthState(message.payload)
       }
 
       if (message.type === "SEMANTIC_SNAPSHOT_READY") {
@@ -1016,9 +1592,82 @@ async function hydrateActiveTabState(): Promise<void> {
   }
 }
 
+async function hydrateAuthState(): Promise<void> {
+  applyAuthState(await authClient.getAuthState())
+}
+
+async function signInWithGoogle(): Promise<void> {
+  const next = await authClient.signInWithGoogle()
+  applyAuthState(next)
+  if (next.status === "signed-in") {
+    showNotify("Signed in with Google.", "success")
+    return
+  }
+  if (next.errorMessage) {
+    showNotify(next.errorMessage, next.status === "error" ? "error" : "info")
+  }
+}
+
+async function signOut(): Promise<void> {
+  const next = await authClient.signOut()
+  applyAuthState(next)
+  showNotify("Signed out.", "info")
+}
+
 async function initialize(): Promise<void> {
   setPhase("initializing")
-  state.sessionTransport = createSessionTransport()
+  const config = await loadExtensionConfig(createChromeLocalStorage())
+  state.apiBaseUrl = config.apiBaseUrl
+  state.speechController = createSpeechController({
+    inputProvider: new ContentSpeechInputProvider({
+      getActiveTabId: () => state.activeTabId,
+      getLanguage: () => window.navigator.language,
+      sendToContentScript: async (tabId, message) => sendToContentScript(tabId, message)
+    }),
+    outputProvider: createAudioOutputProvider(),
+    outputEnabled: state.ttsEnabled,
+    onInputStateChange: (speechState, detail) => {
+      state.speechInputState = speechState
+      state.speechInputDetail = detail ?? null
+      renderConversationState()
+    },
+    onDraftChange: (draft) => {
+      setSpeechDraft(draft)
+    },
+    onFinalTranscript: async (text) => {
+      await submitTextPrompt(text, "voice")
+    },
+    onOutputError: (message) => {
+      showNotify(message, "error")
+    }
+  })
+  resetSpeechInputState()
+  bindAuthActions({
+    onSignIn: () => {
+      void signInWithGoogle()
+    },
+    onSignOut: () => {
+      void signOut()
+    }
+  })
+  bindConversationActions({
+    onComposerInput: (value) => {
+      setComposerDraft(value)
+      if (state.speechInputState === "error") {
+        resetSpeechInputState()
+      }
+      renderConversationState()
+    },
+    onSubmitPrompt: (prompt) => {
+      void submitTextPrompt(prompt, "text")
+    },
+    onToggleMic: () => {
+      void toggleSpeechInput()
+    },
+    onToggleVoiceOutput: () => {
+      toggleVoiceOutput()
+    }
+  })
   bindSemanticSnapshotActions({
     onCapture: () => {
       void requestSemanticSnapshot()
@@ -1048,20 +1697,15 @@ async function initialize(): Promise<void> {
       selectSemanticContextFormat(format)
     }
   })
+  renderAuthState()
   renderSemanticSnapshotState()
+  renderConversationState()
   registerRuntimeListeners()
-  await hydrateActiveTabState()
-  await initializeAudio()
+  await Promise.all([hydrateActiveTabState(), hydrateAuthState()])
   window.addEventListener("beforeunload", () => {
     void state.sessionTransport?.close()
-    state.geminiLiveSession?.close()
+    state.speechController?.dispose()
   })
-
-  try {
-    await initializeVoiceSession()
-  } catch (error) {
-    handleVoiceUnavailable(error)
-  }
 }
 
 void initialize().catch((error) => {

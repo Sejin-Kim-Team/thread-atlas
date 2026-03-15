@@ -32,6 +32,12 @@ class FakeWebSocket {
       data: JSON.stringify(event)
     } as MessageEvent<string>)
   }
+
+  emitRaw(event: unknown): void {
+    this.onmessage?.({
+      data: JSON.stringify(event)
+    } as MessageEvent<string>)
+  }
 }
 
 const snapshot: SemanticSnapshot = {
@@ -403,5 +409,70 @@ describe("session websocket transport", () => {
     await Promise.resolve()
 
     expect(parseSent(socket).find((event) => event.type === "context.enrich.result")).toBeUndefined()
+  })
+
+  it("surfaces legacy non-canonical error frames instead of dropping them", async () => {
+    const sockets: FakeWebSocket[] = []
+    const onError = vi.fn()
+    const phases: string[] = []
+
+    const transport = new SessionWsTransport({
+      apiBaseUrl: "https://api.example.com",
+      authClient: {
+        issueToken: vi.fn(async () => ({
+          token: "auth-token",
+          expiresAt: 1_799_999_999,
+          user: { id: "user-1" }
+        }))
+      },
+      handlers: {
+        onPhaseChange(phase) {
+          phases.push(phase)
+        },
+        onError
+      },
+      webSocketFactory(url) {
+        const socket = new FakeWebSocket(url)
+        sockets.push(socket)
+        return socket
+      }
+    })
+
+    const sendPromise = transport.sendIntent({
+      intent: createIntent("Summarize this page"),
+      activeTabId: 17,
+      snapshot
+    })
+    await Promise.resolve()
+
+    const socket = sockets[0]!
+    socket.open()
+    resolveSession(socket)
+    await sendPromise
+
+    socket.emitRaw({
+      type: "error",
+      payload: {
+        code: "GENERATION_FAILED",
+        message: "llm assist failed"
+      }
+    })
+
+    await Promise.resolve()
+
+    expect(onError).toHaveBeenCalledWith(
+      {
+        code: "GENERATION_FAILED",
+        message: "llm assist failed"
+      },
+      expect.objectContaining({
+        type: "error",
+        payload: {
+          code: "GENERATION_FAILED",
+          message: "llm assist failed"
+        }
+      })
+    )
+    expect(phases).toContain("error")
   })
 })

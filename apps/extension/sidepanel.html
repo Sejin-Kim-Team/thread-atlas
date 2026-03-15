@@ -187,6 +187,184 @@
         padding: 6px 10px;
         cursor: pointer;
       }
+
+      .conversation-transcript {
+        display: grid;
+        gap: 10px;
+        margin-bottom: 10px;
+      }
+
+      .conversation-message {
+        border: 1px solid #e2e8f0;
+        border-radius: 10px;
+        padding: 10px;
+        background: #ffffff;
+      }
+
+      .conversation-user {
+        background: #eff6ff;
+        border-color: #bfdbfe;
+      }
+
+      .conversation-assistant {
+        background: #f8fafc;
+      }
+
+      .conversation-role {
+        margin-bottom: 4px;
+        color: #475569;
+        font-size: 11px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+      }
+
+      .conversation-text {
+        color: #0f172a;
+        font-size: 13px;
+        line-height: 1.55;
+        white-space: pre-wrap;
+      }
+
+      .conversation-empty {
+        border: 1px dashed #cbd5e1;
+        border-radius: 10px;
+        padding: 12px;
+        color: #64748b;
+        font-size: 12px;
+        background: #f8fafc;
+      }
+
+      .conversation-composer {
+        display: grid;
+        gap: 8px;
+      }
+
+      .conversation-toolbar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        margin-bottom: 10px;
+      }
+
+      .conversation-toolbar-group {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+
+      .conversation-input {
+        width: 100%;
+        box-sizing: border-box;
+        resize: vertical;
+        min-height: 88px;
+        border: 1px solid #cbd5e1;
+        border-radius: 10px;
+        padding: 10px 12px;
+        font: inherit;
+        font-size: 13px;
+        line-height: 1.5;
+        color: #0f172a;
+        background: #ffffff;
+      }
+
+      .conversation-input[readonly] {
+        background: #f8fafc;
+      }
+
+      .conversation-input:disabled {
+        background: #f8fafc;
+        color: #94a3b8;
+      }
+
+      .button.active-toggle {
+        border-color: #2563eb;
+        background: #eff6ff;
+      }
+
+      .auth-card {
+        border: 1px solid #e2e8f0;
+        border-radius: 12px;
+        padding: 12px;
+        background: #f8fafc;
+      }
+
+      .auth-copy {
+        margin: 0 0 10px;
+        color: #475569;
+        font-size: 12px;
+        line-height: 1.5;
+      }
+
+      .auth-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+      }
+
+      .auth-user {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        min-width: 0;
+      }
+
+      .auth-avatar {
+        width: 36px;
+        height: 36px;
+        border-radius: 999px;
+        border: 1px solid #cbd5e1;
+        background: #ffffff;
+        object-fit: cover;
+      }
+
+      .auth-avatar-fallback {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 12px;
+        font-weight: 700;
+        color: #334155;
+      }
+
+      .auth-user-copy {
+        min-width: 0;
+      }
+
+      .auth-user-name,
+      .auth-user-email {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .auth-user-name {
+        font-size: 13px;
+        font-weight: 600;
+        color: #0f172a;
+      }
+
+      .auth-user-email {
+        margin-top: 2px;
+        font-size: 12px;
+        color: #64748b;
+      }
+
+      .auth-actions {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+      }
+
+      .button.secondary {
+        background: #ffffff;
+      }
+
+      .hidden-inline {
+        display: none !important;
+      }
     </style>
   </head>
   <body>
@@ -197,6 +375,52 @@
         <div id="status-label" class="status-label">initializing</div>
       </div>
     </header>
+    <section class="section">
+      <h2 class="section-title">Account</h2>
+      <div class="auth-card">
+        <div id="auth-copy" class="auth-copy">
+          Sign in with Google to ask questions about the current page.
+        </div>
+        <div class="auth-row">
+          <div id="auth-user" class="auth-user hidden-inline">
+            <img id="auth-avatar" class="auth-avatar hidden-inline" alt="" />
+            <div id="auth-avatar-fallback" class="auth-avatar auth-avatar-fallback hidden-inline">TA</div>
+            <div class="auth-user-copy">
+              <div id="auth-user-name" class="auth-user-name"></div>
+              <div id="auth-user-email" class="auth-user-email"></div>
+            </div>
+          </div>
+          <div class="auth-actions">
+            <button id="auth-sign-in-button" class="button" type="button">Continue with Google</button>
+            <button id="auth-sign-out-button" class="button secondary hidden-inline" type="button">
+              Sign out
+            </button>
+          </div>
+        </div>
+      </div>
+    </section>
+    <section class="section">
+      <h2 class="section-title">Conversation</h2>
+      <div id="conversation-status" class="snapshot-status">Capture a semantic snapshot to start.</div>
+      <div id="conversation-transcript" class="conversation-transcript"></div>
+      <div class="conversation-toolbar">
+        <div class="conversation-toolbar-group">
+          <button id="conversation-mic-button" class="button" type="button">Mic</button>
+        </div>
+        <div class="conversation-toolbar-group">
+          <button id="conversation-voice-output-button" class="button active-toggle" type="button">Voice Output On</button>
+        </div>
+      </div>
+      <div class="conversation-composer">
+        <textarea
+          id="conversation-input"
+          class="conversation-input"
+          rows="4"
+          placeholder="Ask about the current snapshot..."
+        ></textarea>
+        <button id="conversation-send-button" class="button" type="button">Send</button>
+      </div>
+    </section>
     <section class="section">
       <div id="present-root"></div>
     </section>

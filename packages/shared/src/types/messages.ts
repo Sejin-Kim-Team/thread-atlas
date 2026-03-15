@@ -1,4 +1,5 @@
 import type { Projection } from "./projection"
+import type { EnsureAuthSessionResponse, ExtensionAuthState } from "./auth-session"
 import type {
   SemanticCategory,
   SemanticNodeKind,
@@ -43,6 +44,13 @@ export interface SemanticSelectionStateResponse {
   selectedTarget: SemanticSelectionTarget | null
 }
 
+export type SpeechInputRuntimeState = "idle" | "listening" | "processing" | "unsupported" | "error"
+
+export interface SpeechInputControlResponse {
+  ok: boolean
+  error?: string
+}
+
 export interface SemanticSnapshotHistoryResponse {
   tabId: number | null
   snapshots: SemanticSnapshot[]
@@ -52,6 +60,9 @@ export type SidePanelToContentMessage =
   | { type: "COLLECT_SENSORS" }
   | { type: "GET_THREAD_DOC" }
   | { type: "EXECUTE_PROJECTION"; projection: Projection }
+  | { type: "START_PAGE_SPEECH_INPUT"; payload: { sessionId: string; language: string } }
+  | { type: "STOP_PAGE_SPEECH_INPUT"; payload: { sessionId: string } }
+  | { type: "CANCEL_PAGE_SPEECH_INPUT"; payload: { sessionId: string } }
 
 export type ServiceWorkerToContentMessage =
   | { type: "CAPTURE_SEMANTIC_SNAPSHOT"; payload: { source: CaptureSource } }
@@ -63,6 +74,29 @@ export type ServiceWorkerToContentMessage =
 export type ServiceWorkerToSidePanelMessage =
   | { type: "ACTIVE_TAB_CHANGED"; payload: { tabId: number; url: string; title: string } }
   | { type: "ARTICLE_INJECTED"; payload: { tabId: number; url: string } }
+  | { type: "AUTH_STATE_CHANGED"; payload: ExtensionAuthState }
+  | {
+      type: "PAGE_SPEECH_STATE_CHANGED"
+      payload: {
+        sessionId: string
+        state: SpeechInputRuntimeState
+        detail?: string
+      }
+    }
+  | {
+      type: "PAGE_SPEECH_PARTIAL"
+      payload: {
+        sessionId: string
+        text: string
+      }
+    }
+  | {
+      type: "PAGE_SPEECH_FINAL"
+      payload: {
+        sessionId: string
+        text: string
+      }
+    }
   | {
       type: "SEMANTIC_SNAPSHOT_READY"
       payload: {
@@ -88,6 +122,10 @@ export type SidePanelToServiceWorkerMessage =
   | { type: "CAPTURE_VIEWPORT" }
   | { type: "REGISTER_ARTICLE_URL"; payload: { url: string; threadId: string } }
   | { type: "OPEN_TAB"; payload: { url: string; active: boolean } }
+  | { type: "GET_AUTH_STATE" }
+  | { type: "SIGN_IN_WITH_GOOGLE" }
+  | { type: "ENSURE_AUTH_SESSION" }
+  | { type: "SIGN_OUT" }
   | { type: "REQUEST_SEMANTIC_SNAPSHOT"; payload?: { tabId?: number; source?: CaptureSource } }
   | { type: "GET_LATEST_SEMANTIC_SNAPSHOT"; payload?: { tabId?: number } }
   | { type: "GET_SEMANTIC_SNAPSHOT_HISTORY"; payload?: { tabId?: number } }
@@ -122,5 +160,9 @@ export type AnyRuntimeMessage =
   | ServiceWorkerToSidePanelMessage
   | SidePanelToServiceWorkerMessage
   | ArticleContentMessage
+
+export type ServiceWorkerAuthResponse =
+  | ExtensionAuthState
+  | EnsureAuthSessionResponse
 
 export type SourceArticleFromGraph = Pick<ArticleContext, "url" | "title" | "text" | "structure" | "readAt">

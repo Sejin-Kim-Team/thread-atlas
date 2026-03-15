@@ -5,6 +5,9 @@ import { dirname, join } from "node:path"
 const root = process.cwd()
 const distDir = join(root, "dist")
 const watchMode = process.argv.includes("--watch")
+const compiledApiBaseUrl = process.env.THREADATLAS_API_BASE_URL ?? "http://localhost:8080"
+const compiledGoogleOAuthClientId =
+  process.env.THREADATLAS_GOOGLE_OAUTH_CLIENT_ID ?? process.env.GOOGLE_OAUTH_CLIENT_ID ?? ""
 
 const entries = [
   { entryPoints: ["src/sidepanel/index.ts"], outfile: "dist/sidepanel.js" },
@@ -12,7 +15,8 @@ const entries = [
   { entryPoints: ["src/background/service-worker.ts"], outfile: "dist/service-worker.js" },
   { entryPoints: ["src/content/content-semantic.ts"], outfile: "dist/content-semantic.js" },
   { entryPoints: ["src/content/content-hn.ts"], outfile: "dist/content-hn.js" },
-  { entryPoints: ["src/content/content-article.ts"], outfile: "dist/content-article.js" }
+  { entryPoints: ["src/content/content-article.ts"], outfile: "dist/content-article.js" },
+  { entryPoints: ["src/content/page-speech-bridge.ts"], outfile: "dist/page-speech-bridge.js" }
 ]
 
 function copyStatic() {
@@ -44,6 +48,10 @@ function commonConfig(target) {
     target: "chrome120",
     sourcemap: true,
     logLevel: "info",
+    define: {
+      __THREADATLAS_API_BASE_URL__: JSON.stringify(compiledApiBaseUrl),
+      __THREADATLAS_GOOGLE_OAUTH_CLIENT_ID__: JSON.stringify(compiledGoogleOAuthClientId)
+    },
     ...target
   }
 }
