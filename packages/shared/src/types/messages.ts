@@ -44,9 +44,9 @@ export interface SemanticSelectionStateResponse {
   selectedTarget: SemanticSelectionTarget | null
 }
 
-export type SpeechInputRuntimeState = "idle" | "listening" | "processing" | "unsupported" | "error"
+export type AudioCaptureRuntimeState = "idle" | "listening" | "processing" | "unsupported" | "error"
 
-export interface SpeechInputControlResponse {
+export interface AudioCaptureControlResponse {
   ok: boolean
   error?: string
 }
@@ -60,9 +60,9 @@ export type SidePanelToContentMessage =
   | { type: "COLLECT_SENSORS" }
   | { type: "GET_THREAD_DOC" }
   | { type: "EXECUTE_PROJECTION"; projection: Projection }
-  | { type: "START_PAGE_SPEECH_INPUT"; payload: { sessionId: string; language: string } }
-  | { type: "STOP_PAGE_SPEECH_INPUT"; payload: { sessionId: string } }
-  | { type: "CANCEL_PAGE_SPEECH_INPUT"; payload: { sessionId: string } }
+  | { type: "START_PAGE_AUDIO_CAPTURE"; payload: { sessionId: string } }
+  | { type: "STOP_PAGE_AUDIO_CAPTURE"; payload: { sessionId: string } }
+  | { type: "CANCEL_PAGE_AUDIO_CAPTURE"; payload: { sessionId: string } }
 
 export type ServiceWorkerToContentMessage =
   | { type: "CAPTURE_SEMANTIC_SNAPSHOT"; payload: { source: CaptureSource } }
@@ -76,25 +76,26 @@ export type ServiceWorkerToSidePanelMessage =
   | { type: "ARTICLE_INJECTED"; payload: { tabId: number; url: string } }
   | { type: "AUTH_STATE_CHANGED"; payload: ExtensionAuthState }
   | {
-      type: "PAGE_SPEECH_STATE_CHANGED"
+      type: "PAGE_AUDIO_CAPTURE_READY"
       payload: {
+        tabId?: number | null
+      }
+    }
+  | {
+      type: "PAGE_AUDIO_CAPTURE_STATE_CHANGED"
+      payload: {
+        tabId?: number | null
         sessionId: string
-        state: SpeechInputRuntimeState
+        state: AudioCaptureRuntimeState
         detail?: string
       }
     }
   | {
-      type: "PAGE_SPEECH_PARTIAL"
+      type: "PAGE_AUDIO_CAPTURE_CHUNK"
       payload: {
+        tabId?: number | null
         sessionId: string
-        text: string
-      }
-    }
-  | {
-      type: "PAGE_SPEECH_FINAL"
-      payload: {
-        sessionId: string
-        text: string
+        chunkBase64: string
       }
     }
   | {

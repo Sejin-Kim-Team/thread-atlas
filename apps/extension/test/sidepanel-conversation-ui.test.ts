@@ -59,7 +59,7 @@ describe("sidepanel conversation ui", () => {
     expect(document.getElementById("conversation-status")?.textContent).toContain("Capture a semantic snapshot")
   })
 
-  it("binds text submission and voice controls", () => {
+  it("binds text submission, pointer voice controls, and keyboard push-to-talk", () => {
     const onComposerInput = vi.fn()
     const onSubmitPrompt = vi.fn()
     const onStartMicPress = vi.fn()
@@ -95,17 +95,25 @@ describe("sidepanel conversation ui", () => {
       makePointerEvent("pointerup")
     )
     ;(document.getElementById("conversation-mic-button") as HTMLButtonElement).dispatchEvent(
+      makePointerEvent("pointerdown")
+    )
+    ;(document.getElementById("conversation-mic-button") as HTMLButtonElement).dispatchEvent(
       makePointerEvent("pointercancel")
     )
     ;(document.getElementById("conversation-voice-output-button") as HTMLButtonElement).click()
     ;(document.getElementById("conversation-send-button") as HTMLButtonElement).click()
+    document.dispatchEvent(new KeyboardEvent("keydown", { code: "Space", key: " ", bubbles: true }))
+    document.dispatchEvent(new KeyboardEvent("keyup", { code: "Space", key: " ", bubbles: true }))
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }))
+    composer.dispatchEvent(new KeyboardEvent("keydown", { code: "Space", key: " ", bubbles: true }))
+    composer.dispatchEvent(new KeyboardEvent("keyup", { code: "Space", key: " ", bubbles: true }))
 
     expect(onComposerInput).toHaveBeenCalledWith("Summarize this page")
     expect(onSubmitPrompt).toHaveBeenCalledTimes(2)
     expect(onSubmitPrompt).toHaveBeenCalledWith("Summarize this page")
-    expect(onStartMicPress).toHaveBeenCalledTimes(1)
-    expect(onEndMicPress).toHaveBeenCalledTimes(1)
-    expect(onCancelMicPress).toHaveBeenCalledTimes(1)
+    expect(onStartMicPress).toHaveBeenCalledTimes(3)
+    expect(onEndMicPress).toHaveBeenCalledTimes(2)
+    expect(onCancelMicPress).toHaveBeenCalledTimes(2)
     expect(onToggleVoiceOutput).toHaveBeenCalledTimes(1)
   })
 

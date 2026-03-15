@@ -533,6 +533,21 @@ export function showSuggestChips(
   }
 }
 
+let detachConversationKeyboardBindings: (() => void) | null = null
+
+function isEditableConversationTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) {
+    return false
+  }
+
+  if (target.isContentEditable) {
+    return true
+  }
+
+  const tagName = target.tagName
+  return tagName === "INPUT" || tagName === "TEXTAREA" || tagName === "SELECT" || tagName === "BUTTON"
+}
+
 export function bindConversationActions(args: {
   onComposerInput: (value: string) => void
   onSubmitPrompt: (prompt: string) => void
@@ -548,6 +563,13 @@ export function bindConversationActions(args: {
   if (!composer || !sendButton || !micButton || !voiceOutputButton) {
     return
   }
+
+  let activePointerId: number | null = null
+  let suppressLostPointerCancel = false
+  let activeKeyboardMicPress = false
+
+  detachConversationKeyboardBindings?.()
+  detachConversationKeyboardBindings = null
 
   composer.addEventListener("input", () => {
     args.onComposerInput(composer.value)
@@ -565,27 +587,117 @@ export function bindConversationActions(args: {
   })
   micButton.addEventListener("pointerdown", (event) => {
     event.preventDefault()
+    activePointerId = event.pointerId
+    suppressLostPointerCancel = false
     if (typeof micButton.setPointerCapture === "function") {
       micButton.setPointerCapture(event.pointerId)
     }
     args.onStartMicPress()
   })
   micButton.addEventListener("pointerup", (event) => {
+    if (activePointerId !== event.pointerId) {
+      return
+    }
     event.preventDefault()
+    activePointerId = null
+    suppressLostPointerCancel = true
     if (typeof micButton.releasePointerCapture === "function" && micButton.hasPointerCapture(event.pointerId)) {
       micButton.releasePointerCapture(event.pointerId)
     }
     args.onEndMicPress()
   })
-  micButton.addEventListener("pointercancel", () => {
+  micButton.addEventListener("pointercancel", (event) => {
+    if (activePointerId !== event.pointerId) {
+      return
+    }
+    activePointerId = null
+    suppressLostPointerCancel = false
     args.onCancelMicPress()
   })
   micButton.addEventListener("lostpointercapture", () => {
+    if (suppressLostPointerCancel) {
+      suppressLostPointerCancel = false
+      return
+    }
+    if (activePointerId === null) {
+      return
+    }
+    activePointerId = null
     args.onCancelMicPress()
   })
   voiceOutputButton.addEventListener("click", () => {
     args.onToggleVoiceOutput()
   })
+
+  const handleKeyDown = (event: KeyboardEvent) => {
+    if (event.isComposing || event.repeat || event.ctrlKey || event.metaKey || event.altKey) {
+      return
+    }
+
+    if (event.key === "Escape") {
+      if (activeKeyboardMicPress) {
+        activeKeyboardMicPress = false
+      }
+      args.onCancelMicPress()
+      return
+    }
+
+    if (event.code !== "Space" || event.shiftKey) {
+      return
+    }
+
+    if (isEditableConversationTarget(event.target)) {
+      return
+    }
+
+    event.preventDefault()
+    if (activeKeyboardMicPress) {
+      return
+    }
+    activeKeyboardMicPress = true
+    args.onStartMicPress()
+  }
+
+  const handleKeyUp = (event: KeyboardEvent) => {
+    if (event.code !== "Space" || event.shiftKey) {
+      return
+    }
+
+    if (!activeKeyboardMicPress) {
+      return
+    }
+
+    event.preventDefault()
+    activeKeyboardMicPress = false
+    args.onEndMicPress()
+  }
+
+  const handleWindowBlur = () => {
+    if (!activeKeyboardMicPress) {
+      return
+    }
+    activeKeyboardMicPress = false
+    args.onCancelMicPress()
+  }
+
+  const handleVisibilityChange = () => {
+    if (!document.hidden || !activeKeyboardMicPress) {
+      return
+    }
+    activeKeyboardMicPress = false
+    args.onCancelMicPress()
+  }
+
+  document.addEventListener("keydown", handleKeyDown)
+  document.addEventListener("keyup", handleKeyUp)
+  window.addEventListener("blur", handleWindowBlur)
+  document.addEventListener("visibilitychange", handleVisibilityChange)
+  detachConversationKeyboardBindings = () => {
+    document.removeEventListener("keydown", handleKeyDown)
+    document.removeEventListener("keyup", handleKeyUp)
+    window.removeEventListener("blur", handleWindowBlur)
+    document.removeEventListener("visibilitychange", handleVisibilityChange)
+  }
 }
 
 export function bindSemanticSnapshotActions(args: {

@@ -224,8 +224,6 @@ export async function createGeminiLiveSession(args: {
           })
         }
 
-        emitServerContent(event, args.onEvent)
-
         const functionCalls = event.toolCall?.functionCalls
         if (functionCalls && functionCalls.length > 0) {
           const normalized = functionCalls
@@ -248,6 +246,8 @@ export async function createGeminiLiveSession(args: {
             })
           }
         }
+
+        emitServerContent(event, args.onEvent)
       },
       onerror: (event) => {
         const error =

@@ -1,5 +1,9 @@
-import type { SidePanelToServiceWorkerMessage } from "@threadatlas/shared/runtime"
+import type { AnyRuntimeMessage, SidePanelToServiceWorkerMessage } from "@threadatlas/shared/runtime"
 import type { ExtensionAuthState } from "@threadatlas/shared"
+import type {
+  SemanticSelectionStateResponse,
+  SemanticSnapshotCaptureResponse
+} from "@threadatlas/shared/runtime"
 import {
   createSemanticSnapshotCoordinator,
   SEMANTIC_SELECTION_COMMAND,
@@ -8,20 +12,27 @@ import {
 } from "./semantic-snapshot"
 import { createExtensionAuthManager } from "./auth-manager"
 import { createChromeLocalStorage } from "../common/extension-config"
+import type { RegionDump } from "../content/semantic/core/observability"
+
+type ContentScriptBridgeResponse =
+  | SemanticSnapshotCaptureResponse
+  | SemanticSelectionStateResponse
+  | { dump: RegionDump | null }
+
+function safeBroadcastRuntimeMessage(message: unknown): void {
+  chrome.runtime.sendMessage(message, () => {
+    void chrome.runtime.lastError
+  })
+}
 
 const knownArticleUrls = new Map<string, string>()
 const authManager = createExtensionAuthManager({
   storage: createChromeLocalStorage(),
   broadcastAuthState(state: ExtensionAuthState) {
-    chrome.runtime.sendMessage(
-      {
-        type: "AUTH_STATE_CHANGED",
-        payload: state
-      },
-      () => {
-        void chrome.runtime.lastError
-      }
-    )
+    safeBroadcastRuntimeMessage({
+      type: "AUTH_STATE_CHANGED",
+      payload: state
+    })
   }
 })
 
@@ -34,17 +45,37 @@ const semanticSnapshotCoordinator = createSemanticSnapshotCoordinator({
     return (await chrome.tabs.get(tabId)) ?? null
   },
   async sendToContentScript(tabId, message) {
-    return new Promise((resolve, reject) => {
-      chrome.tabs.sendMessage(tabId, message, (response) => {
-        const runtimeError = chrome.runtime.lastError
-        if (runtimeError) {
-          reject(new Error(runtimeError.message))
-          return
-        }
+    const trySend = () =>
+      new Promise<ContentScriptBridgeResponse>((resolve, reject) => {
+        chrome.tabs.sendMessage(tabId, message, (response) => {
+          const runtimeError = chrome.runtime.lastError
+          if (runtimeError) {
+            reject(new Error(runtimeError.message))
+            return
+          }
 
-        resolve(response)
+          resolve(response)
+        })
       })
-    })
+
+    try {
+      return await trySend()
+    } catch (error) {
+      const messageText = error instanceof Error ? error.message : ""
+      if (
+        !messageText.includes("Receiving end does not exist") ||
+        !chrome.scripting?.executeScript
+      ) {
+        throw error
+      }
+
+      await chrome.scripting.executeScript({
+        target: { tabId },
+        files: ["content-semantic.js"]
+      })
+
+      return trySend()
+    }
   },
   async openSidePanel(tabId) {
     if (chrome.sidePanel?.open) {
@@ -52,7 +83,7 @@ const semanticSnapshotCoordinator = createSemanticSnapshotCoordinator({
     }
   },
   notifyRuntime(message) {
-    chrome.runtime.sendMessage(message)
+    safeBroadcastRuntimeMessage(message)
   }
 })
 
@@ -64,7 +95,7 @@ function resolveSemanticTabId(
 }
 
 function notifyActiveTabChanged(tabId: number, url: string, title: string): void {
-  chrome.runtime.sendMessage({
+  safeBroadcastRuntimeMessage({
     type: "ACTIVE_TAB_CHANGED",
     payload: {
       tabId,
@@ -109,16 +140,16 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
   }
 
   try {
-    await chrome.scripting.executeScript({
-      target: { tabId },
-      files: ["content-article.js"]
-    })
+      await chrome.scripting.executeScript({
+        target: { tabId },
+        files: ["content-article.js"]
+      })
 
-    chrome.runtime.sendMessage({
-      type: "ARTICLE_INJECTED",
-      payload: {
-        tabId,
-        url: tab.url
+      safeBroadcastRuntimeMessage({
+        type: "ARTICLE_INJECTED",
+        payload: {
+          tabId,
+          url: tab.url
       }
     })
   } catch (error) {
@@ -127,8 +158,47 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
   }
 })
 
-chrome.runtime.onMessage.addListener((msg: SidePanelToServiceWorkerMessage, sender, sendResponse) => {
-  switch (msg.type) {
+chrome.runtime.onMessage.addListener((msg: AnyRuntimeMessage, sender, sendResponse) => {
+  if (sender.tab?.id != null) {
+    switch (msg.type) {
+      case "PAGE_AUDIO_CAPTURE_READY": {
+        safeBroadcastRuntimeMessage({
+          type: "PAGE_AUDIO_CAPTURE_READY",
+          payload: {
+            tabId: sender.tab.id
+          }
+        })
+        sendResponse({ ok: true })
+        return true
+      }
+      case "PAGE_AUDIO_CAPTURE_STATE_CHANGED": {
+        safeBroadcastRuntimeMessage({
+          type: "PAGE_AUDIO_CAPTURE_STATE_CHANGED",
+          payload: {
+            ...msg.payload,
+            tabId: sender.tab.id
+          }
+        })
+        sendResponse({ ok: true })
+        return true
+      }
+      case "PAGE_AUDIO_CAPTURE_CHUNK": {
+        safeBroadcastRuntimeMessage({
+          type: "PAGE_AUDIO_CAPTURE_CHUNK",
+          payload: {
+            ...msg.payload,
+            tabId: sender.tab.id
+          }
+        })
+        sendResponse({ ok: true })
+        return true
+      }
+    }
+  }
+
+  const sidePanelMessage = msg as SidePanelToServiceWorkerMessage
+
+  switch (sidePanelMessage.type) {
     case "CAPTURE_VIEWPORT": {
       chrome.tabs.captureVisibleTab({ format: "jpeg", quality: 70 }, (dataUrl) => {
         const viewport = dataUrl?.split(",")[1] ?? null
@@ -138,13 +208,13 @@ chrome.runtime.onMessage.addListener((msg: SidePanelToServiceWorkerMessage, send
     }
 
     case "REGISTER_ARTICLE_URL": {
-      knownArticleUrls.set(msg.payload.url, msg.payload.threadId)
+      knownArticleUrls.set(sidePanelMessage.payload.url, sidePanelMessage.payload.threadId)
       sendResponse({ ok: true })
       return true
     }
 
     case "OPEN_TAB": {
-      chrome.tabs.create({ url: msg.payload.url, active: msg.payload.active }, (tab) => {
+      chrome.tabs.create({ url: sidePanelMessage.payload.url, active: sidePanelMessage.payload.active }, (tab) => {
         sendResponse({ tabId: tab.id })
       })
       return true
@@ -152,9 +222,13 @@ chrome.runtime.onMessage.addListener((msg: SidePanelToServiceWorkerMessage, send
 
     case "REQUEST_SEMANTIC_SNAPSHOT": {
       void semanticSnapshotCoordinator
-        .captureActiveTab(resolveSemanticTabId(msg.payload?.tabId, sender), msg.payload?.source ?? "sidepanel", {
+        .captureActiveTab(
+          resolveSemanticTabId(sidePanelMessage.payload?.tabId, sender),
+          sidePanelMessage.payload?.source ?? "sidepanel",
+          {
           openPanel: false
-        })
+          }
+        )
         .then((payload) => sendResponse(payload))
         .catch((error: unknown) => {
           const message = error instanceof Error ? error.message : "semantic snapshot request failed"
@@ -234,7 +308,7 @@ chrome.runtime.onMessage.addListener((msg: SidePanelToServiceWorkerMessage, send
 
     case "GET_LATEST_SEMANTIC_SNAPSHOT": {
       void semanticSnapshotCoordinator
-        .getLatest(resolveSemanticTabId(msg.payload?.tabId, sender))
+        .getLatest(resolveSemanticTabId(sidePanelMessage.payload?.tabId, sender))
         .then((payload) => sendResponse(payload))
         .catch((error: unknown) => {
           const message = error instanceof Error ? error.message : "semantic snapshot lookup failed"
@@ -245,7 +319,7 @@ chrome.runtime.onMessage.addListener((msg: SidePanelToServiceWorkerMessage, send
 
     case "GET_SEMANTIC_SNAPSHOT_HISTORY": {
       void semanticSnapshotCoordinator
-        .getHistory(resolveSemanticTabId(msg.payload?.tabId, sender))
+        .getHistory(resolveSemanticTabId(sidePanelMessage.payload?.tabId, sender))
         .then((payload) => sendResponse(payload))
         .catch(() => {
           sendResponse({ tabId: null, snapshots: [] })
@@ -255,7 +329,7 @@ chrome.runtime.onMessage.addListener((msg: SidePanelToServiceWorkerMessage, send
 
     case "TOGGLE_SEMANTIC_SELECTION": {
       void semanticSnapshotCoordinator
-        .toggleSelectionMode(resolveSemanticTabId(msg.payload?.tabId, sender))
+        .toggleSelectionMode(resolveSemanticTabId(sidePanelMessage.payload?.tabId, sender))
         .then((payload) => sendResponse(payload))
         .catch(() => {
           sendResponse({ tabId: null, enabled: false, selectedTarget: null })
@@ -265,7 +339,7 @@ chrome.runtime.onMessage.addListener((msg: SidePanelToServiceWorkerMessage, send
 
     case "GET_SEMANTIC_SELECTION_STATE": {
       void semanticSnapshotCoordinator
-        .getSelectionState(resolveSemanticTabId(msg.payload?.tabId, sender))
+        .getSelectionState(resolveSemanticTabId(sidePanelMessage.payload?.tabId, sender))
         .then((payload) => sendResponse(payload))
         .catch(() => {
           sendResponse({ tabId: null, enabled: false, selectedTarget: null })
@@ -275,7 +349,7 @@ chrome.runtime.onMessage.addListener((msg: SidePanelToServiceWorkerMessage, send
 
     case "GET_SEMANTIC_REGION_DUMP": {
       void semanticSnapshotCoordinator
-        .getRegionDump(resolveSemanticTabId(msg.payload?.tabId, sender))
+        .getRegionDump(resolveSemanticTabId(sidePanelMessage.payload?.tabId, sender))
         .then((payload) => sendResponse(payload))
         .catch((error: unknown) => {
           const message = error instanceof Error ? error.message : "semantic region dump lookup failed"
@@ -286,7 +360,7 @@ chrome.runtime.onMessage.addListener((msg: SidePanelToServiceWorkerMessage, send
 
     case "CLEAR_SEMANTIC_SELECTION": {
       void semanticSnapshotCoordinator
-        .clearSelection(resolveSemanticTabId(msg.payload?.tabId, sender))
+        .clearSelection(resolveSemanticTabId(sidePanelMessage.payload?.tabId, sender))
         .then((payload) => sendResponse(payload))
         .catch(() => {
           sendResponse({ tabId: null, enabled: false, selectedTarget: null })
@@ -297,13 +371,14 @@ chrome.runtime.onMessage.addListener((msg: SidePanelToServiceWorkerMessage, send
     case "SYNC_SEMANTIC_SELECTION_STATE": {
       const tabId = sender.tab?.id ?? null
       const payload = semanticSnapshotCoordinator.syncSelectionState(tabId, {
-          enabled: msg.payload.enabled,
-          selectedTarget: msg.payload.selectedTarget
+          enabled: sidePanelMessage.payload.enabled,
+          selectedTarget: sidePanelMessage.payload.selectedTarget
         },
-        typeof msg.payload.snapshot !== "undefined" || typeof msg.payload.error !== "undefined"
+        typeof sidePanelMessage.payload.snapshot !== "undefined" ||
+          typeof sidePanelMessage.payload.error !== "undefined"
           ? {
-              snapshot: msg.payload.snapshot ?? null,
-              error: msg.payload.error ?? null
+              snapshot: sidePanelMessage.payload.snapshot ?? null,
+              error: sidePanelMessage.payload.error ?? null
             }
           : undefined
         )

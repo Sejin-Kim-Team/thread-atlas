@@ -1,6 +1,5 @@
 import {
   buildContextPack,
-  createUserSpeechIntent,
   type ExtensionAuthProvider,
   type ExtensionAuthState,
   type ExtensionAuthStatus,
@@ -19,10 +18,9 @@ import {
 import type {
   AnyRuntimeMessage,
   ContextEnrichResultPayload,
-  LiveServerEnvelope,
-  LiveToolResultPayload,
-  RuntimeErrorPayload,
-  ServerEnvelope,
+  RuntimeV2ErrorPayload,
+  RuntimeV2ServerEnvelope,
+  RuntimeV2ToolResultPayload,
   SemanticSelectionTarget
 } from "@threadatlas/shared/runtime"
 import type { RegionDump } from "../content/semantic/core/observability"
@@ -31,11 +29,9 @@ import { routeProjection } from "./projection-router"
 import { ContentGraphManager } from "./content-graph"
 import { createAuthClient } from "./auth-client"
 import { createChromeLocalStorage, loadExtensionConfig } from "../common/extension-config"
-import { LiveAudioInputCapture } from "./live-audio-input"
-import { LiveAudioOutputPlayer } from "./live-audio-output"
-import { SessionWsTransport } from "./session-ws-transport"
+import { ConversationController } from "./conversation-controller"
 import type { SpeechInputState, TurnOrigin } from "./speech-types"
-import { VoiceSessionTransport } from "./voice-session-transport"
+import { mergeStreamingTranscript } from "./transcript-merge"
 import {
   bindAuthActions,
   bindConversationActions,
@@ -85,10 +81,7 @@ type TranscriptMessage = ConversationMessage
 interface SidePanelState {
   phase: Phase
   apiBaseUrl: string
-  sessionTransport: SessionWsTransport | null
-  voiceTransport: VoiceSessionTransport | null
-  liveAudioInput: LiveAudioInputCapture | null
-  liveAudioOutput: LiveAudioOutputPlayer | null
+  conversationController: ConversationController | null
   contentGraph: ContentGraphManager
   activeTabId: number | null
   latestSemanticSnapshot: SemanticSnapshotState | null
@@ -101,8 +94,8 @@ interface SidePanelState {
   sessionId: string | null
   clientSessionId: string | null
   activeTurnId: string | null
-  pendingEnrichRequest: Extract<ServerEnvelope, { type: "context.enrich.request" }> | null
-  lastRuntimeError: RuntimeErrorPayload | null
+  pendingEnrichRequest: Extract<RuntimeV2ServerEnvelope, { type: "tool.request" }> | null
+  lastRuntimeError: RuntimeV2ErrorPayload | null
   runtimeSnapshot: SemanticSnapshot | null
   semanticContextProfile: ContextTaskProfile
   semanticContextFormat: ContextProjectionFormat
@@ -110,8 +103,6 @@ interface SidePanelState {
   composerText: string
   speechInputState: SpeechInputState
   speechInputDetail: string | null
-  speechDraftBase: string
-  speechDraftInterim: string
   ttsEnabled: boolean
   authStatus: ExtensionAuthStatus
   authProvider: ExtensionAuthProvider | null
@@ -122,6 +113,8 @@ interface SidePanelState {
   pendingTurnOrigin: TurnOrigin | null
   voiceAssistantMessageId: string | null
   voiceUserMessageId: string | null
+  voiceAssistantTranscriptBuffer: string
+  voiceUserTranscriptBuffer: string
 }
 
 const TTS_ENABLED_STORAGE_KEY = "THREADATLAS_TTS_ENABLED"
@@ -135,10 +128,7 @@ function readPersistedTtsEnabled(): boolean {
 const state: SidePanelState = {
   phase: "initializing",
   apiBaseUrl: "",
-  sessionTransport: null,
-  voiceTransport: null,
-  liveAudioInput: null,
-  liveAudioOutput: null,
+  conversationController: null,
   contentGraph: new ContentGraphManager(),
   activeTabId: null,
   latestSemanticSnapshot: null,
@@ -160,8 +150,6 @@ const state: SidePanelState = {
   composerText: "",
   speechInputState: "unsupported",
   speechInputDetail: null,
-  speechDraftBase: "",
-  speechDraftInterim: "",
   ttsEnabled: readPersistedTtsEnabled(),
   authStatus: "signed-out",
   authProvider: null,
@@ -171,11 +159,20 @@ const state: SidePanelState = {
   currentTurnOrigin: null,
   pendingTurnOrigin: null,
   voiceAssistantMessageId: null,
-  voiceUserMessageId: null
+  voiceUserMessageId: null,
+  voiceAssistantTranscriptBuffer: "",
+  voiceUserTranscriptBuffer: ""
+}
+
+function resetVoiceTranscriptState(): void {
+  state.voiceAssistantMessageId = null
+  state.voiceUserMessageId = null
+  state.voiceAssistantTranscriptBuffer = ""
+  state.voiceUserTranscriptBuffer = ""
 }
 
 type RegionDumpEntry = RegionDump["regions"][number]
-type RuntimeEnrichRequestEvent = Extract<ServerEnvelope, { type: "context.enrich.request" }>
+type RuntimeToolRequestEvent = Extract<RuntimeV2ServerEnvelope, { type: "tool.request" }>
 const INTERACTIVE_CONTEXT_RESTRICTION = "Interactive semantic snapshots currently support only the branch-summary profile."
 
 function setPhase(phase: Phase): void {
@@ -208,9 +205,9 @@ function applyAuthState(next: ExtensionAuthState): void {
     next.status !== "refreshing"
 
   if (shouldResetRuntime) {
-    void state.sessionTransport?.close()
-    state.sessionTransport = null
-    void interruptVoiceSession("auth-state-reset")
+    void state.conversationController?.close()
+    resetVoiceTranscriptState()
+    resetSpeechInputState()
     state.sessionId = null
     state.clientSessionId = null
     state.activeTurnId = null
@@ -246,21 +243,12 @@ function shouldShowSpeechError(): boolean {
 }
 
 function resetSpeechInputState(): void {
-  state.speechInputState = state.liveAudioInput?.supported ? "idle" : "unsupported"
+  state.speechInputState = state.conversationController?.inputSupported ? "idle" : "unsupported"
   state.speechInputDetail = null
 }
 
 function setComposerDraft(value: string): void {
-  state.speechDraftBase = value
-  state.speechDraftInterim = ""
   state.composerText = value
-}
-
-function setSpeechDraft(args: { baseDraft: string; interimDraft: string; composedDraft: string }): void {
-  state.speechDraftBase = args.baseDraft
-  state.speechDraftInterim = args.interimDraft
-  state.composerText = args.composedDraft
-  renderConversationState()
 }
 
 function clearTurnOrigin(): void {
@@ -269,38 +257,18 @@ function clearTurnOrigin(): void {
 }
 
 function stopLiveAudioOutput(): void {
-  state.liveAudioOutput?.stop()
-}
-
-async function stopVoiceInputCapture(flush = false): Promise<void> {
-  if (!state.liveAudioInput) {
-    return
-  }
-  try {
-    await state.liveAudioInput.stop(flush)
-  } catch {
-    // Local cleanup should continue even if audio teardown races.
-  }
+  state.conversationController?.audioOutput.stop()
 }
 
 async function interruptVoiceSession(reason = "interrupted"): Promise<void> {
-  try {
-    state.voiceTransport?.interrupt(reason)
-  } catch {
-    // Ignore interrupt races; close still resets the local transport.
-  }
-  state.voiceTransport?.close()
-  state.voiceTransport = null
-  await stopVoiceInputCapture(false)
+  await state.conversationController?.interrupt(reason)
   stopLiveAudioOutput()
-  state.voiceAssistantMessageId = null
-  state.voiceUserMessageId = null
+  resetVoiceTranscriptState()
   resetSpeechInputState()
 }
 
 function upsertVoiceUserTranscript(text: string, final: boolean): void {
-  const normalized = text.trim()
-  if (!normalized && !final) {
+  if (!text && !final) {
     return
   }
 
@@ -308,25 +276,28 @@ function upsertVoiceUserTranscript(text: string, final: boolean): void {
     state.voiceUserMessageId ??
     `voice-user-${globalThis.crypto?.randomUUID?.() ?? Date.now().toString(16)}`
   state.voiceUserMessageId = messageId
-  if (!normalized && final) {
+  const merged = mergeStreamingTranscript(state.voiceUserTranscriptBuffer, text)
+  state.voiceUserTranscriptBuffer = merged
+  if (merged.trim().length === 0 && final) {
     removeConversationMessage(messageId)
+    state.voiceUserTranscriptBuffer = ""
     state.voiceUserMessageId = null
     return
   }
   upsertConversationMessage({
     id: messageId,
     role: "user",
-    text: normalized,
+    text: merged,
     pending: !final
   })
   if (final) {
+    state.voiceUserTranscriptBuffer = ""
     state.voiceUserMessageId = null
   }
 }
 
 function upsertVoiceAssistantTranscript(text: string, final: boolean): void {
-  const normalized = text.trim()
-  if (!normalized && !final) {
+  if (!text && !final) {
     return
   }
 
@@ -334,18 +305,22 @@ function upsertVoiceAssistantTranscript(text: string, final: boolean): void {
     state.voiceAssistantMessageId ??
     `voice-assistant-${globalThis.crypto?.randomUUID?.() ?? Date.now().toString(16)}`
   state.voiceAssistantMessageId = messageId
-  if (!normalized && final) {
+  const merged = mergeStreamingTranscript(state.voiceAssistantTranscriptBuffer, text)
+  state.voiceAssistantTranscriptBuffer = merged
+  if (merged.trim().length === 0 && final) {
     removeConversationMessage(messageId)
+    state.voiceAssistantTranscriptBuffer = ""
     state.voiceAssistantMessageId = null
     return
   }
   upsertConversationMessage({
     id: messageId,
     role: "assistant",
-    text: normalized,
+    text: merged,
     pending: !final
   })
   if (final) {
+    state.voiceAssistantTranscriptBuffer = ""
     state.voiceAssistantMessageId = null
   }
 }
@@ -375,8 +350,8 @@ function getConversationStatus(): {
   voiceOutputLabel: string
   voiceOutputDisabled: boolean
 } {
-  const inputSupported = state.liveAudioInput?.supported ?? false
-  const outputSupported = state.liveAudioOutput?.supported ?? false
+  const inputSupported = state.conversationController?.inputSupported ?? false
+  const outputSupported = state.conversationController?.outputSupported ?? false
 
   if (state.activeTabId === null) {
     return {
@@ -534,7 +509,7 @@ function getConversationStatus(): {
   if (isSpeechProcessing()) {
     return {
       status: "Processing the captured voice input...",
-      placeholder: "Converting your voice input to text...",
+      placeholder: "Waiting for the current voice turn to finish...",
       composerDisabled: false,
       composerReadOnly: true,
       micDisabled: true,
@@ -692,8 +667,7 @@ function resetConversationSurface(): void {
   setComposerDraft("")
   resetSpeechInputState()
   clearTurnOrigin()
-  state.voiceAssistantMessageId = null
-  state.voiceUserMessageId = null
+  resetVoiceTranscriptState()
   clearSuggestChips()
   clearPresent()
   renderConversationState()
@@ -725,21 +699,42 @@ async function sendRuntimeMessage<TResponse>(message: AnyRuntimeMessage): Promis
 }
 
 async function sendToContentScript<TResponse>(tabId: number, message: unknown): Promise<TResponse> {
-  return new Promise((resolve, reject) => {
-    if (typeof chrome === "undefined" || !chrome.tabs?.sendMessage) {
-      reject(new Error("chrome.tabs.sendMessage unavailable"))
-      return
-    }
-
-    chrome.tabs.sendMessage(tabId, message, (response: TResponse) => {
-      const runtimeError = chrome.runtime.lastError
-      if (runtimeError) {
-        reject(new Error(runtimeError.message))
+  const trySend = () =>
+    new Promise<TResponse>((resolve, reject) => {
+      if (typeof chrome === "undefined" || !chrome.tabs?.sendMessage) {
+        reject(new Error("chrome.tabs.sendMessage unavailable"))
         return
       }
-      resolve(response)
+
+      chrome.tabs.sendMessage(tabId, message, (response: TResponse) => {
+        const runtimeError = chrome.runtime.lastError
+        if (runtimeError) {
+          reject(new Error(runtimeError.message))
+          return
+        }
+        resolve(response)
+      })
     })
-  })
+
+  try {
+    return await trySend()
+  } catch (error) {
+    const messageText = error instanceof Error ? error.message : ""
+    if (
+      !messageText.includes("Receiving end does not exist") ||
+      typeof chrome === "undefined" ||
+      !chrome.scripting?.executeScript
+    ) {
+      throw error
+    }
+
+    await chrome.scripting.executeScript({
+      target: { tabId },
+      files: ["content-semantic.js"]
+    })
+
+    return trySend()
+  }
 }
 
 async function requestViewportCapture(): Promise<string | null> {
@@ -1168,22 +1163,25 @@ function selectSemanticContextFormat(format: ContextProjectionFormat): void {
   renderSemanticSnapshotState()
 }
 
-async function handleLiveToolCall(
-  event: Extract<LiveServerEnvelope, { type: "live.tool.call" }>
-): Promise<LiveToolResultPayload | null> {
-  if (event.payload.name === "request_context_enrich") {
-    const enrichEvent: RuntimeEnrichRequestEvent = {
-      type: "context.enrich.request",
-      timestamp: event.timestamp,
-      sessionId: event.liveSessionId,
-      turnId: event.toolCallId,
-      payload: event.payload.args as unknown as RuntimeEnrichRequestEvent["payload"]
-    }
-
+async function handleRuntimeToolRequest(
+  event: RuntimeToolRequestEvent
+): Promise<RuntimeV2ToolResultPayload | null> {
+  if (event.payload.kind === "context.enrich") {
     try {
-      const payload = await buildContextEnrichResult(enrichEvent)
+      const args = event.payload.args as {
+        requestKind?: ContextEnrichResultPayload["requestKind"]
+        targetRef?: ContextEnrichResultPayload["targetRef"]
+      }
+      if (!args.requestKind || !args.targetRef) {
+        throw new Error("runtime enrich request is missing requestKind or targetRef")
+      }
+      const payload = await buildContextEnrichResult({
+        requestKind: args.requestKind,
+        targetRef: args.targetRef
+      })
       return {
-        name: event.payload.name,
+        toolRequestId: event.payload.toolRequestId,
+        kind: event.payload.kind,
         ok: true,
         result: {
           payload
@@ -1191,39 +1189,42 @@ async function handleLiveToolCall(
       }
     } catch (error) {
       return {
-        name: event.payload.name,
+        toolRequestId: event.payload.toolRequestId,
+        kind: event.payload.kind,
         ok: false,
         error: error instanceof Error ? error.message : "enrich handling failed"
       }
     }
   }
 
-  if (event.payload.name === "focus_node") {
+  if (
+    event.payload.kind === "focus.node" ||
+    event.payload.kind === "present.content" ||
+    event.payload.kind === "copy.text" ||
+    event.payload.kind === "navigate.url"
+  ) {
     const projection = event.payload.args.projection as Projection | undefined
     if (projection) {
       await applyProjectionSideEffects(projection)
     }
-    return null
-  }
-
-  if (event.payload.name === "present_content") {
-    const projection = event.payload.args.projection as Projection | undefined
-    if (projection) {
-      await applyProjectionSideEffects(projection)
+    return {
+      toolRequestId: event.payload.toolRequestId,
+      kind: event.payload.kind,
+      ok: true
     }
-    return null
   }
 
   return {
-    name: event.payload.name,
+    toolRequestId: event.payload.toolRequestId,
+    kind: event.payload.kind,
     ok: false,
-    error: "unsupported live frontend tool"
+    error: "unsupported runtime frontend tool"
   }
 }
 
 async function startVoiceCapture(): Promise<void> {
-  const input = state.liveAudioInput
-  if (!input?.supported) {
+  const controller = state.conversationController
+  if (!controller?.inputSupported) {
     showNotify("Voice input is unavailable in this browser.", "info")
     return
   }
@@ -1258,7 +1259,7 @@ async function startVoiceCapture(): Promise<void> {
   setComposerDraft("")
   state.pendingTurnOrigin = "voice"
   state.currentTurnOrigin = null
-  await state.sessionTransport?.interrupt("superseded-by-voice-turn")
+  await state.conversationController?.transport.interrupt("superseded-by-voice-turn")
   await interruptVoiceSession("restart-voice-turn")
 
   const snapshot = getConversationSnapshot()
@@ -1266,68 +1267,15 @@ async function startVoiceCapture(): Promise<void> {
     return
   }
 
-  const transport = new VoiceSessionTransport({
-    apiBaseUrl: state.apiBaseUrl,
-    authClient,
-    handlers: {
-      onReady() {
-        state.lastRuntimeError = null
-      },
-      onInputTranscript(text, final) {
-        state.currentTurnOrigin = "voice"
-        upsertVoiceUserTranscript(text, final)
-      },
-      onOutputTranscript(text, final) {
-        state.currentTurnOrigin = "voice"
-        upsertVoiceAssistantTranscript(text, final)
-      },
-      onAudioChunk(chunkBase64) {
-        if (!state.ttsEnabled) {
-          return
-        }
-        void state.liveAudioOutput?.playChunk(chunkBase64)
-      },
-      async onToolCall(event) {
-        return await handleLiveToolCall(event)
-      },
-      onTurnDone() {
-        state.lastRuntimeError = null
-        state.currentTurnOrigin = null
-        state.pendingTurnOrigin = null
-        state.voiceTransport?.close()
-        state.voiceTransport = null
-        resetSpeechInputState()
-        stopLiveAudioOutput()
-        renderConversationState()
-      },
-      onError(error) {
-        state.lastRuntimeError = {
-          code: error.code === "MODEL_CONFIG_MISSING" ? "MODEL_CONFIG_MISSING" : "GENERATION_FAILED",
-          message: error.message
-        }
-        state.speechInputState = "error"
-        state.speechInputDetail = error.message
-        stopLiveAudioOutput()
-        showNotify(error.message, "error")
-        renderConversationState()
-      }
-    }
-  })
-  state.voiceTransport = transport
-
   try {
-    await transport.open({
+    state.runtimeSnapshot = snapshot
+    await controller.startVoiceTurn({
       activeTabId: state.activeTabId,
       snapshot,
       language: window.navigator.language
     })
-    await input.start()
-    state.speechInputState = "listening"
-    state.speechInputDetail = null
     renderConversationState()
   } catch (error) {
-    state.voiceTransport?.close()
-    state.voiceTransport = null
     state.speechInputState = "error"
     state.speechInputDetail =
       error instanceof Error ? error.message : "Voice capture could not be started."
@@ -1341,11 +1289,8 @@ async function finishVoiceCapture(): Promise<void> {
     return
   }
 
-  state.speechInputState = "processing"
-  state.speechInputDetail = null
+  await state.conversationController?.finishVoiceTurn()
   renderConversationState()
-  await stopVoiceInputCapture(true)
-  state.voiceTransport?.commitAudio()
 }
 
 async function cancelVoiceCapture(): Promise<void> {
@@ -1357,16 +1302,14 @@ async function cancelVoiceCapture(): Promise<void> {
 }
 
 function toggleVoiceOutput(): void {
-  if (!state.liveAudioOutput?.supported) {
+  if (!state.conversationController?.outputSupported) {
     showNotify("Voice output is unavailable in this browser.", "info")
     return
   }
 
   state.ttsEnabled = !state.ttsEnabled
   persistTtsEnabled()
-  if (!state.ttsEnabled) {
-    stopLiveAudioOutput()
-  }
+  state.conversationController.setVoiceOutputEnabled(state.ttsEnabled)
   renderConversationState()
 }
 
@@ -1573,11 +1516,16 @@ function getExpectedNodeId(targetRef: Record<string, unknown>): string | null {
   return asNonEmptyString(targetRef.nodeId) ?? asNonEmptyString(targetRef.entityId)
 }
 
-async function buildContextEnrichResult(event: RuntimeEnrichRequestEvent): Promise<ContextEnrichResultPayload> {
+async function buildContextEnrichResult(
+  request: {
+    requestKind: ContextEnrichResultPayload["requestKind"]
+    targetRef: ContextEnrichResultPayload["targetRef"]
+  }
+): Promise<ContextEnrichResultPayload> {
   const capturedAt = new Date().toISOString()
   const baseResult = {
-    requestKind: event.payload.requestKind,
-    targetRef: event.payload.targetRef,
+    requestKind: request.requestKind,
+    targetRef: request.targetRef,
     capturedAt
   } satisfies Pick<ContextEnrichResultPayload, "requestKind" | "targetRef" | "capturedAt">
 
@@ -1590,7 +1538,7 @@ async function buildContextEnrichResult(event: RuntimeEnrichRequestEvent): Promi
     }
   }
 
-  const expectedNodeId = getExpectedNodeId(event.payload.targetRef)
+  const expectedNodeId = getExpectedNodeId(request.targetRef)
   if (expectedNodeId && snapshot.focus.nodeId !== expectedNodeId) {
     return {
       ...baseResult,
@@ -1605,7 +1553,7 @@ async function buildContextEnrichResult(event: RuntimeEnrichRequestEvent): Promi
     state.selectedTarget?.regionId === snapshot.focus.region ? state.selectedTarget.text.trim() : ""
   const text = selectedTargetText || nodeText
   const detail: Record<string, unknown> = {
-    captureScope: event.payload.requestKind,
+    captureScope: request.requestKind,
     pageUrl: snapshot.page.url,
     pageTitle: snapshot.page.title ?? null,
     nodeId: snapshot.focus.nodeId,
@@ -1621,7 +1569,7 @@ async function buildContextEnrichResult(event: RuntimeEnrichRequestEvent): Promi
     detail.attributes = attributes
   }
 
-  if (event.payload.requestKind === "node-detail") {
+  if (request.requestKind === "node-detail") {
     return {
       ...baseResult,
       status: "ok",
@@ -1646,124 +1594,101 @@ async function buildContextEnrichResult(event: RuntimeEnrichRequestEvent): Promi
   }
 }
 
-function createSessionTransport(): SessionWsTransport {
-  return new SessionWsTransport({
+function createConversationController(): ConversationController {
+  return new ConversationController({
     apiBaseUrl: state.apiBaseUrl,
     authClient,
+    getActiveTabId: () => state.activeTabId,
+    sendToContentScript,
+    addRuntimeListener(listener) {
+      chrome.runtime.onMessage.addListener(
+        listener as Parameters<typeof chrome.runtime.onMessage.addListener>[0]
+      )
+    },
+    removeRuntimeListener(listener) {
+      chrome.runtime.onMessage.removeListener(
+        listener as Parameters<typeof chrome.runtime.onMessage.removeListener>[0]
+      )
+    },
+    ttsEnabled: state.ttsEnabled,
     handlers: {
       onPhaseChange(phase) {
         setPhase(phase)
+      },
+      onSpeechStateChange(speechState, detail) {
+        state.speechInputState = speechState
+        state.speechInputDetail = detail ?? null
+        renderConversationState()
       },
       onSessionReady(event) {
         state.sessionId = event.payload.sessionId
         state.clientSessionId = event.payload.clientSessionId
         state.lastRuntimeError = null
       },
-      onProgress(event) {
-        if (!state.runtimeSnapshot) {
-          return
-        }
+      onTurnStarted(event) {
         state.activeTurnId = event.turnId
         state.lastRuntimeError = null
-        if (state.pendingTurnOrigin) {
-          state.currentTurnOrigin = state.pendingTurnOrigin
-          state.pendingTurnOrigin = null
+        state.currentTurnOrigin = event.payload.modality
+        state.pendingTurnOrigin = null
+        renderConversationState()
+      },
+      onInputTranscript(text, final, event) {
+        if (state.currentTurnOrigin === "voice") {
+          upsertVoiceUserTranscript(text, final)
+          return
         }
+
+        upsertConversationMessage({
+          id: `turn-user-${event.turnId}`,
+          role: "user",
+          text,
+          pending: !final
+        })
+      },
+      onOutputTranscript(text, final) {
+        if (state.currentTurnOrigin !== "voice") {
+          return
+        }
+        upsertVoiceAssistantTranscript(text, final)
       },
       onProjection(projection) {
-        if (!state.runtimeSnapshot) {
+        if (state.currentTurnOrigin === "voice" && projection.type === "respond") {
           return
         }
         void executeProjection(projection)
       },
-      onTurnDone() {
-        if (!state.runtimeSnapshot) {
-          return
+      async onToolRequest(event) {
+        state.pendingEnrichRequest = event
+        renderConversationState()
+        try {
+          return await handleRuntimeToolRequest(event)
+        } finally {
+          state.pendingEnrichRequest = null
+          renderConversationState()
         }
+      },
+      onTurnDone() {
         state.activeTurnId = null
         state.pendingEnrichRequest = null
         state.lastRuntimeError = null
         state.runtimeSnapshot = null
+        resetVoiceTranscriptState()
         clearTurnOrigin()
+        renderConversationState()
       },
       onError(error) {
-        if (!state.runtimeSnapshot) {
-          return
-        }
         state.activeTurnId = null
         state.pendingEnrichRequest = null
         state.lastRuntimeError = error
         state.runtimeSnapshot = null
+        resetVoiceTranscriptState()
         clearTurnOrigin()
         stopLiveAudioOutput()
         showNotify(error.message, "error")
-      },
-      async onEnrichRequest(event) {
-        if (!state.runtimeSnapshot) {
-          return {
-            requestKind: event.payload.requestKind,
-            targetRef: event.payload.targetRef,
-            status: "unsupported",
-            capturedAt: new Date().toISOString(),
-            failureReason: "runtime snapshot is no longer active"
-          }
-        }
-        state.pendingEnrichRequest = event
-        try {
-          return await buildContextEnrichResult(event)
-        } finally {
-          state.pendingEnrichRequest = null
-        }
+        renderConversationState()
       }
     }
   })
-}
-
-async function handleUserIntent(intent: Intent): Promise<void> {
-  if (!isConversationAuthReady()) {
-    showNotify("Sign in with Google before asking about the current page.", "info")
-    return
-  }
-
-  if (state.activeTabId === null) {
-    showNotify("No active tab context.", "error")
-    return
-  }
-
-  const snapshot = getSelectedSemanticSnapshot()
-  if (!snapshot) {
-    showNotify("No semantic snapshot selected for the current tab.", "error")
-    return
-  }
-
-  state.sessionTransport ??= createSessionTransport()
-  state.runtimeSnapshot = snapshot
-  state.activeTurnId = null
-  state.pendingEnrichRequest = null
-  state.lastRuntimeError = null
-  clearSuggestChips()
-  clearPresent()
-  await interruptVoiceSession("superseded-by-text-turn")
-
-  try {
-    await state.sessionTransport.sendIntent({
-      intent,
-      activeTabId: state.activeTabId,
-      snapshot
-    })
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "failed to send intent to the session runtime"
-    state.activeTurnId = null
-    state.pendingEnrichRequest = null
-    state.runtimeSnapshot = null
-    clearTurnOrigin()
-    state.lastRuntimeError = {
-      code: "GENERATION_FAILED",
-      message
-    }
-    setPhase("error")
-    showNotify(message, "error")
-  }
 }
 
 async function submitTextPrompt(prompt: string, origin: TurnOrigin = "text"): Promise<void> {
@@ -1799,12 +1724,33 @@ async function submitTextPrompt(prompt: string, origin: TurnOrigin = "text"): Pr
   state.currentTurnOrigin = null
   clearSuggestChips()
   clearPresent()
-  appendConversationMessage({
-    role: "user",
-    text: normalized
-  })
+  state.runtimeSnapshot = getSelectedSemanticSnapshot()
+  if (!state.runtimeSnapshot) {
+    return
+  }
 
-  await handleUserIntent(createUserSpeechIntent(normalized))
+  try {
+    await state.conversationController?.sendTextTurn({
+      activeTabId: state.activeTabId,
+      snapshot: state.runtimeSnapshot,
+      text: normalized,
+      language: window.navigator.language
+    })
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : "failed to send prompt to the unified runtime"
+    state.activeTurnId = null
+    state.pendingEnrichRequest = null
+    state.runtimeSnapshot = null
+    clearTurnOrigin()
+    state.lastRuntimeError = {
+      code: "GENERATION_FAILED",
+      message
+    }
+    setPhase("error")
+    showNotify(message, "error")
+    renderConversationState()
+  }
 }
 
 function registerRuntimeListeners(): void {
@@ -1812,9 +1758,6 @@ function registerRuntimeListeners(): void {
     chrome.runtime.onMessage.addListener((message: AnyRuntimeMessage) => {
       if (message.type === "ACTIVE_TAB_CHANGED") {
         const tabChanged = state.activeTabId !== message.payload.tabId
-        if (tabChanged && hasActiveRuntimeTurn()) {
-          void state.sessionTransport?.interrupt("active-tab-changed")
-        }
         if (tabChanged) {
           void interruptVoiceSession("active-tab-changed")
         }
@@ -1919,12 +1862,8 @@ async function initialize(): Promise<void> {
   setPhase("initializing")
   const config = await loadExtensionConfig(createChromeLocalStorage())
   state.apiBaseUrl = config.apiBaseUrl
-  state.liveAudioOutput = new LiveAudioOutputPlayer()
-  state.liveAudioInput = new LiveAudioInputCapture({
-    onChunkBase64: (chunkBase64) => {
-      state.voiceTransport?.appendAudioChunk(chunkBase64)
-    }
-  })
+  state.conversationController = createConversationController()
+  state.conversationController.setVoiceOutputEnabled(state.ttsEnabled)
   resetSpeechInputState()
   bindAuthActions({
     onSignIn: () => {
@@ -1993,9 +1932,7 @@ async function initialize(): Promise<void> {
   registerRuntimeListeners()
   await Promise.all([hydrateActiveTabState(), hydrateAuthState()])
   window.addEventListener("beforeunload", () => {
-    void state.sessionTransport?.close()
-    void interruptVoiceSession("beforeunload")
-    void state.liveAudioOutput?.dispose()
+    void state.conversationController?.close()
   })
 }
 

@@ -8,22 +8,20 @@ import evaluateRouter from "./routes/evaluate"
 import ingestMemoryRouter from "./routes/ingest-memory"
 import tokenRouter from "./routes/token"
 import { createLogger } from "./runtime/logger"
-import { createWsSessionEventsRouter } from "./routes/ws-session-events"
-import { RuntimeManager } from "./session/runtime/manager"
-import { attachLiveWebSocketServer } from "./ws/live-ws-server"
-import { attachSessionWebSocketServer } from "./ws/session-ws-server"
+import { SemanticRuntimeManager } from "./session/semantic-runtime-manager"
+import { attachRuntimeWebSocketServer } from "./ws/runtime-ws-server"
 
 type RuntimeBoundExpress = Express & {
   locals: Express["locals"] & {
-    runtimeManager?: RuntimeManager
+    semanticRuntimeManager?: SemanticRuntimeManager
   }
 }
 
 export function createServer(): Express {
   const app = express()
-  const runtime = new RuntimeManager()
+  const runtime = new SemanticRuntimeManager()
   const logger = createLogger("server")
-  ;(app as RuntimeBoundExpress).locals.runtimeManager = runtime
+  ;(app as RuntimeBoundExpress).locals.semanticRuntimeManager = runtime
   app.use(express.json({ limit: DEFAULT_JSON_BODY_LIMIT }))
 
   app.get("/health", (_req, res) => {
@@ -46,7 +44,6 @@ export function createServer(): Express {
   // FE 마이그레이션 완료 전까지 기존 extension 호출 경로를 유지한다.
   app.use("/api/evaluate", evaluateRouter)
   app.use("/api/ingest/memory", ingestMemoryRouter)
-  app.use("/ws/session/events", createWsSessionEventsRouter(runtime))
 
   return app
 }
@@ -84,14 +81,13 @@ export async function getReadinessStatus(): Promise<{
 }
 
 export function createHttpServer(app: Express = createServer()): HttpServer {
-  const runtime = (app as RuntimeBoundExpress).locals.runtimeManager
+  const runtime = (app as RuntimeBoundExpress).locals.semanticRuntimeManager
   if (!runtime) {
-    throw new Error("runtimeManager is required to attach canonical websocket server")
+    throw new Error("semanticRuntimeManager is required to attach canonical websocket server")
   }
 
   // HTTP 앱과 WS transport를 분리해 supertest 경로가 실제 listen에 의존하지 않도록 한다.
   const server = createHttpNodeServer(app)
-  attachSessionWebSocketServer(server, runtime)
-  attachLiveWebSocketServer(server, runtime)
+  attachRuntimeWebSocketServer(server, runtime)
   return server
 }

@@ -24,7 +24,7 @@
   ],
   "web_accessible_resources": [
     {
-      "resources": ["styles/highlight.css", "page-speech-bridge.js"],
+      "resources": ["styles/highlight.css", "page-audio-bridge.js", "audio-input-worklet.js"],
       "matches": ["<all_urls>"]
     }
   ],

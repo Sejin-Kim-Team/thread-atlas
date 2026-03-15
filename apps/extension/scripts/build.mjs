@@ -16,7 +16,7 @@ const entries = [
   { entryPoints: ["src/content/content-semantic.ts"], outfile: "dist/content-semantic.js" },
   { entryPoints: ["src/content/content-hn.ts"], outfile: "dist/content-hn.js" },
   { entryPoints: ["src/content/content-article.ts"], outfile: "dist/content-article.js" },
-  { entryPoints: ["src/content/page-speech-bridge.ts"], outfile: "dist/page-speech-bridge.js" }
+  { entryPoints: ["src/content/page-audio-bridge.ts"], outfile: "dist/page-audio-bridge.js" }
 ]
 
 function copyStatic() {

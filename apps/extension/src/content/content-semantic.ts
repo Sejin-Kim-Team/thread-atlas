@@ -1,8 +1,8 @@
 import type {
+  AudioCaptureControlResponse,
   SemanticSelectionStateResponse,
   SemanticSnapshotCaptureResponse,
   SidePanelToContentMessage,
-  SpeechInputControlResponse,
   ServiceWorkerToContentMessage
 } from "@threadatlas/shared/runtime"
 import { TriggerManager } from "./capture/TriggerManager"
@@ -16,20 +16,19 @@ interface SemanticRegionDumpResponse {
   dump: RegionDump | null
 }
 
-type PageSpeechState = "idle" | "listening" | "processing" | "unsupported" | "error"
+type PageAudioCaptureState = "idle" | "listening" | "processing" | "unsupported" | "error"
 
-interface PageSpeechBridgeInboundMessage {
-  source: "threadatlas-page-speech"
+interface PageAudioBridgeInboundMessage {
+  source: "threadatlas-page-audio"
   type:
-    | "THREADATLAS_PAGE_SPEECH_READY"
-    | "THREADATLAS_PAGE_SPEECH_STATE"
-    | "THREADATLAS_PAGE_SPEECH_PARTIAL"
-    | "THREADATLAS_PAGE_SPEECH_FINAL"
+    | "THREADATLAS_PAGE_AUDIO_READY"
+    | "THREADATLAS_PAGE_AUDIO_STATE"
+    | "THREADATLAS_PAGE_AUDIO_CHUNK"
   payload: {
     sessionId?: string
-    state?: PageSpeechState
+    state?: PageAudioCaptureState
     detail?: string
-    text?: string
+    chunkBase64?: string
   }
 }
 
@@ -38,11 +37,14 @@ declare global {
     __threadatlasSemanticCaptureInitialized__?: boolean
     __threadatlasSemanticCaptureSession__?: SemanticCaptureSession
     __threadatlasSemanticTriggerManager__?: TriggerManager
-    __threadatlasPageSpeechBridgeInjected__?: boolean
-    __threadatlasPageSpeechBridgeReady__?: boolean
-    __threadatlasPageSpeechBridgeFailed__?: boolean
+    __threadatlasPageAudioBridgeReady__?: boolean
+    __threadatlasPageAudioBridgeFailed__?: boolean
   }
 }
+
+let pageAudioBridgeReadyPromise: Promise<void> | null = null
+let resolvePageAudioBridgeReady: (() => void) | null = null
+let rejectPageAudioBridgeReady: ((error: Error) => void) | null = null
 
 async function hydrateSelectionMode(triggerManager: TriggerManager): Promise<void> {
   try {
@@ -87,7 +89,7 @@ function initializeSemanticCapture(): void {
 
   session.initialize()
   browserCapture.initialize()
-  ensurePageSpeechBridge()
+  ensurePageAudioBridge()
   window.__threadatlasSemanticCaptureSession__ = session
   window.__threadatlasSemanticTriggerManager__ = triggerManager
   window.__threadatlasSemanticCaptureInitialized__ = true
@@ -102,7 +104,7 @@ function initializeSemanticCapture(): void {
           | SemanticSnapshotCaptureResponse
           | SemanticSelectionStateResponse
           | SemanticRegionDumpResponse
-          | SpeechInputControlResponse
+          | AudioCaptureControlResponse
       ) => void
     ) => {
       if (message.type === "CAPTURE_SEMANTIC_SNAPSHOT") {
@@ -132,28 +134,30 @@ function initializeSemanticCapture(): void {
         return true
       }
 
-      if (message.type === "START_PAGE_SPEECH_INPUT") {
-        if (window.__threadatlasPageSpeechBridgeFailed__) {
-          sendResponse({ ok: false, error: "Voice input bridge failed to load on this page." })
-          return true
-        }
-        if (!window.__threadatlasPageSpeechBridgeReady__) {
-          sendResponse({ ok: false, error: "Voice input bridge is not ready on this page yet." })
-          return true
-        }
-        sendPageSpeechBridgeMessage("THREADATLAS_PAGE_SPEECH_START", message.payload)
+      if (message.type === "START_PAGE_AUDIO_CAPTURE") {
+        void waitForPageAudioBridgeReady()
+          .then(() => {
+            sendPageAudioBridgeMessage("THREADATLAS_PAGE_AUDIO_START", message.payload)
+            sendResponse({ ok: true })
+          })
+          .catch((error: unknown) => {
+            sendResponse({
+              ok: false,
+              error:
+                error instanceof Error ? error.message : "Voice input bridge failed to load on this page."
+            })
+          })
+        return true
+      }
+
+      if (message.type === "STOP_PAGE_AUDIO_CAPTURE") {
+        sendPageAudioBridgeMessage("THREADATLAS_PAGE_AUDIO_STOP", message.payload)
         sendResponse({ ok: true })
         return true
       }
 
-      if (message.type === "STOP_PAGE_SPEECH_INPUT") {
-        sendPageSpeechBridgeMessage("THREADATLAS_PAGE_SPEECH_STOP", message.payload)
-        sendResponse({ ok: true })
-        return true
-      }
-
-      if (message.type === "CANCEL_PAGE_SPEECH_INPUT") {
-        sendPageSpeechBridgeMessage("THREADATLAS_PAGE_SPEECH_CANCEL", message.payload)
+      if (message.type === "CANCEL_PAGE_AUDIO_CAPTURE") {
+        sendPageAudioBridgeMessage("THREADATLAS_PAGE_AUDIO_CANCEL", message.payload)
         sendResponse({ ok: true })
         return true
       }
@@ -163,37 +167,64 @@ function initializeSemanticCapture(): void {
   )
 }
 
-function ensurePageSpeechBridge(): void {
-  if (window.__threadatlasPageSpeechBridgeInjected__) {
-    return
-  }
+function ensurePageAudioBridge(): void {
+  window.removeEventListener("message", handlePageAudioBridgeMessage)
+  window.addEventListener("message", handlePageAudioBridgeMessage)
+
+  pageAudioBridgeReadyPromise = new Promise<void>((resolve, reject) => {
+    resolvePageAudioBridgeReady = resolve
+    rejectPageAudioBridgeReady = reject
+  })
+
+  window.__threadatlasPageAudioBridgeReady__ = false
+  window.__threadatlasPageAudioBridgeFailed__ = false
 
   const script = document.createElement("script")
-  script.src = chrome.runtime.getURL("page-speech-bridge.js")
+  script.src = chrome.runtime.getURL("page-audio-bridge.js")
   script.async = false
-  script.dataset.threadatlasPageSpeechBridge = "true"
+  script.dataset.threadatlasPageAudioBridge = "true"
   script.addEventListener("load", () => {
     script.remove()
   })
   script.addEventListener("error", () => {
-    window.__threadatlasPageSpeechBridgeFailed__ = true
+    window.__threadatlasPageAudioBridgeFailed__ = true
+    window.__threadatlasPageAudioBridgeReady__ = false
+    rejectPageAudioBridgeReady?.(new Error("Voice input bridge failed to load on this page."))
     script.remove()
   })
   ;(document.head ?? document.documentElement).appendChild(script)
-
-  window.addEventListener("message", handlePageSpeechBridgeMessage)
-  window.__threadatlasPageSpeechBridgeInjected__ = true
-  window.__threadatlasPageSpeechBridgeReady__ = false
-  window.__threadatlasPageSpeechBridgeFailed__ = false
 }
 
-function sendPageSpeechBridgeMessage(
-  type: "THREADATLAS_PAGE_SPEECH_START" | "THREADATLAS_PAGE_SPEECH_STOP" | "THREADATLAS_PAGE_SPEECH_CANCEL",
-  payload: { sessionId: string; language?: string }
+async function waitForPageAudioBridgeReady(timeoutMs = 1500): Promise<void> {
+  if (window.__threadatlasPageAudioBridgeFailed__) {
+    throw new Error("Voice input bridge failed to load on this page.")
+  }
+
+  if (window.__threadatlasPageAudioBridgeReady__) {
+    return
+  }
+
+  if (!pageAudioBridgeReadyPromise) {
+    ensurePageAudioBridge()
+  }
+
+  await Promise.race([
+    pageAudioBridgeReadyPromise,
+    new Promise<void>((_, reject) => {
+      window.setTimeout(() => {
+        reject(new Error("Voice input bridge is not ready on this page yet."))
+      }, timeoutMs)
+    })
+  ])
+}
+
+function sendPageAudioBridgeMessage(
+  type: "THREADATLAS_PAGE_AUDIO_START" | "THREADATLAS_PAGE_AUDIO_STOP" | "THREADATLAS_PAGE_AUDIO_CANCEL",
+  payload: { sessionId: string }
 ): void {
   window.postMessage(
     {
-      source: "threadatlas-content-speech",
+      source: "threadatlas-content-audio",
       type,
       payload
     },
@@ -201,25 +232,33 @@ function sendPageSpeechBridgeMessage(
   )
 }
 
-function handlePageSpeechBridgeMessage(event: MessageEvent<PageSpeechBridgeInboundMessage>): void {
+function handlePageAudioBridgeMessage(event: MessageEvent<PageAudioBridgeInboundMessage>): void {
   if (event.source !== window) {
     return
   }
 
   const data = event.data
-  if (!data || data.source !== "threadatlas-page-speech") {
+  if (!data || data.source !== "threadatlas-page-audio") {
     return
   }
 
-  if (data.type === "THREADATLAS_PAGE_SPEECH_READY") {
-    window.__threadatlasPageSpeechBridgeReady__ = true
-    window.__threadatlasPageSpeechBridgeFailed__ = false
-    return
-  }
+  if (data.type === "THREADATLAS_PAGE_AUDIO_READY") {
+    window.__threadatlasPageAudioBridgeReady__ = true
+    window.__threadatlasPageAudioBridgeFailed__ = false
+    resolvePageAudioBridgeReady?.()
+    resolvePageAudioBridgeReady = null
+    rejectPageAudioBridgeReady = null
 
-  if (data.type === "THREADATLAS_PAGE_SPEECH_STATE" && data.payload.state) {
     void chrome.runtime.sendMessage({
-      type: "PAGE_SPEECH_STATE_CHANGED",
+      type: "PAGE_AUDIO_CAPTURE_READY",
+      payload: {}
+    })
+    return
+  }
+
+  if (data.type === "THREADATLAS_PAGE_AUDIO_STATE" && data.payload.state) {
+    void chrome.runtime.sendMessage({
+      type: "PAGE_AUDIO_CAPTURE_STATE_CHANGED",
       payload: {
         sessionId: data.payload.sessionId,
         state: data.payload.state,
@@ -229,23 +268,12 @@ function handlePageSpeechBridgeMessage(event: MessageEvent<PageSpeechBridgeInbou
     return
   }
 
-  if (data.type === "THREADATLAS_PAGE_SPEECH_PARTIAL" && typeof data.payload.text === "string") {
+  if (data.type === "THREADATLAS_PAGE_AUDIO_CHUNK" && typeof data.payload.chunkBase64 === "string") {
     void chrome.runtime.sendMessage({
-      type: "PAGE_SPEECH_PARTIAL",
+      type: "PAGE_AUDIO_CAPTURE_CHUNK",
       payload: {
         sessionId: data.payload.sessionId,
-        text: data.payload.text
-      }
-    })
-    return
-  }
-
-  if (data.type === "THREADATLAS_PAGE_SPEECH_FINAL" && typeof data.payload.text === "string") {
-    void chrome.runtime.sendMessage({
-      type: "PAGE_SPEECH_FINAL",
-      payload: {
-        sessionId: data.payload.sessionId,
-        text: data.payload.text
+        chunkBase64: data.payload.chunkBase64
       }
     })
   }
