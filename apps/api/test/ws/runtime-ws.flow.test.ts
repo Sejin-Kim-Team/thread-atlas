@@ -104,6 +104,62 @@ function createHarness(): import("http").Server {
   return server
 }
 
+function createToolRaceHarness(): import("http").Server {
+  const app = express()
+  const semanticRuntime = {
+    openSession: vi.fn(async (args: { clientSessionId: string }) => ({
+      sessionId: "sess-tool-race",
+      clientSessionId: args.clientSessionId,
+      reused: false
+    })),
+    syncContext: vi.fn(async () => undefined),
+    syncSnapshot: vi.fn(async () => undefined),
+    interruptTurn: vi.fn(async () => undefined),
+    runTextTurn: vi.fn(
+      async (args: {
+        principalUserId: string
+        sessionId: string
+        text: string
+        onTurnStarted?: (turnId: string) => Promise<void> | void
+        requestFrontendTool: (request: {
+          sessionId: string
+          turnId: string
+          kind: "context.enrich" | "focus.node" | "present.content" | "copy.text" | "navigate.url"
+          waitForResult: boolean
+          args: Record<string, unknown>
+        }) => Promise<{ ok: boolean } | null>
+      }) => {
+        await args.onTurnStarted?.("turn-tool-race")
+        const frontendResult = await args.requestFrontendTool({
+          sessionId: args.sessionId,
+          turnId: "turn-tool-race",
+          kind: "context.enrich",
+          waitForResult: true,
+          args: {
+            requestKind: "node-detail",
+            targetRef: {
+              kind: "semantic-node",
+              nodeId: "node-tool-race"
+            }
+          }
+        })
+        return {
+          turnId: "turn-tool-race",
+          answerText: frontendResult?.ok ? "TOOL_RESPONSE_OK" : "TOOL_RESPONSE_MISSING",
+          projections: [],
+          referencedTabIds: [],
+          usedMemoryRecordIds: [],
+          provenanceSummary: ["current-page"]
+        }
+      }
+    )
+  } as unknown as SemanticRuntimeManager
+  app.use(express.json({ limit: DEFAULT_JSON_BODY_LIMIT }))
+  const server = app.listen(0)
+  attachRuntimeWebSocketServer(server, semanticRuntime)
+  return server
+}
+
 function getPort(server: import("http").Server): number {
   const address = server.address()
   if (!address || typeof address === "string") {
@@ -373,6 +429,119 @@ describe("ws /ws/runtime flow", () => {
     const audioChunk = messages.find((message) => message.type === "turn.output.audio.chunk")
     expect(audioChunk?.payload).toMatchObject({
       chunkBase64: Buffer.from("pcm").toString("base64")
+    })
+
+    ws.close()
+  }, 15000)
+
+  it("accepts immediate frontend tool responses without timing out", async () => {
+    const server = createToolRaceHarness()
+    servers.push(server)
+
+    const token = issueToken("tool-race-user-1")
+    const ws = await connectWebSocket(`ws://127.0.0.1:${getPort(server)}/ws/runtime?token=${token}`)
+    const readyPromise = waitForTypes(ws, ["session.ready"])
+
+    ws.on("message", (event) => {
+      const parsed = JSON.parse(String(event)) as Record<string, any>
+      if (parsed.type !== "tool.request") {
+        return
+      }
+      ws.send(
+        JSON.stringify({
+          type: "tool.result",
+          requestId: "req-tool-result-race",
+          timestamp: "2026-03-16T13:43:24.214Z",
+          sessionId: parsed.sessionId,
+          turnId: parsed.turnId,
+          payload: {
+            toolRequestId: parsed.payload.toolRequestId,
+            kind: parsed.payload.kind,
+            ok: true,
+            result: {
+              payload: {
+                requestKind: "node-detail",
+                targetRef: {
+                  kind: "semantic-node",
+                  nodeId: "node-tool-race"
+                },
+                status: "ok",
+                capturedAt: "2026-03-16T13:43:24.214Z",
+                detail: {
+                  text: "Focused node detail"
+                }
+              }
+            }
+          }
+        })
+      )
+    })
+
+    ws.send(
+      JSON.stringify({
+        type: "session.open",
+        requestId: "req-open-tool-race",
+        timestamp: "2026-03-16T13:43:21.405Z",
+        payload: {
+          clientSessionId: "runtime-client-tool-race",
+          language: "ko-KR"
+        }
+      })
+    )
+
+    const readyMessages = await readyPromise
+    const ready = readyMessages.find((message) => message.type === "session.ready")
+    const sessionId = String(ready?.sessionId ?? "")
+
+    const turnMessagesPromise = waitForTypes(ws, [
+      "turn.started",
+      "turn.input.transcript.final",
+      "tool.request",
+      "turn.output.transcript.final",
+      "turn.done"
+    ])
+
+    ws.send(
+      JSON.stringify({
+        type: "session.context.sync",
+        requestId: "req-context-tool-race",
+        timestamp: "2026-03-16T13:43:21.407Z",
+        sessionId,
+        payload: {
+          tabId: 128,
+          isPrimary: true
+        }
+      })
+    )
+    ws.send(
+      JSON.stringify({
+        type: "session.snapshot.sync",
+        requestId: "req-snapshot-tool-race",
+        timestamp: "2026-03-16T13:43:21.407Z",
+        sessionId,
+        payload: {
+          tabId: 128,
+          snapshot: createValidSnapshot("2026-03-16T13:43:21.407Z")
+        }
+      })
+    )
+    ws.send(
+      JSON.stringify({
+        type: "turn.input.text",
+        requestId: "req-text-tool-race",
+        timestamp: "2026-03-16T13:43:21.408Z",
+        sessionId,
+        payload: {
+          text: "이 페이지에 대해서 요약해줘"
+        }
+      })
+    )
+
+    const messages = await turnMessagesPromise
+    expect(messages.some((message) => message.type === "turn.error")).toBe(false)
+    const outputTranscript = messages.find((message) => message.type === "turn.output.transcript.final")
+    expect(outputTranscript?.payload).toMatchObject({
+      text: "TOOL_RESPONSE_OK"
     })
 
     ws.close()

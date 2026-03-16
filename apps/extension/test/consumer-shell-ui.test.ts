@@ -166,8 +166,8 @@ describe("consumer shell ui", () => {
     mic.dispatchEvent(makePointerEvent("pointerdown"))
     mic.dispatchEvent(makePointerEvent("pointercancel"))
 
-    document.dispatchEvent(new KeyboardEvent("keydown", { code: "Space", key: " ", bubbles: true }))
-    document.dispatchEvent(new KeyboardEvent("keyup", { code: "Space", key: " ", bubbles: true }))
+    document.dispatchEvent(new KeyboardEvent("keydown", { code: "Space", key: " ", altKey: true, bubbles: true }))
+    document.dispatchEvent(new KeyboardEvent("keyup", { code: "Space", key: " ", altKey: true, bubbles: true }))
     document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }))
 
     document.getElementById("consumer-menu-button")?.dispatchEvent(new MouseEvent("click", { bubbles: true }))
