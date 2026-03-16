@@ -2,6 +2,7 @@ import type {
   InteractiveNode,
   PageNode,
   SemanticCategory,
+  SemanticScopeKind,
   SemanticNode,
   SemanticPrimitive
 } from "./semantic-snapshot"
@@ -61,6 +62,7 @@ export interface FocusResult {
 
 export interface ResolveFocusInput {
   source: CaptureSource
+  scopeKind?: SemanticScopeKind
   activeElement: Element | null
   selection: Selection | null
   triggerTarget: Element | null

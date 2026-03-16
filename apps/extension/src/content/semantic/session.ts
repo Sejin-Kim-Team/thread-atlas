@@ -5,6 +5,7 @@ import type {
   SemanticRegionState,
   SemanticSkeleton
 } from "@threadatlas/shared/browser-runtime"
+import type { SemanticSnapshot } from "@threadatlas/shared"
 import type {
   SemanticSelectionTarget,
   SemanticSnapshotCaptureResponse
@@ -48,6 +49,52 @@ function hasMeaningfulRegion(region: SemanticRegion): boolean {
 
     return Boolean(node.label || node.valuePreview)
   })
+}
+
+function findRegionDumpEntry(dump: RegionDump | null, regionId: string): RegionDump["regions"][number] | null {
+  if (!dump) {
+    return null
+  }
+  return dump.regions.find((region) => region.id === regionId) ?? null
+}
+
+function applyMultimodalHints(
+  snapshot: SemanticSnapshot,
+  dump: RegionDump | null,
+  scopeKind: "page" | "selection"
+): void {
+  snapshot.meta.scopeKind = scopeKind
+  snapshot.meta.focusTargetHint = {
+    regionId: snapshot.focus.region,
+    focusNodeId: snapshot.focus.nodeId,
+    ...(snapshot.meta.coverage?.rootNodeId ? { rootNodeId: snapshot.meta.coverage.rootNodeId } : {})
+  }
+
+  const region = findRegionDumpEntry(dump, snapshot.focus.region)
+  if (!region) {
+    return
+  }
+
+  snapshot.meta.focusRegionHint = {
+    primitive: region.primitive,
+    ...(region.subtype ? { subtype: region.subtype } : {}),
+    ...(region.normalizedKind ? { normalizedKind: region.normalizedKind } : {}),
+    ...(region.layoutRole ? { layoutRole: region.layoutRole } : {}),
+    ...(region.roleRank ? { roleRank: region.roleRank } : {})
+  }
+}
+
+function resolveCaptureScopeKind(input?: ResolveFocusInput): "page" | "selection" {
+  if (input?.scopeKind === "page" || input?.scopeKind === "selection") {
+    return input.scopeKind
+  }
+  if (input?.selectedElement) {
+    return "selection"
+  }
+  if (input?.selection && !input.selection.isCollapsed) {
+    return "selection"
+  }
+  return "page"
 }
 
 export class SemanticCaptureSession {
@@ -116,9 +163,7 @@ export class SemanticCaptureSession {
       }
     }
 
-    const focus = this.focusResolver.resolve(
-      this.extractor,
-      this.document,
+    const resolveInput =
       input ?? {
         source: "command",
         activeElement: this.document.activeElement,
@@ -127,6 +172,11 @@ export class SemanticCaptureSession {
         selectedElement: null,
         lastHoveredElement: null
       }
+
+    const focus = this.focusResolver.resolve(
+      this.extractor,
+      this.document,
+      resolveInput
     )
 
     if (!focus) {
@@ -151,6 +201,10 @@ export class SemanticCaptureSession {
       extractorId: this.extractor.id,
       skeletonVersion: this.skeleton.version
     })
+
+    if (snapshot) {
+      applyMultimodalHints(snapshot, this.dumpObservability(), resolveCaptureScopeKind(resolveInput))
+    }
 
     return {
       snapshot,

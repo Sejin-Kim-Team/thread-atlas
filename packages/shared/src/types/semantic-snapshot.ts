@@ -1,4 +1,6 @@
 export type PageKind = "article" | "thread" | "post" | "generic"
+export type SemanticScopeKind = "page" | "selection"
+export type SemanticNormalizedKind = "article" | "thread" | "card"
 
 export type SemanticPrimitive =
   | "authored-block"
@@ -111,6 +113,19 @@ export interface SemanticSnapshot {
     capturedAt: string
     skeletonVersion: number
     extractorId: string
+    scopeKind?: SemanticScopeKind
+    focusRegionHint?: {
+      primitive: SemanticPrimitive
+      subtype?: string
+      normalizedKind?: SemanticNormalizedKind
+      layoutRole?: string
+      roleRank?: string
+    }
+    focusTargetHint?: {
+      regionId: string
+      focusNodeId: string
+      rootNodeId?: string
+    }
     coverage?: {
       kind: "focus-branch" | "focus-section"
       rootNodeId: string

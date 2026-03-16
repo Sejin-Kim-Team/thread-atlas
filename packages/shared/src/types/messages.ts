@@ -3,6 +3,7 @@ import type { EnsureAuthSessionResponse, ExtensionAuthState } from "./auth-sessi
 import type {
   SemanticCategory,
   SemanticNodeKind,
+  SemanticScopeKind,
   SemanticPrimitive,
   SemanticSnapshot
 } from "./semantic-snapshot"
@@ -58,6 +59,22 @@ export interface PageTextSelectionChangedPayload {
   timestamp: number
 }
 
+export interface SemanticCropRect {
+  top: number
+  left: number
+  right: number
+  bottom: number
+  width: number
+  height: number
+}
+
+export interface SemanticCropTargetResponse {
+  focusRect: SemanticCropRect | null
+  rootRect: SemanticCropRect | null
+  viewportRect: SemanticCropRect
+  devicePixelRatio: number
+}
+
 export interface SemanticSnapshotHistoryResponse {
   tabId: number | null
   snapshots: SemanticSnapshot[]
@@ -68,6 +85,10 @@ export type SidePanelToContentMessage =
   | { type: "GET_THREAD_DOC" }
   | { type: "EXECUTE_PROJECTION"; projection: Projection }
   | { type: "CAPTURE_PAGE_TEXT_SELECTION_SNAPSHOT" }
+  | {
+      type: "GET_SEMANTIC_CROP_TARGET"
+      payload: { regionId: string; focusNodeId: string; rootNodeId?: string | null; scopeKind?: SemanticScopeKind }
+    }
   | {
       type: "APPLY_PAGE_SELECTION_SCOPE_HIGHLIGHT"
       payload: { regionId: string; focusNodeId: string; rootNodeId?: string | null }

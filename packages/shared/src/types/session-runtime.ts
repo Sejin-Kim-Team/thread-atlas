@@ -59,6 +59,8 @@ export interface ContextEnrichResultPayload {
   status: "ok" | "failed" | "unsupported"
   capturedAt: string
   detail?: Record<string, unknown>
+  imageBase64?: string
+  mimeType?: "image/png" | "image/jpeg"
   failureReason?: string
 }
 

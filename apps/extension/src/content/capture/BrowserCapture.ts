@@ -31,6 +31,7 @@ export class BrowserCapture {
   buildResolveFocusInput(source: CaptureSource): ResolveFocusInput {
     return {
       source,
+      scopeKind: this.selectedElement ? "selection" : "page",
       activeElement: this.selectedElement ?? this.document.activeElement,
       selection: this.window.getSelection(),
       triggerTarget:

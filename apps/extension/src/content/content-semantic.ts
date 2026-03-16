@@ -1,6 +1,8 @@
 import type {
   AudioCaptureControlResponse,
   PageTextSelectionChangedPayload,
+  SemanticCropRect,
+  SemanticCropTargetResponse,
   SemanticSelectionStateResponse,
   SemanticSnapshotCaptureResponse,
   SidePanelToContentMessage,
@@ -115,8 +117,9 @@ function capturePageTextSelectionSnapshot(session: SemanticCaptureSession): Sema
 
   return session.captureSnapshot({
     source: "sidepanel",
+    scopeKind: "selection",
     activeElement: selectedElement,
-    selection: null,
+    selection,
     triggerTarget: selectedElement,
     selectedElement,
     lastHoveredElement: selectedElement
@@ -173,6 +176,78 @@ function findSemanticElement(document: Document, regionId: string, nodeId: strin
   )
 }
 
+function unionSemanticCropRect(elements: Element[]): SemanticCropRect | null {
+  const rects = elements
+    .map((element) => element.getBoundingClientRect())
+    .filter((rect) => rect.width > 0 && rect.height > 0)
+
+  if (rects.length === 0) {
+    return null
+  }
+
+  const left = Math.min(...rects.map((rect) => rect.left))
+  const top = Math.min(...rects.map((rect) => rect.top))
+  const right = Math.max(...rects.map((rect) => rect.right))
+  const bottom = Math.max(...rects.map((rect) => rect.bottom))
+
+  return {
+    top,
+    left,
+    right,
+    bottom,
+    width: right - left,
+    height: bottom - top
+  }
+}
+
+function toSemanticCropRect(rect: DOMRect | null | undefined): SemanticCropRect | null {
+  if (!rect || rect.width <= 0 || rect.height <= 0) {
+    return null
+  }
+  return {
+    top: rect.top,
+    left: rect.left,
+    right: rect.right,
+    bottom: rect.bottom,
+    width: rect.width,
+    height: rect.height
+  }
+}
+
+function resolveSemanticCropTarget(payload: {
+  regionId: string
+  focusNodeId: string
+  rootNodeId?: string | null
+}): SemanticCropTargetResponse {
+  const focusElement = findSemanticElement(document, payload.regionId, payload.focusNodeId)
+  const scopeRootElements = payload.rootNodeId
+    ? Array.from(
+        document.querySelectorAll(
+          `[data-semantic-region="${payload.regionId}"][data-semantic-scope-root-id="${payload.rootNodeId}"]`
+        )
+      )
+    : []
+  const rootRect =
+    unionSemanticCropRect(scopeRootElements) ??
+    toSemanticCropRect(findSemanticElement(document, payload.regionId, payload.rootNodeId)?.getBoundingClientRect()) ??
+    toSemanticCropRect(focusElement?.getBoundingClientRect()) ??
+    toSemanticCropRect(document.querySelector(`[data-semantic-region="${payload.regionId}"]`)?.getBoundingClientRect())
+
+  return {
+    focusRect: toSemanticCropRect(focusElement?.getBoundingClientRect()),
+    rootRect,
+    viewportRect: {
+      top: 0,
+      left: 0,
+      right: window.innerWidth,
+      bottom: window.innerHeight,
+      width: window.innerWidth,
+      height: window.innerHeight
+    },
+    devicePixelRatio: window.devicePixelRatio || 1
+  }
+}
+
 function applySelectionScopeHighlight(payload: {
   regionId: string
   focusNodeId: string
@@ -211,6 +286,26 @@ function isCapturePageTextSelectionSnapshotMessage(
     return false
   }
   return (message as { type?: unknown }).type === "CAPTURE_PAGE_TEXT_SELECTION_SNAPSHOT"
+}
+
+function isGetSemanticCropTargetMessage(
+  message: unknown
+): message is Extract<SidePanelToContentMessage, { type: "GET_SEMANTIC_CROP_TARGET" }> {
+  if (typeof message !== "object" || message === null) {
+    return false
+  }
+  const candidate = message as {
+    type?: unknown
+    payload?: { regionId?: unknown; focusNodeId?: unknown; rootNodeId?: unknown }
+  }
+  return (
+    candidate.type === "GET_SEMANTIC_CROP_TARGET" &&
+    typeof candidate.payload?.regionId === "string" &&
+    typeof candidate.payload?.focusNodeId === "string" &&
+    (candidate.payload.rootNodeId === undefined ||
+      candidate.payload.rootNodeId === null ||
+      typeof candidate.payload.rootNodeId === "string")
+  )
 }
 
 function isApplyPageSelectionScopeHighlightMessage(
@@ -352,6 +447,7 @@ function initializeSemanticCapture(): void {
           | SemanticSnapshotCaptureResponse
           | SemanticSelectionStateResponse
           | SemanticRegionDumpResponse
+          | SemanticCropTargetResponse
           | AudioCaptureControlResponse
       ) => void
     ) => {
@@ -379,6 +475,11 @@ function initializeSemanticCapture(): void {
         sendResponse({
           dump: session.dumpObservability()
         })
+        return true
+      }
+
+      if (isGetSemanticCropTargetMessage(message)) {
+        sendResponse(resolveSemanticCropTarget(message.payload))
         return true
       }
 

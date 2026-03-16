@@ -9,6 +9,7 @@ import type {
   AnyRuntimeMessage,
   ContextEnrichResultPayload,
   PageTextSelectionChangedPayload,
+  SemanticCropTargetResponse,
   SemanticSnapshotCaptureResponse,
   RuntimeV2ErrorPayload,
   RuntimeV2ServerEnvelope,
@@ -23,6 +24,7 @@ import { routeProjection } from "../sidepanel/projection-router"
 import type { TurnOrigin } from "../sidepanel/speech-types"
 import { mergeStreamingTranscript } from "../sidepanel/transcript-merge"
 import { showNotify } from "../sidepanel/ui"
+import { cropViewportBase64ToPng } from "./image-crop"
 import {
   bindConsumerShellActions,
   renderConsumerShell,
@@ -611,6 +613,34 @@ async function requestViewportCapture(): Promise<string | null> {
   }
 }
 
+async function requestSemanticCropTarget(
+  snapshot: SemanticSnapshot
+): Promise<SemanticCropTargetResponse | null> {
+  if (state.activeTabId === null) {
+    return null
+  }
+
+  const focusTargetHint = snapshot.meta.focusTargetHint ?? {
+    regionId: snapshot.focus.region,
+    focusNodeId: snapshot.focus.nodeId,
+    rootNodeId: snapshot.meta.coverage?.rootNodeId
+  }
+
+  try {
+    return await sendToContentScript<SemanticCropTargetResponse>(state.activeTabId, {
+      type: "GET_SEMANTIC_CROP_TARGET",
+      payload: {
+        regionId: focusTargetHint.regionId,
+        focusNodeId: focusTargetHint.focusNodeId,
+        ...(focusTargetHint.rootNodeId ? { rootNodeId: focusTargetHint.rootNodeId } : {}),
+        ...(snapshot.meta.scopeKind ? { scopeKind: snapshot.meta.scopeKind } : {})
+      }
+    })
+  } catch {
+    return null
+  }
+}
+
 function updateSemanticSnapshot(payload: SemanticSnapshotState): void {
   state.latestSemanticSnapshot = payload
   state.pageSnapshot = payload.snapshot
@@ -813,6 +843,9 @@ function buildEnrichAttributes(
     attributes["data-primitive"] = region.primitive
     attributes["data-layout-role"] = region.layoutRole
     attributes["data-role-rank"] = region.roleRank
+    if (region.normalizedKind) {
+      attributes["data-normalized-kind"] = region.normalizedKind
+    }
     if (region.subtype) {
       attributes["data-subtype"] = region.subtype
     }
@@ -847,6 +880,16 @@ function buildEnrichAttributes(
 
 function getExpectedNodeId(targetRef: Record<string, unknown>): string | null {
   return asNonEmptyString(targetRef.nodeId) ?? asNonEmptyString(targetRef.entityId)
+}
+
+function shouldPreferSemanticCrop(snapshot: SemanticSnapshot): boolean {
+  if (snapshot.meta.scopeKind === "selection") {
+    return true
+  }
+  return (
+    snapshot.meta.focusRegionHint?.normalizedKind === "card" ||
+    snapshot.meta.focusRegionHint?.primitive === "repeated-item"
+  )
 }
 
 async function buildContextEnrichResult(
@@ -884,11 +927,15 @@ async function buildContextEnrichResult(
   const text = getSemanticNodeText(snapshot.focus.node)
   const detail: Record<string, unknown> = {
     captureScope: request.requestKind,
+    scopeKind: snapshot.meta.scopeKind ?? "page",
     pageUrl: snapshot.page.url,
     pageTitle: snapshot.page.title ?? null,
     nodeId: snapshot.focus.nodeId,
     regionId: snapshot.focus.region,
-    text
+    text,
+    ...(snapshot.meta.focusTargetHint?.rootNodeId
+      ? { rootNodeId: snapshot.meta.focusTargetHint.rootNodeId }
+      : {})
   }
   const bounds = buildEnrichBounds(region)
   if (bounds) {
@@ -897,6 +944,9 @@ async function buildContextEnrichResult(
   const attributes = buildEnrichAttributes(snapshot, snapshot.focus.node, region)
   if (attributes) {
     detail.attributes = attributes
+  }
+  if (snapshot.meta.focusRegionHint) {
+    detail.regionHint = snapshot.meta.focusRegionHint
   }
 
   if (request.requestKind === "node-detail") {
@@ -909,18 +959,47 @@ async function buildContextEnrichResult(
 
   const viewport = await requestViewportCapture()
   if (!viewport) {
+    return request.requestKind === "visible-region"
+      ? {
+          ...baseResult,
+          status: "failed",
+          failureReason: "viewport capture unavailable for visual enrich request"
+        }
+      : {
+          ...baseResult,
+          status: "ok",
+          detail
+        }
+  }
+
+  const preferSemanticCrop = shouldPreferSemanticCrop(snapshot)
+
+  if (request.requestKind === "visible-region" && !preferSemanticCrop) {
     return {
       ...baseResult,
-      status: "failed",
-      failureReason: "viewport capture unavailable for visual enrich request"
+      status: "ok",
+      detail,
+      imageBase64: viewport,
+      mimeType: "image/jpeg"
     }
   }
 
-  detail.imageBase64 = viewport
+  const cropTarget = await requestSemanticCropTarget(snapshot)
+  const croppedImage = cropTarget ? await cropViewportBase64ToPng(viewport, cropTarget) : null
+  if (!croppedImage) {
+    return {
+      ...baseResult,
+      status: "ok",
+      detail
+    }
+  }
+
   return {
     ...baseResult,
     status: "ok",
-    detail
+    detail,
+    imageBase64: croppedImage,
+    mimeType: "image/png"
   }
 }
 

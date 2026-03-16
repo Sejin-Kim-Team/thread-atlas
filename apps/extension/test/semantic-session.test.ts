@@ -254,6 +254,15 @@ describe("SemanticCaptureSession", () => {
       omittedNodeCount: 0,
       omittedRootCount: 0
     })
+    expect(result.snapshot?.meta.scopeKind).toBe("selection")
+    expect(result.snapshot?.meta.focusTargetHint).toEqual({
+      regionId: "repeated-item-1",
+      focusNodeId: "repeated-item-1-item-2",
+      rootNodeId: "repeated-item-1-item-1"
+    })
+    expect(result.snapshot?.meta.focusRegionHint).toMatchObject({
+      primitive: "repeated-item"
+    })
 
     session.dispose()
   })
@@ -462,6 +471,15 @@ describe("SemanticCaptureSession", () => {
       kind: "focus-section",
       rootNodeId: "repeated-item-1-scope-root",
       capturedNodeCount: 3
+    })
+    expect(result.snapshot?.meta.scopeKind).toBe("selection")
+    expect(result.snapshot?.meta.focusRegionHint).toMatchObject({
+      primitive: "repeated-item",
+      normalizedKind: "card"
+    })
+    expect(result.snapshot?.meta.focusTargetHint).toMatchObject({
+      regionId: "repeated-item-1",
+      focusNodeId: "repeated-item-1-item-2"
     })
 
     session.dispose()

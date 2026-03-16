@@ -224,10 +224,78 @@ describe("ws enrich trigger mode redesign contract (red)", () => {
     expect(countAssistCalls()).toBe(0)
   })
 
+  it("requests node-screenshot eagerly in rule mode for selection scope snapshots", async () => {
+    const capturedAt = "2026-03-08T11:05:00.000Z"
+    const baseSnapshot = createValidSnapshot(capturedAt)
+    const selectionSnapshot = {
+      ...baseSnapshot,
+      meta: {
+        ...baseSnapshot.meta,
+        scopeKind: "selection",
+        focusTargetHint: {
+          regionId: "comment-tree",
+          focusNodeId: "comment-43210091",
+          rootNodeId: "comment-43210010"
+        },
+        focusRegionHint: {
+          primitive: "repeated-item",
+          normalizedKind: "card"
+        }
+      }
+    }
+    const setup = await prepareSession({ mode: "rule", snapshot: selectionSnapshot, capturedAt })
+    const intent = await postIntent(setup, {
+      text: "이 선택 부분만 요약해줘.",
+      requestId: "req-trigger-selection-scope"
+    })
+
+    const events = intent.body.events as Array<Record<string, unknown>>
+    const enrichRequest = findEvent(events, "context.enrich.request")
+    expect(enrichRequest).toBeDefined()
+    expect((enrichRequest?.payload as Record<string, unknown> | undefined)?.requestKind).toBe(
+      "node-screenshot"
+    )
+    expect(countAssistCalls()).toBe(0)
+  })
+
+  it("requests node-screenshot eagerly in rule mode for repeated-item/card focus", async () => {
+    const capturedAt = "2026-03-08T11:06:00.000Z"
+    const baseSnapshot = createValidSnapshot(capturedAt)
+    const cardSnapshot = {
+      ...baseSnapshot,
+      meta: {
+        ...baseSnapshot.meta,
+        scopeKind: "page",
+        focusRegionHint: {
+          primitive: "repeated-item",
+          normalizedKind: "card"
+        },
+        focusTargetHint: {
+          regionId: "search-results",
+          focusNodeId: "result-card-2",
+          rootNodeId: "result-card-2"
+        }
+      }
+    }
+    const setup = await prepareSession({ mode: "rule", snapshot: cardSnapshot, capturedAt })
+    const intent = await postIntent(setup, {
+      text: "이 항목이 말하는 핵심이 뭐야?",
+      requestId: "req-trigger-card-focus"
+    })
+
+    const events = intent.body.events as Array<Record<string, unknown>>
+    const enrichRequest = findEvent(events, "context.enrich.request")
+    expect(enrichRequest).toBeDefined()
+    expect((enrichRequest?.payload as Record<string, unknown> | undefined)?.requestKind).toBe(
+      "node-screenshot"
+    )
+    expect(countAssistCalls()).toBe(0)
+  })
+
   it("can request enrich via LLM assist in hybrid-simple mode even when rule misses", async () => {
     const setup = await prepareSession({ mode: "hybrid-simple" })
     const intent = await postIntent(setup, {
-      text: "지금 화면에서 추가 확인이 필요한지 판단해줘.",
+      text: "지금 맥락만으로 충분한지 판단해줘.",
       requestId: "req-trigger-hs-llm-assist"
     })
 
@@ -253,7 +321,7 @@ describe("ws enrich trigger mode redesign contract (red)", () => {
 
     const setup = await prepareSession({ mode: "hybrid-simple" })
     const intent = await postIntent(setup, {
-      text: "지금 화면에서 추가 확인이 필요한지 판단해줘.",
+      text: "지금 맥락만으로 충분한지 판단해줘.",
       requestId: "req-trigger-hs-assist-no-enrich"
     })
 
@@ -276,7 +344,7 @@ describe("ws enrich trigger mode redesign contract (red)", () => {
 
     const setup = await prepareSession({ mode: "hybrid-simple" })
     const intent = await postIntent(setup, {
-      text: "지금 화면에서 추가 확인이 필요한지 판단해줘.",
+      text: "지금 맥락만으로 충분한지 판단해줘.",
       requestId: "req-trigger-hs-assist-non-json"
     })
 
@@ -361,7 +429,7 @@ describe("ws enrich trigger mode redesign contract (red)", () => {
   it("advertises only 3 requestKind values in assist prompt schema", async () => {
     const setup = await prepareSession({ mode: "hybrid-simple" })
     await postIntent(setup, {
-      text: "지금 화면에서 추가 확인이 필요한지 판단해줘.",
+      text: "지금 맥락만으로 충분한지 판단해줘.",
       requestId: "req-trigger-assist-schema"
     })
 
@@ -390,7 +458,7 @@ describe("ws enrich trigger mode redesign contract (red)", () => {
 
     const setup = await prepareSession({ mode: "hybrid-simple" })
     const intent = await postIntent(setup, {
-      text: "지금 화면에서 추가 확인이 필요한지 판단해줘.",
+      text: "지금 맥락만으로 충분한지 판단해줘.",
       requestId: "req-trigger-assist-page-entity-kind"
     })
 

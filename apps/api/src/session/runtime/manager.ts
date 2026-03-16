@@ -78,7 +78,7 @@ interface EnrichAssistDecision {
 }
 
 const ENRICH_RULE_DICTIONARY: Record<
-  "visual" | "entity" | "detail" | "hardNegative" | "ambiguous",
+  "visual" | "entity" | "detail" | "hardNegative" | "ambiguous" | "cardItem",
   BilingualKeywordSet
 > = {
   visual: {
@@ -201,6 +201,10 @@ const ENRICH_RULE_DICTIONARY: Record<
   ambiguous: {
     ko: ["애매", "판단해줘", "도와줘", "확실하지", "모르겠"],
     en: ["ambiguous", "not sure", "unclear", "help me decide", "cannot tell"]
+  },
+  cardItem: {
+    ko: ["카드", "항목", "아이템", "리스트", "결과", "목록"],
+    en: ["card", "item", "items", "result", "results", "listing", "listings", "list"]
   }
 }
 
@@ -691,6 +695,78 @@ function analyzeEnrichRuleSignals(intentText: string): EnrichRuleSignals {
     hardNegative,
     ambiguous
   }
+}
+
+function resolveSnapshotScopeKind(snapshot: SnapshotLike): "page" | "selection" | null {
+  if (!isObject(snapshot.meta)) {
+    return null
+  }
+  return snapshot.meta.scopeKind === "page" || snapshot.meta.scopeKind === "selection"
+    ? snapshot.meta.scopeKind
+    : null
+}
+
+function resolveFocusRegionHint(snapshot: SnapshotLike): {
+  primitive?: string | null
+  normalizedKind?: string | null
+} {
+  if (!isObject(snapshot.meta) || !isObject(snapshot.meta.focusRegionHint)) {
+    return {}
+  }
+  return {
+    primitive: asStringOrNull(snapshot.meta.focusRegionHint.primitive),
+    normalizedKind: asStringOrNull(snapshot.meta.focusRegionHint.normalizedKind)
+  }
+}
+
+function isCardItemIntent(intentText: string): boolean {
+  return containsAnyKeyword(intentText.toLowerCase(), ENRICH_RULE_DICTIONARY.cardItem)
+}
+
+function decideTargetedEagerMultimodal(
+  intentText: string,
+  snapshot: SnapshotLike,
+  ruleSignals: EnrichRuleSignals
+): EnrichRuleDecision | null {
+  if (ruleSignals.hardNegative) {
+    return null
+  }
+
+  const scopeKind = resolveSnapshotScopeKind(snapshot)
+  if (scopeKind === "selection") {
+    return {
+      shouldRequestEnrich: true,
+      requestKind: "node-screenshot",
+      reason: "selection scope targeted multimodal enrich"
+    }
+  }
+
+  const focusRegionHint = resolveFocusRegionHint(snapshot)
+  if (focusRegionHint.normalizedKind === "card") {
+    return {
+      shouldRequestEnrich: true,
+      requestKind: "node-screenshot",
+      reason: "card focus targeted multimodal enrich"
+    }
+  }
+
+  if (focusRegionHint.primitive === "repeated-item") {
+    return {
+      shouldRequestEnrich: true,
+      requestKind: "node-screenshot",
+      reason: "repeated item focus targeted multimodal enrich"
+    }
+  }
+
+  if (ruleSignals.hasVisual || isCardItemIntent(intentText)) {
+    return {
+      shouldRequestEnrich: true,
+      requestKind: "node-screenshot",
+      reason: "visual or structured question targeted multimodal enrich"
+    }
+  }
+
+  return null
 }
 
 function resolveRequestKindFromSignals(signals: EnrichRuleSignals): EnrichRequestKind {
@@ -1500,6 +1576,18 @@ export class RuntimeManager {
     }
   ): Promise<{ ok: true; decision: EnrichRuleDecision } | { ok: false; error: RuntimeResult }> {
     const ruleSignals = analyzeEnrichRuleSignals(intentText)
+    const targetedDecision = decideTargetedEagerMultimodal(intentText, snapshot, ruleSignals)
+    if (targetedDecision) {
+      logger.debug("runtime-enrich-targeted-eager", {
+        mode: this.enrichTriggerMode,
+        requestKind: targetedDecision.requestKind,
+        reason: targetedDecision.reason
+      })
+      return {
+        ok: true,
+        decision: targetedDecision
+      }
+    }
     const ruleDecision = decideByRule(ruleSignals)
     const suspicious = isSnapshotSuspicious(snapshot)
 
