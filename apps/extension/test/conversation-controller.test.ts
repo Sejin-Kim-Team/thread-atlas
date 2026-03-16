@@ -142,4 +142,63 @@ describe("ConversationController", () => {
       "transport.commitAudio"
     ])
   })
+
+  it("stops forwarding audio chunks immediately once finishing starts", async () => {
+    let resolveStop: (() => void) | null = null
+    const appendAudioChunk = vi.fn()
+    const audioInput = {
+      supported: true,
+      start: vi.fn(async () => {}),
+      stop: vi.fn(
+        () =>
+          new Promise<void>((resolve) => {
+            resolveStop = resolve
+          })
+      ),
+      cancel: vi.fn(async () => {}),
+      dispose: vi.fn(),
+      onChunkBase64: undefined as ((chunkBase64: string) => void) | undefined,
+      onError: undefined as ((error: Error) => void) | undefined,
+      onStateChange: undefined as ((state: "idle" | "listening" | "processing" | "unsupported" | "error", detail?: string) => void) | undefined
+    }
+    const transport = {
+      sendTextTurn: vi.fn(),
+      startVoiceTurn: vi.fn(async () => {}),
+      appendAudioChunk,
+      commitAudio: vi.fn(),
+      interrupt: vi.fn(async () => {}),
+      close: vi.fn(async () => {})
+    }
+    const controller = new ConversationController({
+      apiBaseUrl: "http://localhost:8080",
+      authClient: { issueToken: vi.fn() },
+      getActiveTabId: () => 17,
+      sendToContentScript: vi.fn(),
+      ttsEnabled: false,
+      audioInput,
+      audioOutput: {
+        supported: true,
+        playChunk: vi.fn(),
+        stop: vi.fn(),
+        dispose: vi.fn()
+      },
+      transport,
+      handlers: {}
+    })
+
+    await controller.startVoiceTurn({
+      activeTabId: 17,
+      snapshot
+    })
+    audioInput.onChunkBase64?.("before-finish")
+
+    const finishPromise = controller.finishVoiceTurn()
+    audioInput.onChunkBase64?.("after-finish-before-stop-resolve")
+    resolveStop?.()
+    await finishPromise
+
+    expect(appendAudioChunk).toHaveBeenCalledTimes(1)
+    expect(appendAudioChunk).toHaveBeenCalledWith("before-finish")
+    expect(transport.commitAudio).toHaveBeenCalledTimes(1)
+  })
 })

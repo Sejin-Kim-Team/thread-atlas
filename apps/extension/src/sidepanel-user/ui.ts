@@ -1,9 +1,6 @@
 import type { PresentContent, TokenUser } from "@threadatlas/shared"
-import type {
-  ConsumerPageReadinessState,
-  ConsumerShellViewState,
-  ConsumerVoiceActivityState
-} from "./view-state"
+import type { ConsumerShellViewState, ConsumerVoiceActivityState } from "./view-state"
+import { renderAssistantMarkdownFragment } from "./markdown"
 
 export interface ConsumerConversationMessage {
   id: string
@@ -18,6 +15,8 @@ export interface ConsumerConversationMessage {
     showContext?: boolean
   }
 }
+
+const TRANSCRIPT_BOTTOM_THRESHOLD_PX = 48
 
 function getAuthDisplayName(user: TokenUser | null): string {
   return user?.displayName ?? user?.primaryEmail ?? "Signed in"
@@ -37,25 +36,48 @@ function getElement<T extends Element>(id: string): T | null {
   return document.getElementById(id) as T | null
 }
 
+function getTranscriptScrollRoot(): HTMLDivElement | null {
+  return getElement<HTMLDivElement>("consumer-transcript-scroll")
+}
+
 function createWavePath(levels: number[], mode: ConsumerVoiceActivityState): string {
   const width = 240
-  const height = 28
+  const height = 24
   const baseline = height / 2
   const safeLevels =
     levels.length > 1
       ? levels
       : mode === "thinking"
-        ? [0.08, 0.12, 0.08, 0.12, 0.08, 0.12, 0.08, 0.12]
+        ? [0.08, 0.11, 0.08, 0.11, 0.08, 0.11, 0.08, 0.11]
         : [0, 0, 0, 0, 0, 0, 0, 0]
   const step = width / Math.max(1, safeLevels.length - 1)
   return safeLevels
     .map((level, index) => {
-      const amplitude = mode === "thinking" ? 3 + level * 8 : level * 12
+      const amplitude = mode === "thinking" ? 2 + level * 5 : 1 + level * 10
       const phase = index % 2 === 0 ? -1 : 1
       const y = baseline + amplitude * phase
       return `${index === 0 ? "M" : "L"} ${Math.round(index * step)} ${Math.round(y)}`
     })
     .join(" ")
+}
+
+function createAssistantMessageBody(message: ConsumerConversationMessage): HTMLDivElement {
+  const body = document.createElement("div")
+  body.className = "consumer-message-text consumer-message-markdown"
+  const fragment = renderAssistantMarkdownFragment(message.text)
+  if (!fragment.hasChildNodes()) {
+    body.textContent = message.text
+    return body
+  }
+  body.appendChild(fragment)
+  return body
+}
+
+function createUserMessageBody(message: ConsumerConversationMessage): HTMLDivElement {
+  const body = document.createElement("div")
+  body.className = "consumer-message-text consumer-message-plain"
+  body.textContent = message.text
+  return body
 }
 
 function renderTranscript(messages: ConsumerConversationMessage[]): void {
@@ -81,15 +103,17 @@ function renderTranscript(messages: ConsumerConversationMessage[]): void {
       item.classList.add("consumer-message-pending")
     }
 
+    const surface = document.createElement("div")
+    surface.className = "consumer-message-surface"
+
     const label = document.createElement("div")
     label.className = "consumer-message-role"
     label.textContent = message.role === "user" ? "You" : "ThreadAtlas"
 
-    const body = document.createElement("div")
-    body.className = "consumer-message-text"
-    body.textContent = message.text
+    const body =
+      message.role === "assistant" ? createAssistantMessageBody(message) : createUserMessageBody(message)
 
-    item.append(label, body)
+    surface.append(label, body)
 
     if (message.role === "assistant") {
       const hasProvenance = Boolean(message.provenanceSummary?.length)
@@ -112,7 +136,7 @@ function renderTranscript(messages: ConsumerConversationMessage[]): void {
               itemText === "current-page"
                 ? "Based on this page"
                 : itemText === "enriched-context"
-                  ? "Used more page context"
+                  ? "Used image context"
                   : itemText
             provenance.appendChild(pill)
           }
@@ -156,12 +180,31 @@ function renderTranscript(messages: ConsumerConversationMessage[]): void {
           footer.appendChild(actions)
         }
 
-        item.appendChild(footer)
+        surface.appendChild(footer)
       }
     }
 
+    item.appendChild(surface)
     root.appendChild(item)
   }
+}
+
+export function readConsumerTranscriptPinnedToBottom(): boolean {
+  const root = getTranscriptScrollRoot()
+  if (!root) {
+    return true
+  }
+
+  return root.scrollHeight - root.scrollTop - root.clientHeight <= TRANSCRIPT_BOTTOM_THRESHOLD_PX
+}
+
+export function scrollConsumerTranscriptToLatest(): void {
+  const root = getTranscriptScrollRoot()
+  if (!root) {
+    return
+  }
+
+  root.scrollTop = root.scrollHeight
 }
 
 export function renderConsumerShell(args: {
@@ -184,6 +227,7 @@ export function renderConsumerShell(args: {
   showInternalConsoleLauncher: boolean
   contextContent: PresentContent | null
   contextSheetOpen: boolean
+  showJumpToLatest: boolean
 }): void {
   const pageDomain = getElement<HTMLDivElement>("consumer-page-domain")
   const pageTitle = getElement<HTMLHeadingElement>("consumer-page-title")
@@ -194,6 +238,7 @@ export function renderConsumerShell(args: {
   const activity = getElement<HTMLDivElement>("consumer-activity-label")
   const signal = getElement<SVGPathElement>("consumer-signal-path")
   const signalRoot = getElement<HTMLDivElement>("consumer-signal")
+  const liveStrip = getElement<HTMLDivElement>("consumer-live-strip")
   const authCard = getElement<HTMLDivElement>("consumer-auth-card")
   const authTitle = getElement<HTMLDivElement>("consumer-auth-title")
   const authBody = getElement<HTMLDivElement>("consumer-auth-body")
@@ -217,6 +262,7 @@ export function renderConsumerShell(args: {
   const contextSheet = getElement<HTMLDivElement>("consumer-context-sheet")
   const contextTitle = getElement<HTMLHeadingElement>("consumer-context-title")
   const contextList = getElement<HTMLDivElement>("consumer-context-list")
+  const jumpButton = getElement<HTMLButtonElement>("consumer-jump-latest-button")
 
   if (
     !pageDomain ||
@@ -228,6 +274,7 @@ export function renderConsumerShell(args: {
     !activity ||
     !signal ||
     !signalRoot ||
+    !liveStrip ||
     !authCard ||
     !authTitle ||
     !authBody ||
@@ -250,7 +297,8 @@ export function renderConsumerShell(args: {
     !internalConsoleButton ||
     !contextSheet ||
     !contextTitle ||
-    !contextList
+    !contextList ||
+    !jumpButton
   ) {
     return
   }
@@ -262,6 +310,8 @@ export function renderConsumerShell(args: {
   activity.textContent = args.view.activityLabel
   signal.setAttribute("d", createWavePath(args.signalLevels, args.voiceActivityState))
   signalRoot.dataset.state = args.voiceActivityState
+  liveStrip.dataset.state = args.voiceActivityState
+  liveStrip.classList.toggle("hidden", args.voiceActivityState === "idle")
 
   renderTranscript(args.messages)
 
@@ -270,7 +320,11 @@ export function renderConsumerShell(args: {
   composer.placeholder = args.view.composerPlaceholder
   send.disabled = args.sendDisabled
   mic.disabled = args.view.micDisabled
-  mic.textContent = args.voiceActivityState === "listening" ? "Release" : "Hold to talk"
+  const micLabel = args.voiceActivityState === "listening" ? "Release to send" : "Hold to talk"
+  mic.dataset.state = args.voiceActivityState === "listening" ? "listening" : "idle"
+  mic.setAttribute("aria-label", micLabel)
+  mic.setAttribute("title", micLabel)
+  send.setAttribute("aria-label", args.sendDisabled ? "Send unavailable" : "Send message")
 
   authCard.classList.toggle("hidden", !args.view.showAuthPrompt)
   authTitle.textContent = args.authStatusLabel
@@ -299,6 +353,8 @@ export function renderConsumerShell(args: {
   voiceOutputButton.textContent = args.voiceOutputEnabled ? "Voice output on" : "Voice output off"
   voiceOutputButton.setAttribute("aria-pressed", args.voiceOutputEnabled ? "true" : "false")
   internalConsoleButton.classList.toggle("hidden", !args.showInternalConsoleLauncher)
+
+  jumpButton.classList.toggle("hidden", !args.showJumpToLatest)
 
   contextSheet.classList.toggle("hidden", !args.contextSheetOpen)
   contextTitle.textContent = args.contextContent?.title ?? "More context"
@@ -345,6 +401,8 @@ export function bindConsumerShellActions(args: {
   onEscape: () => void
   onOpenInternalConsole: () => void
   onCloseContextSheet: () => void
+  onTranscriptScroll: () => void
+  onJumpToLatest: () => void
 }): void {
   const composer = getElement<HTMLTextAreaElement>("conversation-input")
   const send = getElement<HTMLButtonElement>("conversation-send-button")
@@ -356,8 +414,10 @@ export function bindConsumerShellActions(args: {
   const recoveryPrimary = getElement<HTMLButtonElement>("consumer-recovery-primary")
   const scopeClear = getElement<HTMLButtonElement>("consumer-scope-clear")
   const transcript = getElement<HTMLDivElement>("consumer-transcript")
+  const transcriptScroll = getTranscriptScrollRoot()
   const internalConsoleButton = getElement<HTMLButtonElement>("consumer-open-console-button")
   const closeContextButton = getElement<HTMLButtonElement>("consumer-context-close")
+  const jumpButton = getElement<HTMLButtonElement>("consumer-jump-latest-button")
 
   composer?.addEventListener("input", () => {
     args.onComposerInput(composer.value)
@@ -396,6 +456,8 @@ export function bindConsumerShellActions(args: {
   scopeClear?.addEventListener("click", args.onClearScope)
   internalConsoleButton?.addEventListener("click", args.onOpenInternalConsole)
   closeContextButton?.addEventListener("click", args.onCloseContextSheet)
+  transcriptScroll?.addEventListener("scroll", args.onTranscriptScroll)
+  jumpButton?.addEventListener("click", args.onJumpToLatest)
 
   recoveryPrimary?.addEventListener("click", () => {
     const kind = (recoveryPrimary.dataset.kind || null) as "refresh" | "microphone" | "runtime" | null

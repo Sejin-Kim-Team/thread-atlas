@@ -199,13 +199,18 @@ export class ConversationController {
   }
 
   async finishVoiceTurn(): Promise<void> {
-    if (!this.audioInput.supported) {
+    if (!this.audioInput.supported || this.voiceTurnLifecycle !== "capturing") {
       return
     }
-    await this.audioInput.stop()
     this.acceptingVoiceInputChunks = false
     this.voiceTurnLifecycle = "awaiting-turn"
-    this.transport.commitAudio()
+    try {
+      await this.audioInput.stop()
+      this.transport.commitAudio()
+    } catch (error) {
+      this.voiceTurnLifecycle = "idle"
+      throw error
+    }
   }
 
   async cancelVoiceTurn(): Promise<void> {

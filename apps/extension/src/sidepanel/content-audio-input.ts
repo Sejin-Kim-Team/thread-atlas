@@ -203,6 +203,8 @@ export class PageAudioInputProvider implements ContentAudioInputProvider {
           this.currentTabId = null
           this.resolveStop?.()
           this.clearStopPromise()
+          this.onLevel?.(0)
+          this.emitState("idle")
           return
         }
 

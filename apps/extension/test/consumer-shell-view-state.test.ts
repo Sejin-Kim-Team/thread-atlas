@@ -97,4 +97,37 @@ describe("consumer shell view state", () => {
     expect(refreshRecovery.showRecovery).toBe(true)
     expect(refreshRecovery.recoveryKind).toBe("refresh")
   })
+
+  it("shows thinking only for active generation phases", () => {
+    const openingSession = deriveConsumerShellViewState({
+      pageSupported: true,
+      snapshotReady: true,
+      snapshotPreparing: false,
+      snapshotError: null,
+      authStatus: "signed-in",
+      inputSupported: true,
+      voiceActivityState: "idle",
+      runtimePhase: "opening-session",
+      speechInputState: "processing",
+      speechInputDetail: null,
+      lastRuntimeError: null
+    })
+
+    const waitingEnrich = deriveConsumerShellViewState({
+      pageSupported: true,
+      snapshotReady: true,
+      snapshotPreparing: false,
+      snapshotError: null,
+      authStatus: "signed-in",
+      inputSupported: true,
+      voiceActivityState: "idle",
+      runtimePhase: "waiting-enrich",
+      speechInputState: "idle",
+      speechInputDetail: null,
+      lastRuntimeError: null
+    })
+
+    expect(openingSession.activityLabel).toBe("Hold to talk or type a question.")
+    expect(waitingEnrich.activityLabel).toBe("Thinking...")
+  })
 })

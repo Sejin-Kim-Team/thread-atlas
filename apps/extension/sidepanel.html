@@ -8,13 +8,17 @@
       :root {
         color-scheme: light;
         --bg: #f7f3eb;
-        --surface: rgba(255, 255, 255, 0.88);
-        --surface-strong: #ffffff;
+        --surface: rgba(255, 255, 255, 0.82);
+        --surface-strong: rgba(255, 255, 255, 0.96);
+        --surface-soft: rgba(255, 255, 255, 0.68);
+        --surface-tint: rgba(63, 102, 214, 0.08);
         --border: rgba(15, 23, 42, 0.09);
+        --border-soft: rgba(15, 23, 42, 0.05);
         --text: #18212f;
         --muted: #5f6c80;
+        --muted-soft: #7d8798;
         --accent: #3f66d6;
-        --accent-soft: rgba(63, 102, 214, 0.1);
+        --accent-soft: rgba(63, 102, 214, 0.12);
         --ready: #1f9a6d;
         --warn: #c57b2f;
         --danger: #c84e4e;
@@ -24,32 +28,47 @@
         box-sizing: border-box;
       }
 
+      html,
       body {
         margin: 0;
-        min-height: 100vh;
+        height: 100%;
+      }
+
+      body {
         font-family: Georgia, "Iowan Old Style", "Palatino Linotype", "Times New Roman", serif;
         color: var(--text);
         background:
           radial-gradient(circle at top left, rgba(63, 102, 214, 0.12), transparent 28%),
           linear-gradient(180deg, #fcfaf5 0%, var(--bg) 52%, #f3eee5 100%);
+        overflow: hidden;
+      }
+
+      button,
+      textarea {
+        font: inherit;
       }
 
       .shell {
         position: relative;
+        display: flex;
+        flex-direction: column;
         min-height: 100vh;
-        padding: 18px 16px 20px;
+        max-height: 100vh;
+        padding: 16px 14px 12px;
       }
 
       .header {
         display: flex;
         align-items: flex-start;
         justify-content: space-between;
-        gap: 12px;
-        margin-bottom: 16px;
+        gap: 10px;
+        margin-bottom: 10px;
+        flex: 0 0 auto;
       }
 
       .header-copy {
         min-width: 0;
+        flex: 1 1 auto;
       }
 
       .page-domain {
@@ -60,20 +79,30 @@
         font-weight: 600;
         letter-spacing: 0.08em;
         text-transform: uppercase;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
       }
 
       .page-title {
         margin: 0;
-        font-size: 28px;
+        font-size: 24px;
         line-height: 1.08;
         font-weight: 600;
         letter-spacing: -0.025em;
+        display: -webkit-box;
+        -webkit-box-orient: vertical;
+        -webkit-line-clamp: 2;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        max-width: 100%;
       }
 
       .header-actions {
         display: flex;
         align-items: center;
-        gap: 10px;
+        gap: 8px;
+        flex: 0 0 auto;
       }
 
       .readiness-pill {
@@ -86,6 +115,7 @@
         font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
         font-size: 12px;
         font-weight: 600;
+        min-height: 36px;
       }
 
       .readiness-pill[data-state="ready"] {
@@ -129,14 +159,14 @@
         position: absolute;
         top: 68px;
         right: 16px;
-        width: 240px;
+        width: 248px;
         padding: 12px;
         border-radius: 18px;
         border: 1px solid var(--border);
         background: rgba(255, 255, 255, 0.96);
         box-shadow: 0 20px 60px rgba(15, 23, 42, 0.08);
         backdrop-filter: blur(14px);
-        z-index: 10;
+        z-index: 30;
       }
 
       .menu.hidden,
@@ -167,7 +197,8 @@
 
       .menu-user-name,
       .menu-user-email,
-      .menu-help {
+      .menu-help,
+      .menu-row-button {
         font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
       }
 
@@ -194,24 +225,37 @@
         border-radius: 12px;
       }
 
-      .panel {
-        border: 1px solid var(--border);
-        border-radius: 24px;
-        background: rgba(255, 255, 255, 0.82);
-        box-shadow: 0 18px 60px rgba(15, 23, 42, 0.04);
-        backdrop-filter: blur(12px);
+      .conversation-shell {
+        min-height: 0;
+        flex: 1 1 auto;
+        display: flex;
+        flex-direction: column;
       }
 
-      .conversation-panel {
-        padding: 16px;
+      .transcript-scroll {
+        min-height: 0;
+        flex: 1 1 auto;
+        overflow-y: auto;
+        padding: 2px 2px 10px;
+        scrollbar-width: thin;
+      }
+
+      .transcript-prelude,
+      .transcript {
+        display: grid;
+        gap: 12px;
+      }
+
+      .transcript-prelude {
+        margin-bottom: 12px;
       }
 
       .inline-card {
-        margin-bottom: 12px;
-        padding: 14px;
+        padding: 15px 16px;
         border-radius: 18px;
-        border: 1px solid var(--border);
-        background: rgba(255, 255, 255, 0.84);
+        border: 1px solid var(--border-soft);
+        background: rgba(255, 255, 255, 0.72);
+        box-shadow: 0 8px 30px rgba(15, 23, 42, 0.03);
       }
 
       .inline-card-title {
@@ -226,7 +270,7 @@
         color: var(--muted);
         font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
         font-size: 13px;
-        line-height: 1.45;
+        line-height: 1.5;
       }
 
       .button {
@@ -234,155 +278,60 @@
         font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
         font-size: 13px;
         font-weight: 600;
+        transition:
+          transform 180ms ease,
+          box-shadow 220ms ease,
+          background-color 220ms ease,
+          border-color 220ms ease,
+          opacity 180ms ease;
       }
 
       .button-primary {
         background: var(--accent);
         border-color: var(--accent);
         color: #ffffff;
-      }
-
-      .signal-wrap {
-        margin-bottom: 14px;
-      }
-
-      .scope-bar {
-        display: grid;
-        gap: 8px;
-        margin-bottom: 14px;
-      }
-
-      .scope-chip {
-        display: inline-flex;
-        align-items: center;
-        gap: 8px;
-        width: fit-content;
-        max-width: 100%;
-        padding: 7px 11px;
-        border-radius: 999px;
-        border: 1px solid var(--border);
-        background: rgba(255, 255, 255, 0.76);
-        color: var(--text);
-        font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-        font-size: 12px;
-        font-weight: 700;
-      }
-
-      .scope-chip[data-scope="selection"] {
-        border-color: rgba(63, 102, 214, 0.2);
-        background: var(--accent-soft);
-        color: var(--accent);
-      }
-
-      .scope-clear {
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        width: 20px;
-        height: 20px;
-        padding: 0;
-        border: 0;
-        border-radius: 999px;
-        background: rgba(15, 23, 42, 0.08);
-        color: inherit;
-        cursor: pointer;
-        font: inherit;
-        font-size: 12px;
-        font-weight: 700;
-        line-height: 1;
-      }
-
-      .scope-preview {
-        color: var(--muted);
-        font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-        font-size: 12px;
-        line-height: 1.4;
-      }
-
-      .scope-meta {
-        color: #7f89a4;
-        font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-        font-size: 11px;
-        line-height: 1.35;
-      }
-
-      .signal {
-        height: 34px;
-        margin-bottom: 6px;
-        border-radius: 999px;
-        border: 1px solid var(--border);
-        background: rgba(255, 255, 255, 0.68);
-        display: flex;
-        align-items: center;
-        padding: 0 10px;
-      }
-
-      .signal svg {
-        width: 100%;
-        height: 24px;
-      }
-
-      .signal path {
-        fill: none;
-        stroke: var(--accent);
-        stroke-width: 2.2;
-        stroke-linecap: round;
-        stroke-linejoin: round;
-        opacity: 0.86;
-      }
-
-      .signal[data-state="thinking"] path {
-        animation: pulse-line 1.45s ease-in-out infinite;
-      }
-
-      @keyframes pulse-line {
-        0%, 100% {
-          opacity: 0.35;
-        }
-        50% {
-          opacity: 0.95;
-        }
-      }
-
-      .activity-label {
-        color: var(--muted);
-        font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-        font-size: 12px;
-      }
-
-      .transcript {
-        display: grid;
-        gap: 12px;
-        min-height: 240px;
-        margin-bottom: 14px;
-      }
-
-      .consumer-empty,
-      .consumer-message {
-        border-radius: 20px;
-        padding: 14px;
+        box-shadow: 0 10px 24px rgba(63, 102, 214, 0.22);
       }
 
       .consumer-empty {
+        padding: 18px 16px;
+        border-radius: 22px;
         border: 1px dashed var(--border);
-        background: rgba(255, 255, 255, 0.55);
+        background: rgba(255, 255, 255, 0.5);
         color: var(--muted);
         font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
         font-size: 13px;
-        line-height: 1.45;
+        line-height: 1.5;
       }
 
       .consumer-message {
-        border: 1px solid var(--border);
-        background: rgba(255, 255, 255, 0.74);
+        display: flex;
+        width: 100%;
+      }
+
+      .consumer-message-surface {
+        width: 100%;
       }
 
       .consumer-message-user {
-        background: rgba(63, 102, 214, 0.08);
+        justify-content: flex-end;
+      }
+
+      .consumer-message-user .consumer-message-surface {
+        max-width: 84%;
+        padding: 12px 14px;
+        border-radius: 18px 18px 8px 18px;
+        border: 1px solid rgba(63, 102, 214, 0.12);
+        background: var(--surface-tint);
+      }
+
+      .consumer-message-assistant .consumer-message-surface {
+        width: 100%;
+        padding: 6px 0 4px;
       }
 
       .consumer-message-pending {
-        opacity: 0.84;
+        opacity: 0.9;
       }
 
       .consumer-message-role,
@@ -393,7 +342,7 @@
       }
 
       .consumer-message-role {
-        margin-bottom: 6px;
+        margin-bottom: 8px;
         color: var(--muted);
         font-size: 11px;
         font-weight: 700;
@@ -401,10 +350,82 @@
         letter-spacing: 0.08em;
       }
 
+      .consumer-message-user .consumer-message-role {
+        text-align: right;
+      }
+
       .consumer-message-text {
         font-size: 18px;
-        line-height: 1.52;
+        line-height: 1.58;
+      }
+
+      .consumer-message-plain {
         white-space: pre-wrap;
+      }
+
+      .consumer-message-markdown {
+        color: var(--text);
+      }
+
+      .consumer-message-markdown > :first-child {
+        margin-top: 0;
+      }
+
+      .consumer-message-markdown > :last-child {
+        margin-bottom: 0;
+      }
+
+      .consumer-message-markdown p,
+      .consumer-message-markdown ul,
+      .consumer-message-markdown ol,
+      .consumer-message-markdown blockquote,
+      .consumer-message-markdown pre {
+        margin: 0 0 0.8em;
+      }
+
+      .consumer-message-markdown ul,
+      .consumer-message-markdown ol {
+        padding-left: 1.25em;
+      }
+
+      .consumer-message-markdown li + li {
+        margin-top: 0.28em;
+      }
+
+      .consumer-message-markdown strong {
+        font-weight: 700;
+      }
+
+      .consumer-message-markdown code {
+        padding: 0.08em 0.36em;
+        border-radius: 0.45em;
+        background: rgba(15, 23, 42, 0.06);
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+        font-size: 0.92em;
+      }
+
+      .consumer-message-markdown pre {
+        overflow-x: auto;
+        padding: 12px 13px;
+        border-radius: 14px;
+        background: rgba(15, 23, 42, 0.045);
+      }
+
+      .consumer-message-markdown pre code {
+        padding: 0;
+        background: transparent;
+      }
+
+      .consumer-message-markdown blockquote {
+        padding-left: 14px;
+        border-left: 2px solid rgba(63, 102, 214, 0.24);
+        color: var(--muted);
+      }
+
+      .consumer-message-markdown a {
+        color: var(--accent);
+        text-decoration: underline;
+        text-underline-offset: 0.14em;
       }
 
       .consumer-message-footer {
@@ -444,56 +465,329 @@
         cursor: pointer;
       }
 
+      .composer-dock {
+        flex: 0 0 auto;
+        margin-top: 6px;
+        padding: 10px;
+        border: 1px solid rgba(15, 23, 42, 0.07);
+        border-radius: 20px;
+        background: rgba(255, 255, 255, 0.9);
+        box-shadow: 0 12px 32px rgba(15, 23, 42, 0.04);
+        backdrop-filter: blur(18px);
+      }
+
+      .dock-top {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 10px;
+        margin-bottom: 8px;
+      }
+
+      .scope-bar {
+        display: grid;
+        gap: 5px;
+        min-width: 0;
+      }
+
+      .scope-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        width: fit-content;
+        max-width: 100%;
+        padding: 7px 12px;
+        border-radius: 999px;
+        border: 1px solid var(--border);
+        background: rgba(255, 255, 255, 0.94);
+        color: var(--text);
+        font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        font-size: 13px;
+        font-weight: 700;
+        min-height: 38px;
+      }
+
+      .scope-chip[data-scope="selection"] {
+        border-color: rgba(63, 102, 214, 0.2);
+        background: var(--accent-soft);
+        color: var(--accent);
+      }
+
+      .scope-clear {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 20px;
+        height: 20px;
+        padding: 0;
+        border: 0;
+        border-radius: 999px;
+        background: rgba(15, 23, 42, 0.08);
+        color: inherit;
+        cursor: pointer;
+        font-size: 12px;
+        font-weight: 700;
+        line-height: 1;
+      }
+
+      .scope-preview {
+        color: var(--muted);
+        font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        font-size: 11px;
+        line-height: 1.35;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .scope-meta {
+        color: var(--muted-soft);
+        font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        font-size: 11px;
+        line-height: 1.35;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .jump-button {
+        flex: 0 0 auto;
+        padding: 6px 10px;
+        border-radius: 999px;
+        border: 1px solid rgba(63, 102, 214, 0.16);
+        background: rgba(255, 255, 255, 0.8);
+        color: var(--accent);
+        font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        font-size: 11px;
+        font-weight: 700;
+        transition:
+          transform 180ms ease,
+          opacity 180ms ease,
+          box-shadow 180ms ease;
+      }
+
+      .live-strip {
+        display: grid;
+        gap: 4px;
+        margin-bottom: 8px;
+        padding: 8px 10px;
+        border-radius: 14px;
+        border: 1px solid var(--border-soft);
+        background: rgba(255, 255, 255, 0.7);
+        transition:
+          border-color 220ms ease,
+          background-color 220ms ease,
+          box-shadow 220ms ease;
+      }
+
+      .live-strip[data-state="listening"] {
+        border-color: rgba(63, 102, 214, 0.16);
+        background: rgba(255, 255, 255, 0.82);
+        box-shadow: inset 0 0 0 1px rgba(63, 102, 214, 0.04);
+      }
+
+      .live-strip[data-state="speaking"] {
+        border-color: rgba(63, 102, 214, 0.14);
+        background: rgba(255, 255, 255, 0.8);
+      }
+
+      .signal {
+        display: flex;
+        align-items: center;
+        height: 18px;
+        overflow: hidden;
+        opacity: 1;
+        transform: translateY(0);
+        max-height: 18px;
+        transition:
+          opacity 220ms ease,
+          transform 220ms ease,
+          max-height 220ms ease;
+      }
+
+      .signal svg {
+        width: 100%;
+        height: 16px;
+      }
+
+      .signal path {
+        fill: none;
+        stroke: var(--accent);
+        stroke-width: 1.9;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+        opacity: 0.85;
+      }
+
+      .signal[data-state="idle"],
+      .signal[data-state="thinking"] {
+        opacity: 0;
+        transform: translateY(-4px);
+        max-height: 0;
+      }
+
+      .signal[data-state="thinking"] path {
+        animation: pulse-line 1.45s ease-in-out infinite;
+      }
+
+      .signal[data-state="idle"] path {
+        opacity: 0.28;
+      }
+
+      @keyframes pulse-line {
+        0%, 100% {
+          opacity: 0.35;
+        }
+        50% {
+          opacity: 0.95;
+        }
+      }
+
+      .activity-label {
+        color: var(--muted);
+        font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        font-size: 11px;
+        line-height: 1.25;
+      }
+
       .composer {
         display: grid;
-        gap: 12px;
+        gap: 6px;
       }
 
       .composer-input {
         width: 100%;
-        resize: vertical;
-        min-height: 96px;
+        resize: none;
+        min-height: 58px;
+        max-height: 104px;
         border: 1px solid var(--border);
-        border-radius: 20px;
-        background: rgba(255, 255, 255, 0.9);
+        border-radius: 16px;
+        background: rgba(255, 255, 255, 0.92);
         color: var(--text);
-        padding: 14px 16px;
-        font: inherit;
-        font-size: 17px;
-        line-height: 1.5;
+        padding: 11px 13px;
+        font-size: 15px;
+        line-height: 1.4;
       }
 
       .composer-input:disabled {
         color: #99a3b5;
-        background: rgba(255, 255, 255, 0.65);
+        background: rgba(255, 255, 255, 0.68);
       }
 
       .composer-row {
         display: flex;
-        gap: 10px;
+        align-items: center;
+        gap: 8px;
+        justify-content: flex-end;
       }
 
       .hold-button {
         flex: 0 0 auto;
-        min-width: 120px;
-        padding: 0 16px;
-        border-radius: 20px;
+        width: 46px;
+        min-width: 46px;
+        padding: 0;
+        height: 46px;
+        border-radius: 16px;
         border: 1px solid var(--border);
         background: rgba(255, 255, 255, 0.95);
-        font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-        font-size: 13px;
-        font-weight: 700;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        transition:
+          transform 180ms ease,
+          box-shadow 220ms ease,
+          border-color 220ms ease,
+          background-color 220ms ease,
+          opacity 180ms ease;
       }
 
       .send-button {
         flex: 0 0 auto;
-        min-width: 86px;
+        width: 52px;
+        min-width: 52px;
+        height: 52px;
+        border-radius: 16px;
+        margin-left: auto;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+      }
+
+      .composer-icon {
+        width: 20px;
+        height: 20px;
+        display: block;
+      }
+
+      .composer-icon path,
+      .composer-icon line,
+      .composer-icon polyline {
+        vector-effect: non-scaling-stroke;
+      }
+
+      .hold-button .composer-icon {
+        color: var(--text);
+      }
+
+      .send-button .composer-icon {
+        width: 22px;
+        height: 22px;
+        color: #ffffff;
+      }
+
+      .hold-button[data-state="listening"] {
+        border-color: rgba(63, 102, 214, 0.22);
+        background: rgba(63, 102, 214, 0.08);
+        box-shadow: 0 10px 22px rgba(63, 102, 214, 0.14);
+      }
+
+      .hold-button[data-state="listening"] .composer-icon {
+        color: var(--accent);
+      }
+
+      .button:hover,
+      .hold-button:hover,
+      .jump-button:hover {
+        transform: translateY(-1px);
+      }
+
+      .button-primary:hover {
+        box-shadow: 0 14px 28px rgba(63, 102, 214, 0.28);
+      }
+
+      .hold-button:hover {
+        box-shadow: 0 10px 22px rgba(15, 23, 42, 0.06);
+      }
+
+      .button:active,
+      .hold-button:active,
+      .jump-button:active {
+        transform: translateY(0);
+      }
+
+      .button:disabled,
+      .hold-button:disabled,
+      .jump-button:disabled {
+        opacity: 0.56;
+        transform: none;
+        box-shadow: none;
+        cursor: default;
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        .button,
+        .hold-button,
+        .jump-button,
+        .live-strip,
+        .signal {
+          transition: none;
+        }
       }
 
       .context-sheet {
         position: fixed;
         inset: 20px 12px 20px 56px;
-        z-index: 20;
+        z-index: 40;
         padding: 18px;
         border-radius: 24px;
         border: 1px solid var(--border);
@@ -587,58 +881,95 @@
         </div>
       </div>
 
-      <section class="panel conversation-panel">
-        <div id="consumer-auth-card" class="inline-card hidden">
-          <div id="consumer-auth-title" class="inline-card-title">Talk with the page you are reading</div>
-          <div id="consumer-auth-body" class="inline-card-body">Sign in once and ask questions about the current page with voice or text.</div>
-          <button id="consumer-sign-in-button" class="button button-primary" type="button">Continue with Google</button>
-        </div>
+      <main class="conversation-shell">
+        <section id="consumer-transcript-scroll" class="transcript-scroll">
+          <div class="transcript-prelude">
+            <div id="consumer-auth-card" class="inline-card hidden">
+              <div id="consumer-auth-title" class="inline-card-title">Talk with the page you are reading</div>
+              <div id="consumer-auth-body" class="inline-card-body">Sign in once and ask questions about the current page with voice or text.</div>
+              <button id="consumer-sign-in-button" class="button button-primary" type="button">Continue with Google</button>
+            </div>
 
-        <div id="consumer-recovery-card" class="inline-card hidden">
-          <div id="consumer-recovery-title" class="inline-card-title"></div>
-          <div id="consumer-recovery-body" class="inline-card-body"></div>
-          <button id="consumer-recovery-primary" class="button" type="button">Refresh page</button>
-        </div>
-
-        <div class="scope-bar">
-          <div id="consumer-scope-chip" class="scope-chip" data-scope="page">
-            <span id="consumer-scope-label">This page</span>
-            <button
-              id="consumer-scope-clear"
-              class="scope-clear hidden"
-              type="button"
-              aria-label="Clear selection scope"
-            >
-              ×
-            </button>
+            <div id="consumer-recovery-card" class="inline-card hidden">
+              <div id="consumer-recovery-title" class="inline-card-title"></div>
+              <div id="consumer-recovery-body" class="inline-card-body"></div>
+              <button id="consumer-recovery-primary" class="button" type="button">Refresh page</button>
+            </div>
           </div>
-          <div id="consumer-scope-preview" class="scope-preview hidden"></div>
-          <div id="consumer-scope-meta" class="scope-meta hidden"></div>
-        </div>
 
-        <div class="signal-wrap">
-          <div id="consumer-signal" class="signal" data-state="idle">
-            <svg viewBox="0 0 240 28" preserveAspectRatio="none" aria-hidden="true">
-              <path id="consumer-signal-path" d="M 0 14 L 240 14"></path>
-            </svg>
+          <div id="consumer-transcript" class="transcript"></div>
+        </section>
+
+        <section class="composer-dock">
+          <div class="dock-top">
+            <div class="scope-bar">
+              <div id="consumer-scope-chip" class="scope-chip" data-scope="page">
+                <span id="consumer-scope-label">This page</span>
+                <button
+                  id="consumer-scope-clear"
+                  class="scope-clear hidden"
+                  type="button"
+                  aria-label="Clear selection scope"
+                >
+                  ×
+                </button>
+              </div>
+              <div id="consumer-scope-preview" class="scope-preview hidden"></div>
+              <div id="consumer-scope-meta" class="scope-meta hidden"></div>
+            </div>
+
+            <button id="consumer-jump-latest-button" class="jump-button hidden" type="button">Jump to latest</button>
           </div>
-          <div id="consumer-activity-label" class="activity-label">Hold to talk or type a question.</div>
-        </div>
 
-        <div id="consumer-transcript" class="transcript"></div>
-
-        <div class="composer">
-          <textarea
-            id="conversation-input"
-            class="composer-input"
-            placeholder="Ask about this page..."
-          ></textarea>
-          <div class="composer-row">
-            <button id="conversation-mic-button" class="hold-button" type="button">Hold to talk</button>
-            <button id="conversation-send-button" class="button button-primary send-button" type="button">Send</button>
+          <div id="consumer-live-strip" class="live-strip" data-state="idle">
+            <div id="consumer-signal" class="signal" data-state="idle">
+              <svg viewBox="0 0 240 24" preserveAspectRatio="none" aria-hidden="true">
+                <path id="consumer-signal-path" d="M 0 12 L 240 12"></path>
+              </svg>
+            </div>
+            <div id="consumer-activity-label" class="activity-label">Hold to talk or type a question.</div>
           </div>
-        </div>
-      </section>
+
+          <div class="composer">
+            <textarea
+              id="conversation-input"
+              class="composer-input"
+              placeholder="Ask about this page..."
+            ></textarea>
+            <div class="composer-row">
+              <button
+                id="conversation-mic-button"
+                class="hold-button"
+                type="button"
+                aria-label="Hold to talk"
+                title="Hold to talk"
+              >
+                <svg class="composer-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                  <path
+                    d="M12 15a3.5 3.5 0 0 0 3.5-3.5v-4a3.5 3.5 0 1 0-7 0v4A3.5 3.5 0 0 0 12 15Z"
+                    stroke="currentColor"
+                    stroke-width="1.9"
+                  />
+                  <path d="M6.5 11.5a5.5 5.5 0 1 0 11 0" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" />
+                  <path d="M12 17v3" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" />
+                </svg>
+              </button>
+              <button
+                id="conversation-send-button"
+                class="button button-primary send-button"
+                type="button"
+                aria-label="Send message"
+                title="Send"
+              >
+                <svg class="composer-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                  <path d="M5 12H19" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" />
+                  <path d="M13 6L19 12L13 18" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" />
+                </svg>
+              </button>
+            </div>
+          </div>
+        </section>
+      </main>
 
       <aside id="consumer-context-sheet" class="context-sheet hidden">
         <div class="context-sheet-header">

@@ -106,7 +106,7 @@ describe("PageAudioInputProvider", () => {
     await stopPromise
 
     expect(chunks).toEqual(["audio-chunk"])
-    expect(states).toEqual(["idle", "processing", "listening", "processing"])
+    expect(states).toEqual(["idle", "processing", "listening", "processing", "idle"])
   })
 
   it("surfaces page capture errors and ignores direct content messages", async () => {

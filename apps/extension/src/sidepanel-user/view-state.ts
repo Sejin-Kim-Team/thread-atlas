@@ -20,6 +20,17 @@ export interface ConsumerShellViewState {
   recoveryKind: "refresh" | "microphone" | "runtime" | null
 }
 
+function isActivelyThinking(
+  runtimePhase: "initializing" | "ready" | "opening-session" | "sending-intent" | "waiting-enrich" | "resuming-turn" | "dormant" | "error",
+  voiceActivityState: ConsumerVoiceActivityState
+): boolean {
+  if (voiceActivityState === "thinking") {
+    return true
+  }
+
+  return runtimePhase === "sending-intent" || runtimePhase === "waiting-enrich" || runtimePhase === "resuming-turn"
+}
+
 export function deriveConsumerShellViewState(args: {
   pageSupported: boolean
   snapshotReady: boolean
@@ -58,15 +69,7 @@ export function deriveConsumerShellViewState(args: {
     activityLabel = "Listening... release to send."
   } else if (args.voiceActivityState === "speaking") {
     activityLabel = "Speaking..."
-  } else if (
-    args.voiceActivityState === "thinking" ||
-    args.speechInputState === "processing" ||
-    args.runtimePhase === "initializing" ||
-    args.runtimePhase === "opening-session" ||
-    args.runtimePhase === "sending-intent" ||
-    args.runtimePhase === "waiting-enrich" ||
-    args.runtimePhase === "resuming-turn"
-  ) {
+  } else if (isActivelyThinking(args.runtimePhase, args.voiceActivityState)) {
     activityLabel = "Thinking..."
   } else if (!signedIn) {
     activityLabel = "Sign in to talk with the page you are reading."

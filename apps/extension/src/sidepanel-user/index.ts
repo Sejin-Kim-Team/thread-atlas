@@ -28,6 +28,8 @@ import { cropViewportBase64ToPng } from "./image-crop"
 import {
   bindConsumerShellActions,
   renderConsumerShell,
+  readConsumerTranscriptPinnedToBottom,
+  scrollConsumerTranscriptToLatest,
   type ConsumerConversationMessage
 } from "./ui"
 import {
@@ -98,6 +100,9 @@ interface SidePanelUserState {
   voiceActivityState: ConsumerVoiceActivityState
   signalLevels: number[]
   showInternalConsoleLauncher: boolean
+  transcriptPinnedToBottom: boolean
+  showJumpToLatest: boolean
+  pendingTranscriptScrollToBottom: boolean
 }
 
 const TTS_ENABLED_STORAGE_KEY = "THREADATLAS_TTS_ENABLED"
@@ -151,11 +156,16 @@ const state: SidePanelUserState = {
   preparingSnapshot: false,
   voiceActivityState: "idle",
   signalLevels: Array.from({ length: 24 }, () => 0),
-  showInternalConsoleLauncher: false
+  showInternalConsoleLauncher: false,
+  transcriptPinnedToBottom: true,
+  showJumpToLatest: false,
+  pendingTranscriptScrollToBottom: true
 }
 
 let voiceVisualDecayTimer: number | null = null
 let selectionCaptureVersion = 0
+let transcriptSyncFrame: number | null = null
+const VOICE_VISUAL_IDLE_GRACE_MS = 900
 
 function isPageTextSelectionChangedMessage(
   message: unknown
@@ -254,14 +264,9 @@ function getActiveScopeSnapshot(): SemanticSnapshot | null {
   return state.pageSnapshot ?? state.latestSemanticSnapshot?.snapshot ?? null
 }
 
-function formatCount(count: number, singular: string, plural = `${singular}s`): string {
-  return `${count} ${count === 1 ? singular : plural}`
-}
-
 function describeSelectionScope(snapshot: SemanticSnapshot): string {
   const node = snapshot.focus.node
   const coverage = snapshot.meta.coverage
-  const relatedCount = snapshot.context.length
 
   let label = "Section"
   if (coverage?.kind === "focus-branch" || node.kind === "comment") {
@@ -270,14 +275,7 @@ function describeSelectionScope(snapshot: SemanticSnapshot): string {
     label = "Control group"
   }
 
-  if (!coverage) {
-    return `${label} · ${formatCount(relatedCount, "related node")}`
-  }
-
-  return `${label} · ${formatCount(coverage.capturedNodeCount, "captured node")} · ${formatCount(
-    relatedCount,
-    "related node"
-  )}`
+  return label
 }
 
 async function applySelectionScopeHighlight(snapshot: SemanticSnapshot): Promise<void> {
@@ -318,7 +316,11 @@ function refreshVoiceVisualState(): void {
     state.voiceActivityState = "listening"
     return
   }
-  if (hasActiveRuntimeTurn() || state.speechInputState === "processing") {
+  if (
+    state.phase === "sending-intent" ||
+    state.phase === "waiting-enrich" ||
+    state.phase === "resuming-turn"
+  ) {
     state.voiceActivityState = "thinking"
     return
   }
@@ -332,7 +334,7 @@ function scheduleVoiceVisualDecay(): void {
   voiceVisualDecayTimer = window.setTimeout(() => {
     refreshVoiceVisualState()
     renderShell()
-  }, 180)
+  }, VOICE_VISUAL_IDLE_GRACE_MS)
 }
 
 function applyTurnDecoration(message: ShellMessage, turnId: string | null | undefined): ShellMessage {
@@ -389,6 +391,7 @@ function updateTurnDecoration(turnId: string | null | undefined, patch: TurnDeco
   state.conversationMessages = state.conversationMessages.map((message) =>
     message.turnId === turnId && message.role === "assistant" ? applyTurnDecoration(message, turnId) : message
   )
+  markTranscriptUpdated()
 }
 
 function appendConversationMessage(message: ShellMessage): void {
@@ -402,6 +405,7 @@ function appendConversationMessage(message: ShellMessage): void {
       message.turnId
     )
   ]
+  markTranscriptUpdated()
 }
 
 function upsertConversationMessage(message: ShellMessage): void {
@@ -417,6 +421,7 @@ function upsertConversationMessage(message: ShellMessage): void {
     }
     state.conversationMessages = next
   }
+  markTranscriptUpdated()
 }
 
 function removeConversationMessage(id: string | null): void {
@@ -424,6 +429,7 @@ function removeConversationMessage(id: string | null): void {
     return
   }
   state.conversationMessages = state.conversationMessages.filter((item) => item.id !== id)
+  markTranscriptUpdated()
 }
 
 function resetConversationSurface(): void {
@@ -433,6 +439,9 @@ function resetConversationSurface(): void {
   state.contextSheetContent = null
   resetVoiceTranscriptState()
   state.turnDecorations.clear()
+  state.showJumpToLatest = false
+  state.transcriptPinnedToBottom = true
+  state.pendingTranscriptScrollToBottom = true
 }
 
 function getAssistantMessageById(messageId: string): ShellMessage | null {
@@ -543,7 +552,46 @@ function renderShell(): void {
     voiceOutputEnabled: state.ttsEnabled,
     showInternalConsoleLauncher: state.showInternalConsoleLauncher,
     contextContent: state.contextSheetContent,
-    contextSheetOpen: state.contextSheetOpen
+    contextSheetOpen: state.contextSheetOpen,
+    showJumpToLatest: state.showJumpToLatest
+  })
+  scheduleTranscriptPostRenderSync()
+}
+
+function markTranscriptUpdated(forceScrollToBottom = false): void {
+  if (forceScrollToBottom || state.transcriptPinnedToBottom) {
+    state.pendingTranscriptScrollToBottom = true
+    state.showJumpToLatest = false
+    return
+  }
+
+  state.showJumpToLatest = state.conversationMessages.length > 0
+}
+
+function updateTranscriptScrollState(): void {
+  const pinned = readConsumerTranscriptPinnedToBottom()
+  const showJump = !pinned && state.conversationMessages.length > 0
+  if (state.transcriptPinnedToBottom === pinned && state.showJumpToLatest === showJump) {
+    return
+  }
+
+  state.transcriptPinnedToBottom = pinned
+  state.showJumpToLatest = showJump
+  renderShell()
+}
+
+function scheduleTranscriptPostRenderSync(): void {
+  if (transcriptSyncFrame !== null) {
+    window.cancelAnimationFrame(transcriptSyncFrame)
+  }
+
+  transcriptSyncFrame = window.requestAnimationFrame(() => {
+    transcriptSyncFrame = null
+    if (state.pendingTranscriptScrollToBottom) {
+      scrollConsumerTranscriptToLatest()
+      state.pendingTranscriptScrollToBottom = false
+    }
+    updateTranscriptScrollState()
   })
 }
 
@@ -1179,6 +1227,7 @@ async function submitTextPrompt(prompt: string): Promise<void> {
   state.runtimeSnapshot = snapshot
   state.currentTurnOrigin = "text"
   state.contextSheetOpen = false
+  markTranscriptUpdated(true)
   try {
     await state.conversationController?.sendTextTurn({
       activeTabId: state.activeTabId,
@@ -1230,6 +1279,7 @@ async function startVoiceCapture(): Promise<void> {
   state.lastRuntimeError = null
   state.runtimeSnapshot = snapshot
   state.currentTurnOrigin = "voice"
+  markTranscriptUpdated(true)
   try {
     await controller.startVoiceTurn({
       activeTabId: state.activeTabId,
@@ -1498,6 +1548,9 @@ function createConversationController(): ConversationController {
       onInputTranscript(text, final, event) {
         if (event.turnId && state.currentTurnOrigin === "voice") {
           upsertVoiceUserTranscript(event.turnId, text, final)
+          if (final) {
+            void finishVoiceCapture()
+          }
         } else {
           upsertConversationMessage({
             id: `turn-user-${event.turnId}`,
@@ -1663,6 +1716,15 @@ async function initialize(): Promise<void> {
     },
     onCloseContextSheet: () => {
       state.contextSheetOpen = false
+      renderShell()
+    },
+    onTranscriptScroll: () => {
+      updateTranscriptScrollState()
+    },
+    onJumpToLatest: () => {
+      state.transcriptPinnedToBottom = true
+      state.showJumpToLatest = false
+      state.pendingTranscriptScrollToBottom = true
       renderShell()
     }
   })

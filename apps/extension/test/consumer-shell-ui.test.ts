@@ -1,5 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
-import { bindConsumerShellActions, renderConsumerShell } from "../src/sidepanel-user/ui"
+import {
+  bindConsumerShellActions,
+  readConsumerTranscriptPinnedToBottom,
+  renderConsumerShell,
+  scrollConsumerTranscriptToLatest
+} from "../src/sidepanel-user/ui"
 
 describe("consumer shell ui", () => {
   beforeEach(() => {
@@ -28,10 +33,14 @@ describe("consumer shell ui", () => {
       <button id="consumer-scope-clear" class="hidden" type="button">×</button>
       <div id="consumer-scope-preview" class="hidden"></div>
       <div id="consumer-scope-meta" class="hidden"></div>
+      <div id="consumer-live-strip" data-state="idle"></div>
       <div id="consumer-signal" data-state="idle"></div>
       <svg><path id="consumer-signal-path"></path></svg>
       <div id="consumer-activity-label"></div>
-      <div id="consumer-transcript"></div>
+      <div id="consumer-transcript-scroll" style="height: 180px; overflow: auto;">
+        <div id="consumer-transcript"></div>
+      </div>
+      <button id="consumer-jump-latest-button" class="hidden" type="button">Jump to latest</button>
       <textarea id="conversation-input"></textarea>
       <button id="conversation-mic-button" type="button">Hold to talk</button>
       <button id="conversation-send-button" type="button">Send</button>
@@ -64,7 +73,7 @@ describe("consumer shell ui", () => {
         {
           id: "assistant-1",
           role: "assistant",
-          text: "This page argues Spotify's AI DJ is mostly a product design failure.",
+          text: "This page **argues** Spotify's AI DJ is mostly a product design failure.\n\n- Product issue\n- Weak framing\n\n[Read more](https://example.com)",
           provenanceSummary: ["current-page", "enriched-context"],
           actions: {
             copyText: "This page argues Spotify's AI DJ is mostly a product design failure.",
@@ -75,7 +84,7 @@ describe("consumer shell ui", () => {
       ],
       activeScope: "selection",
       selectionPreview: "Spotify DJ is essentially shuffle with voice interludes.",
-      selectionScopeMeta: "Comment branch · 8 captured nodes · 7 related nodes",
+      selectionScopeMeta: "Comment branch",
       composerValue: "",
       sendDisabled: true,
       voiceActivityState: "speaking",
@@ -94,20 +103,25 @@ describe("consumer shell ui", () => {
         title: "More context",
         items: [{ source: "Comment branch", summary: "The discussion argues this is mostly a product issue." }]
       },
-      contextSheetOpen: true
+      contextSheetOpen: true,
+      showJumpToLatest: true
     })
 
     expect(document.getElementById("consumer-page-title")?.textContent).toContain("Spotify")
     expect(document.getElementById("consumer-readiness-pill")?.textContent).toBe("Ready")
     expect(document.getElementById("consumer-scope-label")?.textContent).toBe("Your selection")
     expect(document.getElementById("consumer-scope-preview")?.textContent).toContain("shuffle")
-    expect(document.getElementById("consumer-scope-meta")?.textContent).toContain("Comment branch")
+    expect(document.getElementById("consumer-scope-meta")?.textContent).toBe("Comment branch")
     expect(document.getElementById("consumer-activity-label")?.textContent).toContain("Hold to talk")
+    expect(document.getElementById("consumer-live-strip")?.dataset.state).toBe("speaking")
     expect(document.getElementById("consumer-transcript")?.textContent).toContain("product design failure")
     expect(document.getElementById("consumer-transcript")?.textContent).toContain("Based on this page")
-    expect(document.getElementById("consumer-transcript")?.textContent).toContain("Used more page context")
+    expect(document.getElementById("consumer-transcript")?.textContent).toContain("Used image context")
     expect(document.getElementById("consumer-context-list")?.textContent).toContain("Comment branch")
     expect(document.getElementById("consumer-menu")?.classList.contains("hidden")).toBe(false)
+    expect(document.querySelector("#consumer-transcript strong")?.textContent).toBe("argues")
+    expect(document.querySelector("#consumer-transcript a")?.getAttribute("target")).toBe("_blank")
+    expect(document.getElementById("consumer-jump-latest-button")?.classList.contains("hidden")).toBe(false)
   })
 
   it("binds keyboard and pointer voice controls plus transcript actions", () => {
@@ -128,6 +142,8 @@ describe("consumer shell ui", () => {
     const onEscape = vi.fn()
     const onOpenInternalConsole = vi.fn()
     const onCloseContextSheet = vi.fn()
+    const onTranscriptScroll = vi.fn()
+    const onJumpToLatest = vi.fn()
 
     bindConsumerShellActions({
       onComposerInput,
@@ -146,7 +162,9 @@ describe("consumer shell ui", () => {
       onClearScope,
       onEscape,
       onOpenInternalConsole,
-      onCloseContextSheet
+      onCloseContextSheet,
+      onTranscriptScroll,
+      onJumpToLatest
     })
 
     const composer = document.getElementById("conversation-input") as HTMLTextAreaElement
@@ -177,6 +195,8 @@ describe("consumer shell ui", () => {
     document.getElementById("consumer-scope-clear")?.dispatchEvent(new MouseEvent("click", { bubbles: true }))
     document.getElementById("consumer-open-console-button")?.dispatchEvent(new MouseEvent("click", { bubbles: true }))
     document.getElementById("consumer-context-close")?.dispatchEvent(new MouseEvent("click", { bubbles: true }))
+    document.getElementById("consumer-jump-latest-button")?.dispatchEvent(new MouseEvent("click", { bubbles: true }))
+    document.getElementById("consumer-transcript-scroll")?.dispatchEvent(new Event("scroll", { bubbles: true }))
 
     const transcript = document.getElementById("consumer-transcript") as HTMLDivElement
     transcript.innerHTML = `
@@ -201,8 +221,25 @@ describe("consumer shell ui", () => {
     expect(onClearScope).toHaveBeenCalledTimes(1)
     expect(onOpenInternalConsole).toHaveBeenCalledTimes(1)
     expect(onCloseContextSheet).toHaveBeenCalledTimes(1)
+    expect(onTranscriptScroll).toHaveBeenCalledTimes(1)
+    expect(onJumpToLatest).toHaveBeenCalledTimes(1)
     expect(onCopyMessage).toHaveBeenCalledWith("m-1")
     expect(onShowContext).toHaveBeenCalledWith("m-2")
     expect(onHighlightMessage).toHaveBeenCalledWith("m-3")
+  })
+
+  it("tracks transcript bottom state and can jump to latest", () => {
+    const transcriptScroll = document.getElementById("consumer-transcript-scroll") as HTMLDivElement
+    Object.defineProperty(transcriptScroll, "clientHeight", { value: 180, configurable: true })
+    Object.defineProperty(transcriptScroll, "scrollHeight", { value: 520, configurable: true })
+    transcriptScroll.scrollTop = 340
+
+    expect(readConsumerTranscriptPinnedToBottom()).toBe(true)
+
+    transcriptScroll.scrollTop = 40
+    expect(readConsumerTranscriptPinnedToBottom()).toBe(false)
+
+    scrollConsumerTranscriptToLatest()
+    expect(transcriptScroll.scrollTop).toBe(520)
   })
 })
