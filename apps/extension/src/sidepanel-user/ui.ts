@@ -437,10 +437,10 @@ export function bindConsumerShellActions(args: {
     if (event.defaultPrevented || event.repeat || event.isComposing) {
       return
     }
-    if (event.altKey || event.ctrlKey || event.metaKey) {
+    if (event.ctrlKey || event.metaKey) {
       return
     }
-    if (event.code === "Space" && !isEditableTarget(event.target)) {
+    if (event.code === "Space" && event.altKey && !isEditableTarget(event.target)) {
       event.preventDefault()
       keyboardVoiceActive = true
       args.onStartMicPress()
@@ -458,7 +458,7 @@ export function bindConsumerShellActions(args: {
     if (event.isComposing) {
       return
     }
-    if (event.code === "Space" && keyboardVoiceActive && !isEditableTarget(event.target)) {
+    if (event.code === "Space" && event.altKey && keyboardVoiceActive && !isEditableTarget(event.target)) {
       event.preventDefault()
       keyboardVoiceActive = false
       args.onEndMicPress()

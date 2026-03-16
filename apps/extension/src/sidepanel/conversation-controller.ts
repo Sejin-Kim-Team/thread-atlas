@@ -42,6 +42,8 @@ export class ConversationController {
   readonly transport: ConversationRuntimeTransport
   private ttsEnabled: boolean
   private acceptingVoiceInputChunks = false
+  private currentVoiceTurnId: string | null = null
+  private voiceTurnLifecycle: "idle" | "capturing" | "awaiting-turn" = "idle"
 
   constructor(
     private readonly args: {
@@ -71,6 +73,12 @@ export class ConversationController {
         authClient: args.authClient,
         handlers: {
           ...args.handlers,
+          onTurnStarted: (event) => {
+            if (event.payload.modality === "voice") {
+              this.currentVoiceTurnId = event.turnId
+            }
+            args.handlers.onTurnStarted?.(event)
+          },
           onAudioChunk: (event) => {
             if (this.ttsEnabled) {
               void this.audioOutput.playChunk(event.payload.chunkBase64)
@@ -78,23 +86,38 @@ export class ConversationController {
             args.handlers.onAudioChunk?.(event)
           },
           onTurnDone: (event) => {
-            if (event.payload.modality === "voice") {
+            const isCurrentVoiceTurn =
+              event.payload.modality === "voice" && event.turnId === this.currentVoiceTurnId
+            if (isCurrentVoiceTurn) {
               this.acceptingVoiceInputChunks = false
+              this.currentVoiceTurnId = null
+              this.voiceTurnLifecycle = "idle"
               if (this.audioInput.supported) {
                 void this.audioInput.cancel()
               }
             }
             args.handlers.onTurnDone?.(event)
-            this.notifySpeechState(this.audioInput.supported ? "idle" : "unsupported")
+            if (isCurrentVoiceTurn || event.payload.modality !== "voice") {
+              this.notifySpeechState(this.audioInput.supported ? "idle" : "unsupported")
+            }
           },
           onError: (error, event) => {
-            this.acceptingVoiceInputChunks = false
             args.handlers.onError?.(error, event)
-            this.audioOutput.stop()
-            if (this.audioInput.supported) {
-              void this.audioInput.cancel()
-            } else {
-              this.notifySpeechState("unsupported")
+            const shouldHandleAsCurrentVoiceError =
+              event.turnId != null
+                ? event.turnId === this.currentVoiceTurnId
+                : this.voiceTurnLifecycle === "awaiting-turn"
+
+            if (shouldHandleAsCurrentVoiceError) {
+              this.acceptingVoiceInputChunks = false
+              this.currentVoiceTurnId = null
+              this.voiceTurnLifecycle = "idle"
+              this.audioOutput.stop()
+              if (this.audioInput.supported) {
+                void this.audioInput.cancel()
+              } else {
+                this.notifySpeechState("unsupported")
+              }
             }
           }
         }
@@ -146,6 +169,8 @@ export class ConversationController {
     language?: string
   }): Promise<void> {
     this.acceptingVoiceInputChunks = false
+    this.currentVoiceTurnId = null
+    this.voiceTurnLifecycle = "idle"
     this.audioOutput.stop()
     await this.transport.sendTextTurn(input)
   }
@@ -160,6 +185,8 @@ export class ConversationController {
     }
 
     this.acceptingVoiceInputChunks = false
+    this.currentVoiceTurnId = null
+    this.voiceTurnLifecycle = "capturing"
     this.audioOutput.stop()
     await this.transport.startVoiceTurn(input)
     try {
@@ -177,11 +204,14 @@ export class ConversationController {
     }
     await this.audioInput.stop()
     this.acceptingVoiceInputChunks = false
+    this.voiceTurnLifecycle = "awaiting-turn"
     this.transport.commitAudio()
   }
 
   async cancelVoiceTurn(): Promise<void> {
     this.acceptingVoiceInputChunks = false
+    this.currentVoiceTurnId = null
+    this.voiceTurnLifecycle = "idle"
     if (this.audioInput.supported) {
       await this.audioInput.cancel()
     }
@@ -192,6 +222,8 @@ export class ConversationController {
 
   async interrupt(reason: string): Promise<void> {
     this.acceptingVoiceInputChunks = false
+    this.currentVoiceTurnId = null
+    this.voiceTurnLifecycle = "idle"
     if (this.audioInput.supported) {
       await this.audioInput.cancel()
     }
@@ -202,6 +234,8 @@ export class ConversationController {
 
   async close(): Promise<void> {
     this.acceptingVoiceInputChunks = false
+    this.currentVoiceTurnId = null
+    this.voiceTurnLifecycle = "idle"
     if (this.audioInput.supported) {
       await this.audioInput.cancel()
     }

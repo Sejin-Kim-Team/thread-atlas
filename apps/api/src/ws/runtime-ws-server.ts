@@ -71,6 +71,22 @@ function isRuntimeV2ClientEnvelope(value: unknown): value is RuntimeV2ClientEnve
   )
 }
 
+function getRuntimeEnvelopeType(raw: RawData): string | null {
+  const text = rawDataToText(raw)
+  if (!text) {
+    return null
+  }
+  try {
+    const parsed = JSON.parse(text) as unknown
+    if (!isRecord(parsed) || typeof parsed.type !== "string") {
+      return null
+    }
+    return parsed.type
+  } catch {
+    return null
+  }
+}
+
 function toRuntimeErrorEnvelope(args: {
   code: RuntimeV2ErrorCode
   message: string
@@ -409,20 +425,19 @@ class RuntimeGateway {
     args: Record<string, unknown>
   }): Promise<RuntimeV2ToolResultPayload | null> {
     const toolRequestId = makeRequestId("tool")
-    this.emit({
-      type: "tool.request",
-      timestamp: makeTimestamp(),
-      sessionId: request.sessionId,
-      turnId: request.turnId,
-      payload: {
-        toolRequestId,
-        kind: request.kind,
-        waitForResult: request.waitForResult,
-        args: request.args
-      }
-    })
-
     if (!request.waitForResult) {
+      this.emit({
+        type: "tool.request",
+        timestamp: makeTimestamp(),
+        sessionId: request.sessionId,
+        turnId: request.turnId,
+        payload: {
+          toolRequestId,
+          kind: request.kind,
+          waitForResult: request.waitForResult,
+          args: request.args
+        }
+      })
       return null
     }
 
@@ -443,6 +458,25 @@ class RuntimeGateway {
         reject,
         timeout
       })
+
+      try {
+        this.emit({
+          type: "tool.request",
+          timestamp: makeTimestamp(),
+          sessionId: request.sessionId,
+          turnId: request.turnId,
+          payload: {
+            toolRequestId,
+            kind: request.kind,
+            waitForResult: request.waitForResult,
+            args: request.args
+          }
+        })
+      } catch (error) {
+        clearTimeout(timeout)
+        this.pendingToolRequests.delete(toolRequestId)
+        reject(error instanceof Error ? error : new Error("failed to emit frontend tool request"))
+      }
     })
   }
 
@@ -547,6 +581,20 @@ export function attachRuntimeWebSocketServer(
     let messageQueue = Promise.resolve()
 
     ws.on("message", (chunk) => {
+      if (getRuntimeEnvelopeType(chunk) === "tool.result") {
+        void processIncomingChunk({
+          ws,
+          gateway,
+          chunk
+        }).catch((error) => {
+          logger.error("runtime-ws-tool-result-processing-error", {
+            principalUserId,
+            error
+          })
+        })
+        return
+      }
+
       messageQueue = messageQueue
         .then(() =>
           processIncomingChunk({
