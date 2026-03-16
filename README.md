@@ -2,6 +2,10 @@
 
 ThreadAtlas monorepo for a semantic browser copilot.
 
+## Architecture
+
+![ThreadAtlas Architecture](docs/architecture/threadatlas_architecture_flow.png)
+
 ## Workspace layout
 
 - `apps/api`: current-page session runtime API
