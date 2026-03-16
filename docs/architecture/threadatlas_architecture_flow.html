@@ -1,0 +1,541 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=1440">
+<title>ThreadAtlas — Architecture Diagram</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: 'Inter', -apple-system, sans-serif;
+    background: #ffffff;
+    color: #1a1a2e;
+    padding: 40px 56px 48px;
+    min-width: 1200px;
+  }
+
+  /* ── Header ── */
+  .header { text-align: center; margin-bottom: 40px; }
+  .header h1 { font-size: 26px; font-weight: 800; letter-spacing: -0.5px; color: #111; }
+  .header h1 span { color: #4f46e5; }
+  .header p { font-size: 13px; color: #64748b; margin-top: 6px; }
+
+  /* ── Diagram wrapper ── */
+  .diagram { max-width: 1160px; margin: 0 auto; position: relative; }
+
+  /* ── Layer ── */
+  .layer {
+    border: 2px solid;
+    border-radius: 16px;
+    padding: 20px 24px 18px;
+    margin-bottom: 20px;
+    position: relative;
+  }
+  .layer-tag {
+    position: absolute;
+    top: -11px;
+    left: 24px;
+    padding: 2px 14px;
+    border-radius: 6px;
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+  }
+  .layer-title {
+    font-size: 15px;
+    font-weight: 700;
+    margin-bottom: 16px;
+    padding-left: 2px;
+  }
+
+  /* ── Layer colors ── */
+  .layer-client { border-color: #c7d2fe; background: #f8f9ff; }
+  .layer-client .layer-tag { background: #4f46e5; color: #fff; }
+  .layer-client .layer-title { color: #3730a3; }
+
+  .layer-fe { border-color: #d8b4fe; background: #fdfaff; }
+  .layer-fe .layer-tag { background: #7c3aed; color: #fff; }
+  .layer-fe .layer-title { color: #6b21a8; }
+
+  .layer-be { border-color: #fed7aa; background: #fffcf8; }
+  .layer-be .layer-tag { background: #ea580c; color: #fff; }
+  .layer-be .layer-title { color: #9a3412; }
+
+  .layer-cloud { border-color: #a7f3d0; background: #f7fdfb; }
+  .layer-cloud .layer-tag { background: #059669; color: #fff; }
+  .layer-cloud .layer-title { color: #065f46; }
+
+  /* ── Component boxes ── */
+  .components {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+  .comp {
+    border: 1.5px solid;
+    border-radius: 10px;
+    padding: 12px 16px;
+    min-width: 0;
+    flex: 1;
+    min-height: 72px;
+    position: relative;
+  }
+  .comp-title {
+    font-size: 13px;
+    font-weight: 700;
+    margin-bottom: 4px;
+    line-height: 1.3;
+  }
+  .comp-desc {
+    font-size: 11px;
+    color: #64748b;
+    line-height: 1.45;
+  }
+  .comp-badge {
+    display: inline-block;
+    font-size: 9px;
+    font-weight: 700;
+    padding: 1px 7px;
+    border-radius: 4px;
+    margin-top: 6px;
+    letter-spacing: 0.3px;
+  }
+
+  /* ── Component colors by layer ── */
+  .layer-client .comp { border-color: #c7d2fe; background: #fff; }
+  .layer-client .comp-title { color: #3730a3; }
+
+  .layer-fe .comp { border-color: #e0cbff; background: #fff; }
+  .layer-fe .comp-title { color: #6b21a8; }
+  .layer-fe .comp-badge { background: #f3e8ff; color: #7c3aed; }
+
+  .layer-be .comp { border-color: #fde0b1; background: #fff; }
+  .layer-be .comp-title { color: #9a3412; }
+  .layer-be .comp-badge { background: #fff7ed; color: #c2410c; }
+
+  .layer-cloud .comp { border-color: #a7f3d0; background: #fff; }
+  .layer-cloud .comp-title { color: #065f46; }
+  .layer-cloud .comp-badge { background: #ecfdf5; color: #059669; }
+
+  /* ── Connector arrows (vertical between layers) ── */
+  .connector {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 24px;
+    height: 44px;
+    position: relative;
+  }
+  .conn-line {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0;
+  }
+  .conn-arrow {
+    font-size: 18px;
+    color: #94a3b8;
+    line-height: 1;
+  }
+  .conn-label {
+    font-size: 10px;
+    font-weight: 600;
+    color: #94a3b8;
+    background: #fff;
+    padding: 2px 10px;
+    border-radius: 4px;
+    border: 1px solid #e2e8f0;
+    white-space: nowrap;
+  }
+
+  /* ── Bi-directional connector ── */
+  .connector-bidi {
+    display: flex;
+    justify-content: center;
+    gap: 48px;
+  }
+  .conn-bidi-group {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0;
+  }
+
+  /* ── Sub-group within a layer ── */
+  .sub-group {
+    border: 1.5px dashed;
+    border-radius: 10px;
+    padding: 14px 14px 10px;
+    flex: 1;
+    position: relative;
+  }
+  .sub-group-label {
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    margin-bottom: 10px;
+  }
+  .sub-group .components { gap: 8px; }
+  .sub-group .comp { min-height: 60px; padding: 10px 14px; }
+
+  .layer-fe .sub-group { border-color: #d8b4fe; background: #faf5ff; }
+  .layer-fe .sub-group-label { color: #7c3aed; }
+
+  .layer-be .sub-group { border-color: #fed7aa; background: #fff9f0; }
+  .layer-be .sub-group-label { color: #c2410c; }
+
+  /* ── Gemini detail card ── */
+  .gemini-detail {
+    flex: 2;
+    min-width: 300px;
+  }
+  .model-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-top: 8px;
+  }
+  .model-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 8px 12px;
+    border-radius: 8px;
+    background: #f0fdf4;
+    border: 1px solid #bbf7d0;
+  }
+  .model-icon {
+    flex-shrink: 0;
+    width: 28px;
+    height: 28px;
+    border-radius: 6px;
+    background: #059669;
+    color: #fff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 13px;
+    font-weight: 800;
+  }
+  .model-info { flex: 1; min-width: 0; }
+  .model-name {
+    font-size: 12px;
+    font-weight: 700;
+    color: #065f46;
+    line-height: 1.3;
+  }
+  .model-use {
+    font-size: 10px;
+    color: #6b7280;
+    line-height: 1.4;
+    margin-top: 1px;
+  }
+
+  /* ── Return flow ── */
+  .return-flow {
+    position: absolute;
+    right: -48px;
+    top: 0;
+    bottom: 0;
+    width: 48px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+  }
+  .return-track {
+    position: absolute;
+    top: 20px;
+    bottom: 20px;
+    width: 2px;
+    background: #c7d2fe;
+    border-radius: 1px;
+  }
+  .return-arrow-up {
+    position: absolute;
+    top: 14px;
+    font-size: 16px;
+    color: #818cf8;
+  }
+  .return-text {
+    writing-mode: vertical-rl;
+    text-orientation: mixed;
+    font-size: 10px;
+    font-weight: 600;
+    color: #818cf8;
+    letter-spacing: 0.5px;
+    background: #fff;
+    padding: 8px 4px;
+    position: relative;
+    z-index: 1;
+  }
+
+  /* ── Footer ── */
+  .footer {
+    text-align: center;
+    margin-top: 32px;
+    padding-top: 20px;
+    border-top: 1px solid #e2e8f0;
+  }
+  .footer-main {
+    font-size: 11px;
+    color: #94a3b8;
+  }
+  .footer-legend {
+    display: flex;
+    justify-content: center;
+    gap: 24px;
+    margin-top: 10px;
+  }
+  .legend-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 10px;
+    color: #64748b;
+    font-weight: 500;
+  }
+  .legend-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 3px;
+    border: 1.5px solid;
+  }
+  .legend-dot.fe { background: #fdfaff; border-color: #d8b4fe; }
+  .legend-dot.be { background: #fffcf8; border-color: #fed7aa; }
+  .legend-dot.cloud { background: #f7fdfb; border-color: #a7f3d0; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1><span>ThreadAtlas</span> — Architecture Diagram</h1>
+  <p>Browser-native AI copilot &middot; Semantic page understanding &middot; Grounded reasoning on Google Cloud</p>
+</div>
+
+<div class="diagram">
+
+  <!-- ─── Return flow (right side) ─── -->
+  <div class="return-flow">
+    <div class="return-track"></div>
+    <div class="return-arrow-up">&#9650;</div>
+    <span class="return-text">Streaming Response &amp; Projections</span>
+  </div>
+
+  <!-- ═══════ CLIENT LAYER ═══════ -->
+  <div class="layer layer-client">
+    <span class="layer-tag">Client</span>
+    <div class="layer-title">Browser Environment</div>
+    <div class="components">
+      <div class="comp" style="flex: 0 0 180px;">
+        <div class="comp-title">User</div>
+        <div class="comp-desc">Text query, voice input, text selection, or page navigation</div>
+      </div>
+      <div class="comp">
+        <div class="comp-title">Web Page (Active Tab)</div>
+        <div class="comp-desc">Any website — news articles, discussions, documentation, search results</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Connector -->
+  <div class="connector">
+    <div class="conn-line">
+      <span class="conn-arrow">&#9660;</span>
+      <span class="conn-label">DOM + User Interaction</span>
+      <span class="conn-arrow">&#9660;</span>
+    </div>
+  </div>
+
+  <!-- ═══════ FRONTEND LAYER ═══════ -->
+  <div class="layer layer-fe">
+    <span class="layer-tag">Frontend</span>
+    <div class="layer-title">Chrome Extension — Semantic Perception &amp; Interaction</div>
+
+    <div class="components" style="margin-bottom: 14px;">
+      <div class="comp">
+        <div class="comp-title">Sidepanel UI</div>
+        <div class="comp-desc">Conversation interface with text, voice (mic/speaker), and context preview</div>
+        <span class="comp-badge">Interaction</span>
+      </div>
+      <div class="comp">
+        <div class="comp-title">Background Service Worker</div>
+        <div class="comp-desc">Session state, auth lifecycle, snapshot coordination, tab tracking</div>
+        <span class="comp-badge">Orchestration</span>
+      </div>
+    </div>
+
+    <div style="display: flex; gap: 12px;">
+      <div class="sub-group" style="flex: 3;">
+        <div class="sub-group-label">Semantic Capture Engine</div>
+        <div class="components">
+          <div class="comp">
+            <div class="comp-title">Content Runtime</div>
+            <div class="comp-desc">DOM observer, overlay, selection scope</div>
+          </div>
+          <div class="comp">
+            <div class="comp-title">Generic Extractor</div>
+            <div class="comp-desc">Site-agnostic semantic region detection &amp; normalization pipeline</div>
+          </div>
+          <div class="comp">
+            <div class="comp-title">Site Enhancers</div>
+            <div class="comp-desc">HackerNews, Docs, Search — domain-specific refinement</div>
+          </div>
+        </div>
+      </div>
+      <div class="sub-group" style="flex: 2;">
+        <div class="sub-group-label">Context Assembly</div>
+        <div class="components" style="flex-direction: column;">
+          <div class="comp">
+            <div class="comp-title">SemanticSnapshot</div>
+            <div class="comp-desc">Canonical page structure — focus node, context slice, provenance</div>
+          </div>
+          <div class="comp">
+            <div class="comp-title">ContextPack</div>
+            <div class="comp-desc">LLM-optimized projection with ancestors, siblings, descendants</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Connector (bidirectional) -->
+  <div class="connector connector-bidi">
+    <div class="conn-bidi-group">
+      <span class="conn-arrow">&#9660;</span>
+      <span class="conn-label">Snapshot + Intent (Text / Voice)</span>
+      <span class="conn-arrow">&#9660;</span>
+    </div>
+    <div class="conn-bidi-group">
+      <span class="conn-arrow">&#9650;</span>
+      <span class="conn-label">Enrich Request (Screenshot / Detail)</span>
+      <span class="conn-arrow">&#9650;</span>
+    </div>
+  </div>
+
+  <!-- ═══════ BACKEND LAYER ═══════ -->
+  <div class="layer layer-be">
+    <span class="layer-tag">Backend</span>
+    <div class="layer-title">API Runtime on Cloud Run — Reasoning &amp; Orchestration</div>
+
+    <div class="components" style="margin-bottom: 14px;">
+      <div class="comp">
+        <div class="comp-title">Session &amp; Auth Gateway</div>
+        <div class="comp-desc">WebSocket lifecycle, Google OAuth token verification, turn routing</div>
+        <span class="comp-badge">Entry Point</span>
+      </div>
+      <div class="comp">
+        <div class="comp-title">Turn Executor</div>
+        <div class="comp-desc">Dispatches each conversational turn to Text or Live Voice execution path</div>
+        <span class="comp-badge">Routing</span>
+      </div>
+    </div>
+
+    <div style="display: flex; gap: 12px;">
+      <div class="sub-group" style="flex: 1;">
+        <div class="sub-group-label">Evidence Orchestration</div>
+        <div class="components" style="flex-direction: column;">
+          <div class="comp">
+            <div class="comp-title">Enrich Loop</div>
+            <div class="comp-desc">Intent analysis &rarr; gap detection &rarr; visual evidence request to frontend</div>
+          </div>
+          <div class="comp">
+            <div class="comp-title">Visual Reasoner</div>
+            <div class="comp-desc">Feeds screenshots + page context into Gemini multimodal for structured visual summary</div>
+          </div>
+        </div>
+      </div>
+      <div class="sub-group" style="flex: 1;">
+        <div class="sub-group-label">Generation &amp; Memory</div>
+        <div class="components" style="flex-direction: column;">
+          <div class="comp">
+            <div class="comp-title">Grounded Generator</div>
+            <div class="comp-desc">Produces current-page answers using semantic context + enrich evidence</div>
+          </div>
+          <div class="comp">
+            <div class="comp-title">Memory Retrieval (RAG)</div>
+            <div class="comp-desc">Vector similarity search over cross-session knowledge via pgvector</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Connector -->
+  <div class="connector">
+    <div class="conn-line">
+      <span class="conn-arrow">&#9660;</span>
+      <span class="conn-label">Vertex AI API</span>
+      <span class="conn-arrow">&#9660;</span>
+    </div>
+  </div>
+
+  <!-- ═══════ CLOUD LAYER ═══════ -->
+  <div class="layer layer-cloud">
+    <span class="layer-tag">Google Cloud Platform</span>
+    <div class="layer-title">Managed Infrastructure &amp; AI Services</div>
+
+    <div class="components">
+      <!-- Gemini Detail -->
+      <div class="comp gemini-detail">
+        <div class="comp-title">Gemini &amp; Vertex AI</div>
+        <div class="model-list">
+          <div class="model-item">
+            <div class="model-icon">T</div>
+            <div class="model-info">
+              <div class="model-name">Gemini 2.5 Flash</div>
+              <div class="model-use">Text generation &middot; Multimodal visual reasoning &middot; Structured JSON output &middot; Enrich decision (hybrid LLM-assist)</div>
+            </div>
+          </div>
+          <div class="model-item">
+            <div class="model-icon">V</div>
+            <div class="model-info">
+              <div class="model-name">Gemini Live 2.5 Flash — Native Audio</div>
+              <div class="model-use">Real-time bidirectional voice streaming &middot; Tool-augmented live conversation &middot; Input / output transcription</div>
+            </div>
+          </div>
+          <div class="model-item">
+            <div class="model-icon">E</div>
+            <div class="model-info">
+              <div class="model-name">Gemini Embedding 001</div>
+              <div class="model-use">768-dim vector embeddings &middot; Semantic memory indexing &middot; Cross-session retrieval queries</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Other GCP services -->
+      <div style="display: flex; flex-direction: column; gap: 12px; flex: 1;">
+        <div class="comp">
+          <div class="comp-title">Cloud SQL + pgvector</div>
+          <div class="comp-desc">PostgreSQL with 768-dim vector index for semantic memory, user sessions, identity store</div>
+        </div>
+        <div class="comp">
+          <div class="comp-title">Cloud Run</div>
+          <div class="comp-desc">Auto-scaling container runtime with health / readiness probes</div>
+        </div>
+        <div class="comp">
+          <div class="comp-title">Google OAuth 2.0</div>
+          <div class="comp-desc">OIDC identity verification for secure user authentication</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div><!-- /diagram -->
+
+<!-- Footer -->
+<div class="footer">
+  <div class="footer-legend">
+    <div class="legend-item"><span class="legend-dot fe"></span>Frontend (Chrome Extension)</div>
+    <div class="legend-item"><span class="legend-dot be"></span>Backend (API Runtime)</div>
+    <div class="legend-item"><span class="legend-dot cloud"></span>Google Cloud Platform</div>
+  </div>
+  <div class="footer-main" style="margin-top: 8px;">ThreadAtlas &middot; Sejin-Kim-Team</div>
+</div>
+
+</body>
+</html>
