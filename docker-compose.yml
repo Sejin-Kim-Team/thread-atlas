@@ -6,7 +6,7 @@ services:
     environment:
       POSTGRES_DB: thread-atlas
       POSTGRES_USER: testuser
-      POSTGRES_PASSWORD: test1234
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-testpassword}
     volumes:
       - threadatlas-db-data:/var/lib/postgresql/data
     healthcheck:
@@ -25,7 +25,7 @@ services:
       db:
         condition: service_healthy
     environment:
-      DATABASE_URL: postgresql://testuser:test1234@db:5432/thread-atlas
+      DATABASE_URL: postgres://testuser:${POSTGRES_PASSWORD:-testpassword}@db:5432/thread-atlas
       AUTH_BOOTSTRAP_KEY: ${AUTH_BOOTSTRAP_KEY:-threadatlas-dev-bootstrap-2026-7Xq9Lr2Vm!K8pS4}
       DB_CONNECTION_MODE: database-url
       ENRICH_TRIGGER_MODE: ${ENRICH_TRIGGER_MODE:-hybrid-complex}
