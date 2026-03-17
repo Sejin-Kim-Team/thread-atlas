@@ -142,11 +142,83 @@ await chrome.storage.local.set({
 location.reload()
 ```
 
-5. Use the extension:
-   - **Capture Snapshot**: `Alt+Shift+C` or the context menu
-   - **Semantic Selection**: `Alt+Shift+S` to focus on a specific node
-   - **Text conversation**: Type in the Conversation section
-   - **Voice conversation**: Click the Mic button
+5. Use the extension (see [Usage Guide](#usage-guide) below)
+
+---
+
+## Usage Guide
+
+### 1. Open the Side Panel
+
+Click the ThreadAtlas icon in the Chrome toolbar. A popup appears with **"Open Assistant"** — click it to open the side panel on the right side of your browser.
+
+The side panel shows the current page's title and a status pill:
+- **Preparing** (yellow) — Extension is initializing
+- **Ready** (green) — Ready for interaction
+- **Unavailable** (gray) — Page cannot be analyzed
+
+### 2. Sign In
+
+If using Google OAuth, click **"Continue with Google"** in the side panel. A Google sign-in dialog will appear. After authentication, you'll see your name and avatar in the menu.
+
+### 3. Capture a Semantic Snapshot
+
+Press `Alt+Shift+C` (or right-click → **Capture Semantic Snapshot**) to capture the current page's semantic structure.
+
+**Visual feedback:**
+- A green border flashes around the captured region
+- A toast notification appears in the top-right corner: *"Snapshot captured"*
+- The snapshot is also copied to your clipboard as JSON
+
+The agent now has a structured understanding of the page — not just the raw text, but threads, comments, authors, and reply relationships.
+
+### 4. Ask Questions (Text)
+
+Type a question in the composer at the bottom of the side panel and press **Enter** (or click the send button).
+
+Example questions:
+- *"What are the main arguments in this thread?"*
+- *"What's the context of the comment I'm looking at?"*
+- *"Which evidence is the weakest for this claim?"*
+
+The agent responds with awareness of the page structure. Responses may include:
+- Markdown-formatted text in the conversation area
+- **Provenance badges** like *"Based on this page"* or *"Used image context"*
+- **Action buttons** — Highlight, Show context, Copy
+
+### 5. Ask Questions (Voice)
+
+**Hold-to-talk:** Press and hold the **Mic button** (or hold `Space` / `Alt+Space` anywhere in the side panel).
+
+- While holding: the live activity strip shows an animated waveform, and your speech is transcribed in real time
+- **Release** to send your message
+- **Press `Esc`** to cancel
+
+Toggle **voice output** on/off from the menu (three-dot icon) to have the agent speak responses aloud.
+
+### 6. Use Semantic Selection
+
+Press `Alt+Shift+S` to enter selection mode. This lets you narrow the agent's focus to a specific part of the page.
+
+**In selection mode:**
+- **Hover** over page elements — a blue overlay highlights the current element, green highlights its parent
+- **Click** an element to select it — it turns orange to confirm selection
+- The side panel's scope chip changes from *"This page"* to *"Selected text"*, showing a preview of the selected content
+
+Now when you ask a question, the agent's reasoning is scoped to your selection instead of the entire page.
+
+Press `Alt+Shift+S` again or `Esc` to exit selection mode. Click the **X** on the scope chip to clear the selection.
+
+### Keyboard Shortcuts
+
+| Shortcut | Action |
+|----------|--------|
+| `Alt+Shift+C` | Capture semantic snapshot |
+| `Alt+Shift+S` | Toggle semantic selection mode |
+| `Space` (hold) | Hold-to-talk voice input |
+| `Enter` | Send text message |
+| `Shift+Enter` | New line in text input |
+| `Esc` | Cancel voice input / exit selection mode |
 
 ---
 
