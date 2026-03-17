@@ -6,6 +6,10 @@ LLMs are powerful, but they struggle to understand webpages the way humans do. W
 
 ThreadAtlas was built to explore a different approach: instead of sending raw text to a model, it captures a **semantic snapshot** of the current page and lets the AI agent reason with that structure intact.
 
+### Demo
+
+[![ThreadAtlas Demo](https://img.youtube.com/vi/cW-q2XHA3Ng/maxresdefault.jpg)](https://youtu.be/cW-q2XHA3Ng?si=Y3gz3LsB9slz_YD-)
+
 ---
 
 ## What It Does
