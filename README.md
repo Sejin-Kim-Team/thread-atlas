@@ -1,49 +1,106 @@
 # ThreadAtlas
 
-ThreadAtlas monorepo for a semantic browser copilot.
+**A browser-based AI agent that perceives the semantic structure of the current webpage.**
 
-## Architecture
+LLMs are powerful, but they struggle to understand webpages the way humans do. When reading complex discussions on sites like Hacker News or Reddit, users naturally follow nested replies, track relationships between comments, and navigate across context. But when an AI agent receives the same page, it usually sees only flattened DOM text — the relational structure is lost.
+
+ThreadAtlas was built to explore a different approach: instead of sending raw text to a model, it captures a **semantic snapshot** of the current page and lets the AI agent reason with that structure intact.
+
+---
+
+## What It Does
+
+ThreadAtlas is a Chrome extension + backend system that allows users to have a grounded conversation with an AI agent about the webpage they're currently viewing.
+
+**Semantic Snapshot Capture** — The extension extracts meaningful structure from the DOM: threads, comments, authors, reply chains, and content relationships. The agent receives this structured representation instead of raw HTML.
+
+**Conversational Side Panel** — Users interact with the agent through a browser side panel. Ask questions about the page, and the agent responds with awareness of the page's structure — not just its text.
+
+**Semantic Selection** — Users can narrow the agent's focus to a specific part of the page. Select a comment thread or section, and the agent's reasoning is scoped to that subtree.
+
+**Live Voice Interaction** — Speak naturally with the agent via Gemini Live while it stays grounded in the current page context. The agent can highlight comments, scroll to relevant nodes, and project structured responses in real time.
+
+**Session Memory with RAG** — The agent remembers past pages and conversations. It can recall related discussions from previous sessions and compare arguments across threads.
+
+---
+
+## How It Works
 
 ![ThreadAtlas Architecture](docs/architecture/threadatlas_architecture_flow.png)
 
-## Workspace layout
+### Browser Perception Layer (Chrome Extension)
 
-- `apps/api`: current-page session runtime API
-- `apps/extension`: Chrome Extension sidepanel copilot
-- `packages/shared`: Shared contracts/types/utils
+The extension observes the current webpage and extracts a semantic snapshot from the DOM. On discussion pages, this preserves threads, comments, authors, and reply relationships. Users can also activate semantic selection to focus the agent on a specific subtree.
 
-## Prerequisites
+### Agent Runtime (Backend API)
+
+A Node.js/Express backend manages the session and tool orchestration over WebSocket. During a conversation turn, the backend can request additional browser-side evidence — such as screenshots or node-level details — when it needs more context. The agent autonomously decides when to use tools like `context.enrich`, `focus.node`, `present.content`, or `navigate.url`.
+
+### Gemini Live Integration
+
+The agent uses **Gemini through the Google GenAI SDK**, including **Gemini Live** for real-time voice interaction. The backend runs on **Google Cloud Run**, with **Cloud SQL + pgvector** for session memory and **Vertex AI embeddings** for retrieval.
+
+---
+
+## Example Interactions
+
+| Scenario | What Happens |
+|----------|-------------|
+| "What's the main argument in this thread?" | Agent summarizes the page's claim structure using the semantic snapshot — no tool calls needed |
+| "What's the context of this comment?" | Agent identifies the comment from the viewport, looks up its position in the argument tree, highlights it, and explains |
+| "What's the weakest evidence for this claim?" | Agent runs deep analysis on the claim's supporting comments and rebuttals, then scrolls to the most relevant counter-argument |
+| "I've seen this argument before, remember?" | Agent searches session memory, finds a related past thread, compares the two arguments, and shows a side-by-side view |
+| User interrupts mid-response | Agent stops immediately, records what was already delivered, and resumes from the new request without repeating itself |
+
+---
+
+## Tech Stack
+
+| Layer | Technologies |
+|-------|-------------|
+| Extension | Chrome Extension (Manifest V3), TypeScript, `@mozilla/readability`, `dom-to-semantic-markdown` |
+| Backend | Node.js, Express, WebSocket (`ws`), TypeScript |
+| AI | Google GenAI SDK, Gemini Live, Vertex AI Embeddings |
+| Database | PostgreSQL + pgvector (768-dim vectors) |
+| Infra | Docker, Google Cloud Run, Cloud SQL |
+| Monorepo | pnpm workspaces, Turborepo, esbuild |
+
+---
+
+## Workspace Layout
+
+```
+apps/api/          — Session runtime API (Express + WebSocket)
+apps/extension/    — Chrome Extension (side panel, content scripts, semantic extractor)
+packages/shared/   — Shared types, constants, and utilities
+docs/              — Architecture diagrams and internal specs
+```
+
+---
+
+## Getting Started
+
+### Prerequisites
 
 - Node.js 20+
 - pnpm 10+
 
-## Install
+### Install & Build
 
 ```bash
 pnpm install
-```
-
-## Build
-
-```bash
 pnpm -w build
 ```
 
-## Test
+### Run Tests
 
 ```bash
 pnpm -w test
 ```
 
-## Build extension
+---
 
-```bash
-pnpm extension:build
-```
-
-Load unpacked extension from `apps/extension/dist`.
-
-## Use In Chrome
+## Chrome Extension Setup
 
 1. Build the extension:
 
@@ -51,29 +108,27 @@ Load unpacked extension from `apps/extension/dist`.
 pnpm extension:build
 ```
 
-2. Open `chrome://extensions`
-3. Enable `Developer mode`
-4. Click `Load unpacked`
-5. Select [apps/extension/dist](/Users/eggp/dev/workspace/eggp/thread-atlas/apps/extension/dist)
-6. Open a Hacker News item page like `https://news.ycombinator.com/item?id=...`
-7. Click the ThreadAtlas toolbar button to open the sidepanel
-8. In the sidepanel DevTools console, configure one of the following:
+2. Open `chrome://extensions`, enable **Developer mode**, click **Load unpacked**, and select `apps/extension/dist`
 
-Internal preview via hidden `dev-bootstrap` override:
+3. Open a page (e.g., a Hacker News discussion) and click the ThreadAtlas toolbar icon to open the side panel
+
+4. Configure authentication in the sidepanel DevTools console:
+
+**Option A: Local dev bootstrap**
 
 ```js
 await chrome.storage.local.set({
   THREADATLAS_API_BASE_URL: "http://localhost:8080",
   THREADATLAS_AUTH_GRANT_TYPE: "dev-bootstrap",
   THREADATLAS_BOOTSTRAP_SUBJECT: "local-dev-user-1",
-  THREADATLAS_AUTH_BOOTSTRAP_KEY: "threadatlas-dev-bootstrap-2026-7Xq9Lr2Vm!K8pS4",
+  THREADATLAS_AUTH_BOOTSTRAP_KEY: "<your-bootstrap-key>",
   THREADATLAS_AUTH_DISPLAY_NAME: "Local Dev",
   THREADATLAS_AUTH_PRIMARY_EMAIL: "local-dev@example.com"
 })
 location.reload()
 ```
 
-Real Google sign-in without rebuilding:
+**Option B: Google OAuth**
 
 ```js
 await chrome.storage.local.set({
@@ -83,144 +138,56 @@ await chrome.storage.local.set({
 location.reload()
 ```
 
-9. If you configured Google sign-in, use `Continue with Google` in the sidepanel.
-10. Use `Capture Snapshot`, the context menu item, or the shortcut `Alt+Shift+C`
-11. Ask a text question in the `Conversation` section or use `Mic`
-12. Toggle semantic selection with `Alt+Shift+S` when you want to bind the snapshot to a specific node
-
-## Runtime Notes
-
-- Semantic snapshot capture works without the local API server.
-- Text-first current-page conversation expects the local API server.
-- The canonical runtime path is `POST /api/token` plus `GET /ws/session`.
-- Chrome native STT runs in the page context; Chrome native TTS runs in the sidepanel.
-- Voice/live is optional and not required for the internal MVP.
+5. Use the extension:
+   - **Capture Snapshot**: `Alt+Shift+C` or the context menu
+   - **Semantic Selection**: `Alt+Shift+S` to focus on a specific node
+   - **Text conversation**: Type in the Conversation section
+   - **Voice conversation**: Click the Mic button
 
 ---
 
-## Backend: Run On Local
-
-This section walks you through running the ThreadAtlas backend on your local machine using Docker. No local PostgreSQL installation is required.
+## Backend: Local Development
 
 ### Prerequisites
 
-- **Docker Desktop** (or Docker Engine with Compose plugin)
-- **Node.js 20+** and **pnpm** — needed to install dependencies before the Docker build
-- **Google Cloud CLI** (`gcloud`) — needed for Vertex AI authentication
+- Docker Desktop (or Docker Engine with Compose plugin)
+- Google Cloud CLI (`gcloud`) for Vertex AI authentication
 
-### 1. Clone the Repository
-
-```bash
-git clone https://github.com/<your-fork>/thread-atlas.git
-cd thread-atlas
-```
-
-### 2. Install Dependencies
-
-```bash
-pnpm install
-```
-
-This ensures the lockfile is synced and all packages (including `@google/genai`) are available for the Docker build.
-
-### 3. Set Up Environment Variables
-
-Before starting the services, configure the required environment variables:
+### 1. Set Up Environment Variables
 
 ```bash
 export GOOGLE_CLOUD_PROJECT=<your-gcp-project-id>
 export GOOGLE_CLOUD_LOCATION=<your-gcp-region>
 export GOOGLE_APPLICATION_CREDENTIALS_HOST="$HOME/.config/gcloud/application_default_credentials.json"
-export POSTGRES_USER=<your-db-user> # default: testuser
+export POSTGRES_USER=<your-db-user>       # default: testuser
 export POSTGRES_PASSWORD=<your-db-password> # default: testpassword
 ```
 
-If you haven't generated ADC credentials yet, run:
+If you haven't generated ADC credentials yet:
 
 ```bash
 gcloud auth application-default login
 ```
 
-This will create the credentials file at the path specified by `GOOGLE_APPLICATION_CREDENTIALS_HOST`.
-
-### 4. Start the Services
-
-Run the following command from the repository root:
+### 2. Start the Services
 
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.gcp-local.yml up --build api
 ```
 
-This single command will:
+This starts PostgreSQL with pgvector and the API server. The API will be available at `http://localhost:8080`.
 
-1. Pull the `pgvector/pgvector:pg17` image and start a PostgreSQL database container (`threadatlas-db`)
-2. Build the API from the `Dockerfile` and start the API container (`threadatlas-api`)
-3. Mount your local ADC credentials into the API container for Vertex AI access
-4. Wait for the database to be healthy before starting the API
-
-The API will be available at **http://localhost:8080**.
-
-### 5. Run Database Migrations
-
-The API server automatically runs all SQL migration files on startup. In most cases, the tables will be created without any manual steps.
-
-However, if the automatic migration does not run (e.g., the migration directory is not resolved correctly inside the container), you can manually apply the schema by following these steps:
-
-#### 5.1 Connect to the Database Container
+### 3. Verify
 
 ```bash
-docker exec -it threadatlas-db psql -U testuser -d thread-atlas
-```
-
-#### 5.2 Run Migration Files in Order
-
-Once inside the `psql` shell, run each migration file in sequence. You can copy-paste the contents of each file, or use the following approach from your host terminal:
-
-```bash
-# Run all migration files in order
-for f in apps/api/src/db/migrations/001_auth_core.sql \
-         apps/api/src/db/migrations/002_memory_owner_fk.sql \
-         apps/api/src/db/migrations/003_auth_identity_provider_bootstrap.sql \
-         apps/api/src/db/migrations/003_rag_core.sql; do
-  echo "Running $f ..."
-  docker exec -i threadatlas-db psql -U testuser -d thread-atlas < "$f"
-done
-```
-
-#### 5.3 Verify Tables Were Created
-
-```bash
-docker exec -it threadatlas-db psql -U testuser -d thread-atlas -c '\dt'
-```
-
-You should see tables including: `users`, `user_identities`, `auth_sessions`, `memory_records`, `memory_record_embeddings`, and `analysis_runs`.
-
-### 6. Verify the API
-
-Once the services are running, verify the API is healthy:
-
-```bash
-# Health check
 curl http://localhost:8080/health
-# Expected: {"ok":true}
+# {"ok":true}
 
-# Readiness check (confirms DB connectivity)
 curl http://localhost:8080/ready
-# Expected: {"ok":true,"checks":{"db":"up"}}
+# {"ok":true,"checks":{"db":"up"}}
 ```
 
-You can also confirm both containers are running:
-
-```bash
-docker compose ps
-```
-
-- `threadatlas-db` should show **healthy**
-- `threadatlas-api` should show **running**
-
-### 7. Get an Authentication Token
-
-ThreadAtlas provides a `dev-bootstrap` authentication path for local testing. Use it to get a session token:
+### 4. Get an Authentication Token
 
 ```bash
 curl -X POST http://localhost:8080/api/token \
@@ -236,94 +203,73 @@ curl -X POST http://localhost:8080/api/token \
   }'
 ```
 
-A successful response will return a session token that you can use for authenticated API calls and WebSocket connections.
-
-### 8. Shut Down
-
-To stop all services:
+### 5. Shut Down
 
 ```bash
-docker compose down
-```
-
-To stop and also remove the database volume (clean slate):
-
-```bash
-docker compose down -v
+docker compose down       # stop services
+docker compose down -v    # stop and remove database volume
 ```
 
 ---
 
-## Backend: Run On Cloud
+## Backend: Cloud Deployment
 
 ### 1. Create Cloud SQL Instance
 
-1. Go to Cloud SQL in the Google Cloud Console and create a new PostgreSQL instance as follows:
-   - Instance ID: Choose a unique ID for your instance, for example `thread-atlas`
-   - Password: Set a strong password for the `postgres` user (you will need this later)
-   - Region: Choose the region closest to you, for example `us-central1`
-2. Install the pgvector extension on your Cloud SQL instance:
-   ```sql
-   CREATE EXTENSION IF NOT EXISTS vector;
-   ```
-3. Create the schema by running all SQL files in `apps/api/src/db/migrations` in order:
-   ```bash
-   # From your local machine, connect to Cloud SQL and run each migration
-   for f in apps/api/src/db/migrations/001_auth_core.sql \
-            apps/api/src/db/migrations/002_memory_owner_fk.sql \
-            apps/api/src/db/migrations/003_auth_identity_provider_bootstrap.sql \
-            apps/api/src/db/migrations/003_rag_core.sql; do
-     echo "Running $f ..."
-     psql -h <cloud-sql-ip> -U postgres -d thread-atlas < "$f"
-   done
-   ```
+1. Create a PostgreSQL instance in Google Cloud Console
+2. Install pgvector: `CREATE EXTENSION IF NOT EXISTS vector;`
+3. Run migrations in order:
+
+```bash
+for f in apps/api/src/db/migrations/001_auth_core.sql \
+         apps/api/src/db/migrations/002_memory_owner_fk.sql \
+         apps/api/src/db/migrations/003_auth_identity_provider_bootstrap.sql \
+         apps/api/src/db/migrations/003_rag_core.sql; do
+  echo "Running $f ..."
+  psql -h <cloud-sql-ip> -U postgres -d thread-atlas < "$f"
+done
+```
 
 ### 2. Create Cloud Run Service
 
-Go to Cloud Run in the Google Cloud Console and create a new service as follows:
+1. Go to Cloud Run and create a new service with **Continuously deploy from a repository**
+2. Select Dockerfile at `/Dockerfile`, set port to `8080`
+3. Set environment variables:
 
-1. Go to Cloud Run Overview Menu
-2. Choose "Connect Repository"
-3. Choose "Continuously deploy from a repository"
-4. Choose Cloud Build
-5. Select your forked ThreadAtlas repository.
-6. Choose "Dockerfile" as the build configuration and specify the path to the Dockerfile in our repository, which is `/Dockerfile`.
-7. Write the service name your own way, for example `threadatlas-api`.
-8. Choose the region closest to you, for example `us-central1`.
-9. For authentication, choose "Allow public access".
-10. Scaling: Set the minimum number of instances to 1 to avoid cold start latency.
-11. Container: Set the port to 8080, which is the default port our API listens on.
-    - Set the environment variables as follows:
-      - `GOOGLE_CLOUD_PROJECT`: your Google Cloud project ID
-      - `GOOGLE_CLOUD_LOCATION`: the region you chose (e.g., `us-central1`)
-      - `DB_CONNECTION_MODE`: `cloudsql-connector`
-      - `CLOUD_SQL_INSTANCE_CONNECTION_NAME`: your Cloud SQL instance connection name
-      - `DB_NAME`: your Cloud SQL database name (e.g., `thread-atlas`)
-      - `DB_USER`: your Cloud SQL database user
-      - `DB_IAM_AUTHN`: `true` (if you are using IAM authentication for Cloud SQL)
-      - `NODE_ENV`: `production`
-      - `GOOGLE_OAUTH_CLIENT_ID`: your Google OAuth client ID (if you want to enable Google sign-in)
-      - `AUTH_BOOTSTRAP_KEY`: a secure random string for the dev-bootstrap authentication path (optional, for internal testing without OAuth)
+| Variable | Value |
+|----------|-------|
+| `GOOGLE_CLOUD_PROJECT` | Your GCP project ID |
+| `GOOGLE_CLOUD_LOCATION` | Region (e.g., `us-central1`) |
+| `DB_CONNECTION_MODE` | `cloudsql-connector` |
+| `CLOUD_SQL_INSTANCE_CONNECTION_NAME` | Your instance connection name |
+| `DB_NAME` | `thread-atlas` |
+| `DB_USER` | Your database user |
+| `DB_IAM_AUTHN` | `true` (if using IAM auth) |
+| `NODE_ENV` | `production` |
+| `GOOGLE_OAUTH_CLIENT_ID` | Your OAuth client ID |
+| `AUTH_BOOTSTRAP_KEY` | Secure random string (optional) |
 
 ### 3. Verify Deployment
 
-1. After the deployment is complete, go to the Cloud Run service you just created.
-2. Click on the service to view its details.
-3. Get the URL of your service.
-4. Use curl or Postman to send a GET request to the `/health` endpoint of your service to verify that it is running correctly:
-   ```bash
-   curl https://your-service-url/health
-   ```
-5. You should receive a response indicating that the service is healthy:
-   ```json
-   {"ok":true}
-   ```
+```bash
+curl https://your-service-url/health
+# {"ok":true}
+```
 
 ---
 
-## Source of truth
+## Runtime Notes
 
-- `docs/internals/PRD.md`
-- `docs/internals/BE-SPEC.md`
-- `docs/internals/FE-SPEC.md`
-- `docs/internals/SCENARIO.md`
+- Semantic snapshot capture works without the backend server
+- Text/voice conversation requires the backend API
+- Canonical runtime path: `POST /api/token` then `GET /ws/session` (WebSocket)
+- Database migrations run automatically on API startup
+
+---
+
+## Documentation
+
+- [`docs/internals/PRD.md`](docs/internals/PRD.md) — Product requirements
+- [`docs/internals/BE-SPEC.md`](docs/internals/BE-SPEC.md) — Backend specification
+- [`docs/internals/FE-SPEC.md`](docs/internals/FE-SPEC.md) — Frontend specification
+- [`docs/internals/SCENARIO.md`](docs/internals/SCENARIO.md) — Interaction scenario playbook
